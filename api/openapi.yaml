@@ -7,6 +7,8 @@ paths:
     get:
       operationId: getVersion
       responses:
+        default:
+          $ref: '#/components/responses/Error'
         '200':
           description: 构建版本
           content:
@@ -23,6 +25,8 @@ paths:
             schema:
               $ref: '#/components/schemas/LoginRequest'
       responses:
+        default:
+          $ref: '#/components/responses/Error'
         '200':
           $ref: '#/components/responses/User'
         '400':
@@ -33,12 +37,18 @@ paths:
     post:
       operationId: logout
       responses:
+        default:
+          $ref: '#/components/responses/Error'
         '204':
           description: 会话已清除
   /api/v1/auth/session:
     get:
       operationId: getSession
+      security:
+        - SessionCookie: []
       responses:
+        default:
+          $ref: '#/components/responses/Error'
         '200':
           $ref: '#/components/responses/User'
         '401':
@@ -46,7 +56,11 @@ paths:
   /api/v1/environment:
     get:
       operationId: getEnvironment
+      security:
+        - SessionCookie: []
       responses:
+        default:
+          $ref: '#/components/responses/Error'
         '200':
           description: 当前实例与数据库状态
           content:
@@ -56,6 +70,12 @@ paths:
         '401':
           $ref: '#/components/responses/Error'
 components:
+  securitySchemes:
+    SessionCookie:
+      type: apiKey
+      in: cookie
+      name: cloudlet_default_session
+      description: 会话 Cookie 名称为 cloudlet_实例名称_session，默认实例名称为 default。
   schemas:
     User:
       type: object

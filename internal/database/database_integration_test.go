@@ -152,4 +152,8 @@ func TestPostgresMigrationAccountsAndSessions(t *testing.T) {
 	if err := store.Migrate(ctx); err == nil {
 		t.Fatal("迁移入口接受了超出代码版本的数据库")
 	}
+	if err := container.Stop(ctx, nil); err != nil {
+		t.Fatal(err)
+	}
+	request("GET", api.URL+"/readyz", "", http.StatusServiceUnavailable)
 }

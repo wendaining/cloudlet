@@ -455,6 +455,8 @@ type LoginResponse struct {
 	JSON400 *Error
 	// JSON401 the response for an HTTP 401 `application/json` response
 	JSON401 *Error
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
@@ -470,6 +472,11 @@ func (r LoginResponse) GetJSON400() *Error {
 // GetJSON401 returns the response for an HTTP 401 `application/json` response
 func (r LoginResponse) GetJSON401() *Error {
 	return r.JSON401
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r LoginResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
 }
 
 // GetBody returns the raw response body bytes
@@ -504,6 +511,13 @@ func (r LoginResponse) ContentType() string {
 type LogoutResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r LogoutResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
 }
 
 // GetBody returns the raw response body bytes
@@ -542,6 +556,8 @@ type GetSessionResponse struct {
 	JSON200 *User
 	// JSON401 the response for an HTTP 401 `application/json` response
 	JSON401 *Error
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
@@ -552,6 +568,11 @@ func (r GetSessionResponse) GetJSON200() *User {
 // GetJSON401 returns the response for an HTTP 401 `application/json` response
 func (r GetSessionResponse) GetJSON401() *Error {
 	return r.JSON401
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r GetSessionResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
 }
 
 // GetBody returns the raw response body bytes
@@ -590,6 +611,8 @@ type GetEnvironmentResponse struct {
 	JSON200 *Environment
 	// JSON401 the response for an HTTP 401 `application/json` response
 	JSON401 *Error
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
@@ -600,6 +623,11 @@ func (r GetEnvironmentResponse) GetJSON200() *Environment {
 // GetJSON401 returns the response for an HTTP 401 `application/json` response
 func (r GetEnvironmentResponse) GetJSON401() *Error {
 	return r.JSON401
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r GetEnvironmentResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
 }
 
 // GetBody returns the raw response body bytes
@@ -636,11 +664,18 @@ type GetVersionResponse struct {
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
 	JSON200 *VersionInfo
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
 func (r GetVersionResponse) GetJSON200() *VersionInfo {
 	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r GetVersionResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
 }
 
 // GetBody returns the raw response body bytes
@@ -773,6 +808,13 @@ func ParseLoginResponse(rsp *http.Response) (*LoginResponse, error) {
 		}
 		response.JSON401 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
 	}
 
 	return response, nil
@@ -789,6 +831,19 @@ func ParseLogoutResponse(rsp *http.Response) (*LogoutResponse, error) {
 	response := &LogoutResponse{
 		Body:         bodyBytes,
 		HTTPResponse: rsp,
+	}
+
+	switch {
+	case rsp.StatusCode == 204:
+		break // No content-type
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
 	}
 
 	return response, nil
@@ -821,6 +876,13 @@ func ParseGetSessionResponse(rsp *http.Response) (*GetSessionResponse, error) {
 			return nil, err
 		}
 		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
 
 	}
 
@@ -855,6 +917,13 @@ func ParseGetEnvironmentResponse(rsp *http.Response) (*GetEnvironmentResponse, e
 		}
 		response.JSON401 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
 	}
 
 	return response, nil
@@ -880,6 +949,13 @@ func ParseGetVersionResponse(rsp *http.Response) (*GetVersionResponse, error) {
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
 
 	}
 

@@ -37,7 +37,8 @@ func NewHandler(store *database.Store, cfg config.Config, logger *slog.Logger) (
 			ctx, cancel := context.WithTimeout(c.Request.Context(), time.Second)
 			defer cancel()
 			if err := store.SQL.PingContext(ctx); err != nil {
-				h.failure(c, err)
+				h.logger.Error("database readiness failed", "error", err)
+				c.JSON(http.StatusServiceUnavailable, apigen.Error{Message: "数据库尚未就绪"})
 				return
 			}
 		}
