@@ -1,7 +1,6 @@
 #!/bin/sh
 set -eu
-for file in scripts/*.mjs; do
-  node --check "$file"
-done
+find scripts -name '*.mjs' -exec node --check {} \;
+node --test scripts/development/*.test.mjs
 node --check commitlint.config.js
 shellcheck .githooks/commit-msg scripts/*.sh

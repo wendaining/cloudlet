@@ -3,12 +3,16 @@ COMMIT ?= $(shell git rev-parse HEAD)
 ISSUE ?=
 LDFLAGS = -X github.com/wendaining/cloudlet/internal/version.Version=$(VERSION) -X github.com/wendaining/cloudlet/internal/version.Commit=$(COMMIT)
 
-.PHONY: setup fmt format-check lint test build audit check run container-check repo-sync agent-brief
+.PHONY: setup doctor fmt format-check lint test build audit check run container-check repo-sync agent-brief
 
 setup:
 	npm ci
 	go mod download
 	git config --local core.hooksPath .githooks
+	node scripts/dev.mjs init
+
+doctor:
+	node scripts/dev.mjs doctor
 
 fmt:
 	gofmt -w cmd internal pkg

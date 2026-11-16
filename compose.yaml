@@ -1,0 +1,38 @@
+services:
+  postgres:
+    image: ${CLOUDLET_POSTGRES_IMAGE:?需要数据库镜像版本}
+    environment:
+      POSTGRES_USER: ${CLOUDLET_POSTGRES_USER:?需要数据库账号}
+      POSTGRES_PASSWORD: ${CLOUDLET_POSTGRES_PASSWORD:?需要数据库密码}
+      POSTGRES_DB: ${CLOUDLET_POSTGRES_DB:?需要数据库名称}
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    networks: [management]
+    labels:
+      io.cloudlet.managed: 'true'
+      io.cloudlet.instance: ${CLOUDLET_INSTANCE:?需要实例名称}
+      io.cloudlet.component: database
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: '3'
+
+volumes:
+  postgres-data:
+    labels:
+      io.cloudlet.managed: 'true'
+      io.cloudlet.instance: ${CLOUDLET_INSTANCE:?需要实例名称}
+      io.cloudlet.component: database
+
+networks:
+  management:
+    labels:
+      io.cloudlet.managed: 'true'
+      io.cloudlet.instance: ${CLOUDLET_INSTANCE:?需要实例名称}

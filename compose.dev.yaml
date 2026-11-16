@@ -1,0 +1,4 @@
+services:
+  postgres:
+    ports:
+      - '127.0.0.1:${CLOUDLET_DATABASE_PORT:?需要本机数据库端口}:5432'

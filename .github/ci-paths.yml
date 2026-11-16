@@ -25,6 +25,8 @@ go:
   - '!**/*.md'
 
 tooling:
+  - 'compose*.yaml'
+  - '.env.example'
   - '.github/**'
   - '.githooks/**'
   - 'scripts/**'
@@ -91,3 +93,5 @@ unclassified:
   - '!.gitignore'
   - '!.editorconfig'
   - '!.markdownlint-cli2.jsonc'
+  - '!compose*.yaml'
+  - '!.env.example'
