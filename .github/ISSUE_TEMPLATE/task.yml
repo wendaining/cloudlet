@@ -1,0 +1,25 @@
+name: 工程任务
+description: 维护工程、协作流程、文档或开展技术验证
+labels: ["type:task", "status:triage"]
+assignees: [wendaining]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: 目标
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: 实现范围与依赖
+      description: 说明涉及的模块和前置任务。
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收条件
+      description: 给出实际命令、测试场景或文档检查要求。
+    validations:
+      required: true

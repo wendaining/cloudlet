@@ -1,0 +1,30 @@
+version: 2
+updates:
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    labels: ["type:task", "area:automation"]
+    assignees: [wendaining]
+    open-pull-requests-limit: 3
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    labels: ["type:task", "area:automation"]
+    assignees: [wendaining]
+    open-pull-requests-limit: 3
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    labels: ["type:task", "area:automation"]
+    assignees: [wendaining]
+    open-pull-requests-limit: 3
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    labels: ["type:task", "area:automation"]
+    assignees: [wendaining]
+    open-pull-requests-limit: 3

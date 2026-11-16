@@ -1,0 +1,32 @@
+name: 问题报告
+description: 提交可以复现的问题
+labels: ["type:bug", "status:triage"]
+assignees: [wendaining]
+body:
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: 复现步骤
+      description: 提供运行版本、环境、配置和执行步骤，删除凭据。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期结果
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际结果
+      description: 附上相关日志和错误信息。
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收条件
+      description: 说明修复后需要通过的复现步骤或检查。
+    validations:
+      required: true

@@ -1,0 +1,26 @@
+name: 功能提案
+description: 说明用户需求、范围和验收条件
+labels: ["type:feature", "status:triage"]
+assignees: [wendaining]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: 使用场景
+      description: 说明用户需要完成的操作。
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: 实现范围
+      description: 说明接口、数据、依赖和模块边界。
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收条件
+      description: 列出可以实际执行和检查的结果。
+    validations:
+      required: true

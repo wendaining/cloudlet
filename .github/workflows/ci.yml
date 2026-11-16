@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches-ignore: [master]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Go
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: make format-check test build
+      - run: go vet ./...
+      - run: go tool govulncheck ./...
+  repository:
+    name: Repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: npm ci
+      - run: npm run lint
+      - run: npm audit --audit-level=low
+      - run: go tool actionlint
+  container:
+    name: Container
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: make container-check
+  required:
+    name: CI
+    if: always()
+    needs: [go, repository, container]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    env:
+      GO_RESULT: ${{ needs.go.result }}
+      REPOSITORY_RESULT: ${{ needs.repository.result }}
+      CONTAINER_RESULT: ${{ needs.container.result }}
+    steps:
+      - run: test "$GO_RESULT" = success && test "$REPOSITORY_RESULT" = success && test "$CONTAINER_RESULT" = success
