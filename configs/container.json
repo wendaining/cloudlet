@@ -1,0 +1,7 @@
+{
+  "api_address": "0.0.0.0:8080",
+  "gateway_address": "0.0.0.0:8081",
+  "routes": [
+    { "host": "demo.localhost", "target": "http://127.0.0.1:8080" }
+  ]
+}
