@@ -3,8 +3,5 @@
   "defaultBranch": "master",
   "triageAssignee": "wendaining",
   "requiredChecks": ["CI", "PR policy"],
-  "maxCommitLines": 400,
-  "maxPullRequestLines": 600,
-  "generatedFiles": ["go.sum", "package-lock.json"],
   "rulesetName": "Default branch review and checks"
 }

@@ -4,7 +4,7 @@
 
 ## 准备环境
 
-安装 Go 1.27.4、Node.js 24 及以上版本、Git 和 Make。使用容器时安装 Docker，操作 GitHub 时安装并登录 GitHub CLI。
+安装 Go 1.27.4、Node.js 24 及以上版本、Git、Make 和 ShellCheck。使用容器时安装 Docker，操作 GitHub 时安装并登录 GitHub CLI。
 
 ```sh
 git clone https://github.com/wendaining/cloudlet.git
@@ -25,7 +25,7 @@ status:ready 表示可以开始实施，status:in-progress 表示负责人正在
 
 从最新 master 创建分支，名称使用 codex/编号-简述 或 feature/编号-简述。每个分支处理一个任务，涉及多个可独立验收的目标时拆分 Issue 和 PR。
 
-每次提交只处理一个目的。单次提交的手写内容更改最多 400 行，每个 PR 最多 600 行，计算新增与删除的总数。package-lock.json 与 go.sum 属于生成文件，CI 仍检查依赖和锁定结果。
+每次提交只处理一个目的。
 
 提交信息与 PR 标题使用 Conventional Commits：
 
@@ -45,7 +45,7 @@ make check
 make container-check
 ```
 
-make check 覆盖格式、模块依赖、静态检查、真实 HTTP 集成测试、构建、文档、配置、Actions 和依赖漏洞检查。
+make check 执行完整检查。可以按改动范围使用 npm run lint:docs、npm run lint:config、npm run lint:tooling、make test 和 make container-check。CI 的触发范围见 [交付与发布](docs/releases.md)。
 
 涉及运行时、容器或交付配置时执行容器验证。测试应覆盖更改后的行为、重要错误路径和资源释放。
 
@@ -53,7 +53,7 @@ make check 覆盖格式、模块依赖、静态检查、真实 HTTP 集成测试
 
 按照 PR 模板说明最终行为、验证结果和需要关注的限制。正文使用 Closes #编号，指定与关联 Issue 相同的负责人，并添加 type 与 area 标签。Agent 参与的更改添加 agent:assisted，并填写 Agent 记录。
 
-PR policy 检查每条提交、PR 标题、提交规模、标签、负责人及关联任务。依赖更新 PR 同样需要维护者建立或关联相应任务。
+PR policy 检查每条提交、PR 标题、标签、负责人及关联任务。依赖更新 PR 同样需要维护者建立或关联相应任务。
 
 向其他协作者请求审查。合并要求 CI 与 PR policy 通过，至少一位其他成员批准，审查讨论已处理。使用 squash 合并，PR 标题成为主分支上的提交标题。
 

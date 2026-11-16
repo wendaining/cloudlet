@@ -28,7 +28,7 @@ ready、in-progress 和 agent:ready 要求开放 Issue、唯一负责人、一�
 
 分支使用 codex/编号-简述 或 feature/编号-简述。每个 PR 对应一个验收目标，可以将相关的更改拆成数次提交。能够单独发布或审查的目标分别建立任务与 PR。
 
-每次提交只处理一个目的。CI 限制单次提交的手写新增与删除总数不超过 400 行，每个 PR 不超过 600 行。生成文件由 .github/maintainers.json 列出，目前包含 package-lock.json 和 go.sum。
+每次提交只处理一个目的。
 
 提交信息与 PR 标题通过 commitlint 检查。采用 Conventional Commits，header 最多 100 个字符。合并使用 squash，主分支保留经过检查的 PR 标题。
 
@@ -36,7 +36,7 @@ ready、in-progress 和 agent:ready 要求开放 Issue、唯一负责人、一�
 
 PR 模板要求提供关联任务、最终更改、实际验证结果、风险与限制。有 Agent 参与时填写 Agent 记录。
 
-PR policy 从 GitHub 读取全部提交和关联 Issue，验证标题、提交信息、提交规模、PR 标签、唯一负责人及任务状态。关闭任务的关键字使用 Closes #编号，PR 指向 master。关联 Issue 负责人与 PR 负责人必须相同。
+PR policy 从 GitHub 读取全部提交和关联 Issue，验证标题、提交信息、PR 标签、唯一负责人及任务状态。关闭任务的关键字使用 Closes #编号，PR 指向 master。关联 Issue 负责人与 PR 负责人必须相同。
 
 Issue 的标签或负责人改变后，需要重新运行关联 PR 的 PR policy。修改 PR 的标签、负责人、标题、描述或代码都会自动重新执行检查。
 
@@ -48,12 +48,12 @@ CODEOWNERS 将默认审查责任交给 wendaining。由 wendaining 提交的更�
 
 | Workflow | 触发与职责 |
 | --- | --- |
-| CI | 功能分支推送与 PR 代码变化时执行检查，可由交付流程复用 |
+| CI | master 更新与 PR 变化时，按改动范围执行检查 |
 | PR policy | PR 元数据或代码变化时检查协作要求 |
 | Issue coordination | 新建、重新打开、标记、分配和关闭任务时维护标签与分诊 |
 | Agent handoff | 维护者手动选择 Issue，生成 Agent 任务资料 |
-| Delivery | master 更新后执行 CI，成功后发布提交对应的镜像 |
-| Release | v 开头的标签触发 CI，验证提交属于 master，发布二进制文件 |
+| Delivery | 由 Release 调用，发布版本对应的容器镜像 |
+| Release | 版本标签触发完整验证，发布镜像、二进制文件和校验和 |
 
 PR 检查使用只读权限。Issue 自动化只修改 Issue 元数据。镜像与版本发布任务分别获得所需的 packages 与 contents 写入权限。Actions 固定为完整 commit，Dependabot 每周提出依赖更新。
 

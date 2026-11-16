@@ -1,21 +1,22 @@
 name: Delivery
 
 on:
-  push:
-    branches: [master]
+  workflow_call:
+    inputs:
+      version:
+        description: 已验证的版本标签
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: delivery-master
+  group: delivery-${{ inputs.version }}
   cancel-in-progress: false
 
 jobs:
-  verify:
-    uses: ./.github/workflows/ci.yml
   publish:
-    needs: verify
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -35,9 +36,11 @@ jobs:
         with:
           context: .
           push: true
-          tags: ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ inputs.version }}
+            ghcr.io/${{ github.repository }}:sha-${{ github.sha }}
           build-args: |
-            VERSION=sha-${{ github.sha }}
+            VERSION=${{ inputs.version }}
             COMMIT=${{ github.sha }}
           provenance: mode=max
           sbom: true

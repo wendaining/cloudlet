@@ -2,10 +2,16 @@ name: CI
 
 on:
   push:
-    branches-ignore: [master]
+    branches: [master]
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_call:
+    inputs:
+      full:
+        description: 执行全部发布前检查
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -15,8 +21,57 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    name: Changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      docs: ${{ inputs.full || steps.paths.outputs.docs == 'true' }}
+      go: ${{ inputs.full || steps.paths.outputs.go == 'true' }}
+      tooling: ${{ inputs.full || steps.paths.outputs.tooling == 'true' }}
+      workflows: ${{ inputs.full || steps.paths.outputs.workflows == 'true' }}
+      container: ${{ inputs.full || steps.paths.outputs.container == 'true' }}
+      packaging: ${{ steps.paths.outputs.packaging == 'true' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        if: ${{ !inputs.full }}
+        id: paths
+        with:
+          filters: .github/ci-paths.yml
+          predicate-quantifier: some-with-excludes
+          base: ${{ github.event_name == 'push' && github.ref || '' }}
+      - name: Check path coverage
+        if: steps.paths.outputs.unclassified == 'true'
+        run: |
+          echo '请在 .github/ci-paths.yml 中配置新增文件对应的检查范围'
+          exit 1
+  docs:
+    name: Docs
+    needs: changes
+    if: needs.changes.outputs.docs == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --no-audit
+      - run: npm run lint:docs
   go:
     name: Go
+    needs: changes
+    if: needs.changes.outputs.go == 'true' || needs.changes.outputs.packaging == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -27,10 +82,20 @@ jobs:
         with:
           go-version-file: go.mod
       - run: make format-check test build
+        if: needs.changes.outputs.go == 'true'
       - run: go vet ./...
+        if: needs.changes.outputs.go == 'true'
       - run: go tool govulncheck ./...
-  repository:
-    name: Repository
+        if: needs.changes.outputs.go == 'true'
+      - run: sh scripts/release.sh ci
+        if: needs.changes.outputs.packaging == 'true'
+      - run: shasum -a 256 -c SHA256SUMS
+        if: needs.changes.outputs.packaging == 'true'
+        working-directory: dist
+  tooling:
+    name: Tooling
+    needs: changes
+    if: needs.changes.outputs.tooling == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -41,15 +106,28 @@ jobs:
         with:
           node-version: '24'
           cache: npm
+      - run: npm ci --no-audit
+      - run: npm run lint:config
+      - run: npm run lint:tooling
+      - run: npm audit --audit-level=low
+  workflows:
+    name: Workflows
+    needs: changes
+    if: needs.changes.outputs.workflows == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - run: npm ci
-      - run: npm run lint
-      - run: npm audit --audit-level=low
       - run: go tool actionlint
   container:
     name: Container
+    needs: changes
+    if: needs.changes.outputs.container == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -60,12 +138,22 @@ jobs:
   required:
     name: CI
     if: always()
-    needs: [go, repository, container]
+    needs: [changes, docs, go, tooling, workflows, container]
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     env:
-      GO_RESULT: ${{ needs.go.result }}
-      REPOSITORY_RESULT: ${{ needs.repository.result }}
-      CONTAINER_RESULT: ${{ needs.container.result }}
+      CI_NEEDS: ${{ toJSON(needs) }}
     steps:
-      - run: test "$GO_RESULT" = success && test "$REPOSITORY_RESULT" = success && test "$CONTAINER_RESULT" = success
+      - run: |
+          node --input-type=module <<'JS'
+          import assert from 'node:assert/strict';
+          const needs = JSON.parse(process.env.CI_NEEDS);
+          assert.equal(needs.changes.result, 'success', '改动范围检查必须通过');
+          const scopes = needs.changes.outputs;
+          for (const name of ['docs', 'go', 'tooling', 'workflows', 'container']) {
+            assert(['true', 'false'].includes(scopes[name]), `${name}: 缺少检查范围`);
+            const selected = scopes[name] === 'true' || (name === 'go' && scopes.packaging === 'true');
+            assert.equal(needs[name].result, selected ? 'success' : 'skipped', `${name}: 检查结果不符合执行范围`);
+          }
+          console.log('相关检查全部通过');
+          JS

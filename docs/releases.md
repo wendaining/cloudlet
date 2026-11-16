@@ -2,7 +2,20 @@
 
 ## CI
 
-CI 检查 Go 格式与模块依赖、go vet、启用 race detector 的测试、二进制构建和 govulncheck。仓库检查包含 Markdown、相对文件链接、JSON 与 YAML、Issue 表单、Action 固定版本及 npm audit。
+master 更新和 PR 变化时，CI 根据改动路径选择检查任务。路径规则位于 [.github/ci-paths.yml](../.github/ci-paths.yml)。PR policy 独立检查提交规范与关联任务。
+
+| 改动范围 | 执行检查 |
+| --- | --- |
+| docs 目录、Markdown、许可证与文档工具配置 | Markdown、文件链接与入口文档长度 |
+| Go 源码、模块依赖与运行配置 | Go 格式、模块依赖、go vet、race 测试、构建与 govulncheck |
+| 自动化脚本与仓库配置 | JSON、YAML、Issue 表单、脚本语法、ShellCheck 与 npm audit |
+| Actions 工作流与工作流工具依赖 | actionlint |
+| 容器源码、依赖、Dockerfile 与容器配置 | 实际容器构建、启动、转发和退出验证 |
+| 二进制打包脚本与发布工作流 | 四个平台的打包与校验和验证 |
+
+Go 测试文件改动触发 Go 检查。CI 定义与路径规则改动触发全部相关检查。新增目录需要在路径规则中声明检查范围。版本发布前执行完整验证。
+
+CI 汇总任务持续报告合并检查结果，确认选中的任务全部成功，其他任务按范围跳过。
 
 README 最多 90 行，AGENTS.md 最多 70 行，CONTRIBUTING.md 最多 110 行。详细内容放入 docs。
 
@@ -10,14 +23,14 @@ README 最多 90 行，AGENTS.md 最多 70 行，CONTRIBUTING.md 最多 110 行�
 
 ## 容器交付
 
-master 更新触发 Delivery。工作流完整执行 CI，通过后将镜像发布到 GHCR。镜像标签使用 sha- 加上完整提交标识，构建时同时写入 version 和 commit。
+Release 完成版本与提交验证、完整 CI 后调用 Delivery，将镜像发布到 GHCR。镜像同时使用版本标签与 sha- 加上完整提交标识，构建时写入 version 和 commit。
 
 ```sh
 docker run --rm \
   --read-only --cap-drop=ALL --security-opt=no-new-privileges \
   --memory=128m --cpus=1 --pids-limit=128 \
   -p 127.0.0.1:8080:8080 -p 127.0.0.1:8081:8081 \
-  ghcr.io/wendaining/cloudlet:sha-<完整提交标识>
+  ghcr.io/wendaining/cloudlet:v0.1.0
 ```
 
 GHCR 包的访问权限由包设置管理。使用私有包的机器需要登录 GHCR。
@@ -35,7 +48,7 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-Release 执行 CI，确认标签对应的提交属于 master，为 Linux、macOS 的 amd64 与 arm64 构建服务端和 CLI。每个压缩包包含二进制文件、默认配置、README 和 LICENSE。
+Release 确认版本符合 SemVer、标签提交属于 master，执行完整 CI 并发布版本镜像，再为 Linux、macOS 的 amd64 与 arm64 构建服务端和 CLI。每个压缩包包含二进制文件、默认配置、文档和 LICENSE。
 
 发布文件附带 SHA256SUMS。可以在本地验证发布构建：
 
@@ -49,6 +62,6 @@ shasum -a 256 -c SHA256SUMS
 
 ## 发布权限
 
-Delivery 使用 GitHub 自动提供的仓库令牌写入 GHCR。Release 使用仓库令牌创建 GitHub Release。当前交付流程无需服务器 SSH 密钥。
+Release 调用的 Delivery 使用 GitHub 自动提供的仓库令牌写入 GHCR。Release 使用仓库令牌创建 GitHub Release。当前交付流程无需服务器 SSH 密钥。
 
 运行失败时检查对应 Actions 日志，修复后按同一流程提交与验证。部署配置应使用经过验证的具体提交或版本。

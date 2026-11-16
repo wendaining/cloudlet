@@ -6,9 +6,10 @@
     "node": ">=24"
   },
   "scripts": {
-    "lint": "npm run lint:docs && npm run lint:config",
-    "lint:docs": "markdownlint-cli2 '**/*.md' '#node_modules' '#.local' '#dist' '#bin'",
+    "lint": "npm run lint:docs && npm run lint:config && npm run lint:tooling",
+    "lint:docs": "markdownlint-cli2 '**/*.md' '#node_modules' '#.local' '#dist' '#bin' && node scripts/check-docs.mjs",
     "lint:config": "node scripts/check-repository.mjs",
+    "lint:tooling": "sh scripts/check-tooling.sh",
     "repo:sync": "node scripts/github.mjs sync",
     "issue:coordinate": "node scripts/github.mjs coordinate",
     "pr:check": "node scripts/github.mjs check-pr",

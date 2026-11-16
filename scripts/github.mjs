@@ -42,16 +42,9 @@ async function validateMessage(message, source) {
   assert(result.valid, `${source}: ${result.errors.map(error => error.message).join(', ')}`);
 }
 
-function changedLines(files) {
-  return files.filter(file => !settings.generatedFiles.includes(file.filename)).reduce((sum, file) => sum + file.additions + file.deletions, 0);
-}
-
 async function validateCommit(ref) {
   const { data: detail } = await github.rest.repos.getCommit({ ...target, ref });
   await validateMessage(detail.commit.message, ref);
-  assert(detail.files.length < 300, '单次提交包含过多文件，需要拆分');
-  const lines = changedLines(detail.files);
-  assert(lines <= settings.maxCommitLines, `${ref}: 手写内容更改 ${lines} 行，单次提交上限为 ${settings.maxCommitLines} 行`);
 }
 
 if (command === 'sync') {
@@ -140,11 +133,9 @@ if (command === 'sync') {
   requireNumber();
   const { data: pr } = await github.rest.pulls.get({ ...target, pull_number: number });
   await validateMessage(pr.title, 'PR 标题');
-  const files = await github.paginate(github.rest.pulls.listFiles, { ...target, pull_number: number, per_page: 100 });
-  assert(changedLines(files) <= settings.maxPullRequestLines, `PR 的手写内容更改最多 ${settings.maxPullRequestLines} 行，需要按验收目标拆分`);
   const commits = await github.paginate(github.rest.pulls.listCommits, { ...target, pull_number: number, per_page: 100 });
   for (const commit of commits) {
-    await validateCommit(commit.sha);
+    await validateMessage(commit.commit.message, commit.sha);
   }
   assert.equal(pr.assignees.length, 1, 'PR 需要且只能指定一位负责人');
   const current = names(pr);
@@ -165,7 +156,7 @@ if (command === 'sync') {
 } else if (command === 'check-commits') {
   assert(process.argv.length > 3, '需要至少一个提交标识');
   for (const ref of process.argv.slice(3)) await validateCommit(ref);
-  console.log('提交格式与更改规模检查通过');
+  console.log('提交格式检查通过');
 } else if (command === 'agent-brief') {
   requireNumber();
   const { data: issue } = await github.rest.issues.get({ ...target, issue_number: number });

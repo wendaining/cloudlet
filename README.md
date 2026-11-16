@@ -16,7 +16,7 @@ Cloudlet 是面向单机部署的 Serverless 平台，围绕 Workers、Durable O
 
 ## 本地运行
 
-需要 Go 1.27.4、Node.js 24 及以上版本、Git 和 Make。容器验证需要 Docker。仓库管理操作需要已登录的 GitHub CLI。
+需要 Go 1.27.4、Node.js 24 及以上版本、Git、Make 和 ShellCheck。容器验证需要 Docker。仓库管理操作需要已登录的 GitHub CLI。
 
 ```sh
 make setup
