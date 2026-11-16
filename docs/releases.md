@@ -2,7 +2,7 @@
 
 ## CI
 
-master 更新和 PR 变化时，CI 根据改动路径选择检查任务。路径规则位于 [.github/ci-paths.yml](../.github/ci-paths.yml)。PR policy 独立检查提交规范与关联任务。
+master 更新和 PR 变化时，CI 根据改动路径选择检查任务。路径规则位于 [.github/ci-paths.yml](../.github/ci-paths.yml)。
 
 | 改动范围 | 执行检查 |
 | --- | --- |
@@ -12,7 +12,7 @@ master 更新和 PR 变化时，CI 根据改动路径选择检查任务。路径
 | 前端与接口类型 | 前端静态检查、构建与生成一致性 |
 | 开发入口、Compose 与实例配置 | 真实开发环境、热重载、停止、多实例与失败清理 |
 | 页面、认证与页面测试 | 真实 Chromium 中的登录、会话与退出 |
-| 自动化脚本与仓库配置 | JSON、YAML、Issue 表单、脚本语法、ShellCheck 与 npm audit |
+| 自动化脚本与仓库配置 | JSON、YAML、Issue 表单、脚本语法与 ShellCheck |
 | Actions 工作流与工作流工具依赖 | actionlint |
 | 容器源码、依赖、Dockerfile 与容器配置 | 实际容器构建、启动、转发和退出验证 |
 | 二进制打包脚本与发布工作流 | 四个平台的打包与校验和验证 |

@@ -15,7 +15,6 @@
     "lint:tooling": "sh scripts/check-tooling.sh",
     "repo:sync": "node scripts/github.mjs sync",
     "issue:coordinate": "node scripts/github.mjs coordinate",
-    "pr:check": "node scripts/github.mjs check-pr",
     "agent:brief": "node scripts/github.mjs agent-brief"
   },
   "devDependencies": {

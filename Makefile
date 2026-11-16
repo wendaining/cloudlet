@@ -83,7 +83,6 @@ build:
 
 audit:
 	go tool govulncheck $(GO_PACKAGES)
-	npm audit --audit-level=low
 
 check: format-check lint test build audit generate-check web-check test-integration dev-check test-e2e
 

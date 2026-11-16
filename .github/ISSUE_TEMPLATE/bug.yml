@@ -1,7 +1,6 @@
 name: 问题报告
 description: 提交可以复现的问题
 labels: ["type:bug", "status:triage"]
-assignees: [wendaining]
 body:
   - type: textarea
     id: reproduce

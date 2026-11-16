@@ -16,7 +16,7 @@ for (const label of labels) {
 }
 const knownLabels = new Set(labels.map(label => label.name));
 const maintainers = await readJSON('.github/maintainers.json');
-assert(maintainers.triageAssignee && maintainers.defaultBranch);
+assert(maintainers.defaultBranch);
 for (const name of all.filter(name => /\.ya?ml$/u.test(name))) {
   const document = parseDocument(await readFile(name, 'utf8'), { uniqueKeys: true });
   assert.equal(document.errors.length, 0, `${name}: ${document.errors.join(', ')}`);
@@ -24,7 +24,6 @@ for (const name of all.filter(name => /\.ya?ml$/u.test(name))) {
   if (name.startsWith('.github/ISSUE_TEMPLATE/') && path.basename(name) !== 'config.yml') {
     assert(value.name && value.description && Array.isArray(value.body), `${name}: 缺少 Issue 表单字段`);
     for (const label of value.labels) assert(knownLabels.has(label), `${name}: 未定义标签 ${label}`);
-    assert.deepEqual(value.assignees, [maintainers.triageAssignee]);
     assert.equal(new Set(value.body.filter(field => field.id).map(field => field.id)).size, value.body.filter(field => field.id).length);
   }
   if (name.startsWith('.github/workflows/')) {

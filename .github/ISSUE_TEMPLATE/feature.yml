@@ -1,7 +1,6 @@
 name: 功能提案
 description: 说明用户需求、范围和验收条件
 labels: ["type:feature", "status:triage"]
-assignees: [wendaining]
 body:
   - type: textarea
     id: need

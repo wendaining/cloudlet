@@ -6,7 +6,7 @@ Cloudlet 是 Go 模块化单体项目。任务范围与验收条件以关联 Iss
 
 阅读 [CONTRIBUTING.md](CONTRIBUTING.md)、[技术栈](docs/technology-stack.md)、[架构说明](docs/architecture.md) 和 [Agent 工作流程](docs/agents.md)。检查当前文件与工作区状态，保留用户的现有更改。
 
-任务开始前确认 Issue 已分配一位负责人，具备 type、area、priority 标签，处于 ready 或 in-progress 状态。Agent 任务还需要 agent:ready 标签。
+任务开始前确认 Issue 具备 type、area、priority 标签，处于 ready 或 in-progress 状态。Agent 任务还需要 agent:ready 标签。
 
 ## 实施要求
 
@@ -20,6 +20,6 @@ Cloudlet 是 Go 模块化单体项目。任务范围与验收条件以关联 Iss
 
 按 [改动范围](docs/releases.md) 执行对应检查与相关集成测试，make check 用于完整验证。涉及容器或交付配置时执行 make container-check。记录实际命令、结果和运行限制。
 
-PR 使用 Closes #编号关联 Issue，指定同一位负责人，添加 type、area 和 agent:assisted 标签。由其他成员审查并合并。
+建议在 PR 中使用 Closes #编号关联 Issue，指定负责人，添加 type、area 和 agent:assisted 标签。由其他成员审查并合并。
 
 详细操作与边界见 [docs/agents.md](docs/agents.md)。

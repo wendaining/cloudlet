@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       issue_number:
-        description: 已分配负责人并添加 agent:ready 的 Issue 编号
+        description: 已添加 agent:ready 的 Issue 编号
         required: true
         type: string
 

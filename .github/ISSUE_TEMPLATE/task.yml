@@ -1,7 +1,6 @@
 name: 工程任务
 description: 维护工程、协作流程、文档或开展技术验证
 labels: ["type:task", "status:triage"]
-assignees: [wendaining]
 body:
   - type: textarea
     id: goal

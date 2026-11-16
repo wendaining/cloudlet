@@ -22,7 +22,7 @@ make setup 安装锁定的依赖与测试浏览器，启用提交信息检查，
 
 ## 选择任务
 
-使用问题报告、功能提案或工程任务表单创建 Issue。维护者确认验收条件，指定一位负责人，并添加 type、area、priority 和 status 标签。
+使用问题报告、功能提案或工程任务表单创建 Issue。维护者确认验收条件，指定负责人，并添加 type、area、priority 和 status 标签。
 
 status:ready 表示可以开始实施，status:in-progress 表示负责人正在执行。阻塞条件写入 Issue，并使用 status:blocked。详细规则见 [协作流程](docs/workflow.md)。
 
@@ -32,13 +32,13 @@ status:ready 表示可以开始实施，status:in-progress 表示负责人正在
 
 每次提交只处理一个目的。
 
-提交信息与 PR 标题使用 Conventional Commits：
+提交信息与 PR 标题建议使用 Conventional Commits：
 
 ```text
 feat(gateway): 支持路径路由
 fix(containers): 释放停止容器的端口
 docs: 补充本地开发说明
-ci: 检查 PR 关联任务
+ci: 按改动范围执行检查
 ```
 
 复杂更改按能够独立说明和验证的目的提交。提交时提供完整实现和相关验证。
@@ -56,10 +56,8 @@ make check 执行完整检查，包括真实数据库、开发环境与浏览器
 
 ## 提交 PR
 
-按照 PR 模板说明最终行为、验证结果和需要关注的限制。正文使用 Closes #编号，指定与关联 Issue 相同的负责人，并添加 type 与 area 标签。Agent 参与的更改添加 agent:assisted，并填写 Agent 记录。
+按照 PR 模板说明最终行为、验证结果和需要关注的限制。建议使用 Closes #编号关联任务，指定与关联 Issue 相同的负责人，并添加 type、area 与 agent:assisted 标签。
 
-PR policy 检查每条提交、PR 标题、标签、负责人及关联任务。依赖更新 PR 同样需要维护者建立或关联相应任务。
-
-向其他协作者请求审查。合并要求 CI 与 PR policy 通过，至少一位其他成员批准，审查讨论已处理。使用 squash 合并，PR 标题成为主分支上的提交标题。
+向其他协作者请求审查。合并要求 CI 通过、至少一位其他成员批准。
 
 维护者操作见 [协作流程](docs/workflow.md)，发布操作见 [交付与发布](docs/releases.md)。
