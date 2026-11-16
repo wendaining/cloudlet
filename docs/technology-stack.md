@@ -15,6 +15,7 @@
 | 数据访问 | GORM、gorm.io/driver/postgres | 元数据模型、查询、关联和事务 |
 | 数据库迁移 | goose、SQL 迁移文件 | 按版本管理表结构、索引和数据变更 |
 | 日志 | log/slog | 结构化 JSON 日志 |
+| 登录会话 | SCS、PostgreSQL session store、bcrypt | 会话持久化、实例 Cookie 和密码校验 |
 
 Gin 提供管理 API 所需的路由分组、参数校验和中间件。管理请求、业务逻辑、数据库访问分别放在各自模块中，业务方法接收 context.Context。HTTP 参数类型与数据库模型分别定义。
 

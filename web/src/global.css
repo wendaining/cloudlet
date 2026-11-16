@@ -1,0 +1,19 @@
+:root {
+  font-family: system-ui, sans-serif;
+  background: #f5f7fb;
+  color: #172335;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+h1 {
+  overflow-wrap: anywhere;
+}

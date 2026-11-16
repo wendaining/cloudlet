@@ -1,6 +1,7 @@
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import net from 'node:net';
+import treeKill from 'tree-kill';
 import { root } from './config.mjs';
 
 const execute = promisify(execFile);
@@ -10,13 +11,25 @@ export async function capture(command, args, env = process.env) {
   return stdout.trim();
 }
 
-export function run(command, args, env = process.env) {
+export function run(command, args, env = process.env, { signal } = {}) {
+  signal?.throwIfAborted();
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, { cwd: root, env, stdio: 'inherit' });
+    let force;
+    const interrupt = () => {
+      if (child.exitCode !== null || child.signalCode !== null) return;
+      treeKill(child.pid, 'SIGINT', error => { if (error && child.exitCode === null && child.signalCode === null) reject(error); });
+      force = setTimeout(() => treeKill(child.pid, 'SIGKILL'), 10_000);
+      force.unref();
+    };
+    signal?.addEventListener('abort', interrupt, { once: true });
     child.once('error', reject);
-    child.once('exit', (code, signal) => {
-      if (code === 0) resolve();
-      else reject(new Error(`${command} 执行失败，退出码 ${code}，信号 ${signal}`));
+    child.once('close', (code, exitSignal) => {
+      clearTimeout(force);
+      signal?.removeEventListener('abort', interrupt);
+      if (signal?.aborted) reject(signal.reason);
+      else if (code === 0) resolve();
+      else reject(new Error(`${command} 执行失败，退出码 ${code}，信号 ${exitSignal}`));
     });
   });
 }
@@ -40,7 +53,7 @@ export async function connectDocker(config) {
 export function compose(config, args, live = true) {
   const parameters = ['compose', '--project-directory', root, '--env-file', config.filename,
     '-f', 'compose.yaml', '-f', 'compose.dev.yaml', ...args];
-  return live ? run('docker', parameters, config.env) : capture('docker', parameters, config.env);
+  return live ? run('docker', parameters, config.env, { signal: config.signal }) : capture('docker', parameters, config.env);
 }
 
 export async function assertPortsFree(ports) {
@@ -56,6 +69,8 @@ export async function assertPortsFree(ports) {
 export async function doctor(config, { ports = true } = {}) {
   if (Number(process.versions.node.split('.')[0]) < 24) throw new Error('需要 Node.js 24 或更新版本');
   const go = await capture('go', ['version'], config.env);
+  await capture('go', ['list', '-m', '-json'], config.env);
+  await capture('shellcheck', ['--version'], config.env);
   const composeVersion = await capture('docker', ['compose', 'version'], config.env);
   const docker = await connectDocker(config);
   await compose(config, ['config', '--quiet'], false);

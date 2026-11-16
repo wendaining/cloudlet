@@ -26,7 +26,7 @@ Cloudlet 在一台 Linux 服务器上管理计算资源。本地开发在成员�
 | internal/browser | 复用容器管理的 Playwright 会话 |
 | pkg/client | CLI 与其他客户端共享的 API 客户端 |
 
-执行模块当前提供包边界，开发目标见 [开发任务](roadmap.md)。管理元数据使用 PostgreSQL 的接入工作属于资源管理任务，Durable Objects 的存储能力随 workerd 集成验证。
+PostgreSQL 当前保存账号与登录会话。执行模块当前提供包边界，资源元数据和生命周期的开发目标见 [开发任务](roadmap.md)。Durable Objects 的存储能力随 workerd 集成验证。
 
 ## 当前接口
 

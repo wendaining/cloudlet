@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
@@ -89,7 +89,7 @@ export async function loadConfig(file = process.env.ENV_FILE ?? '.env.local') {
     api: environment.CLOUDLET_API_UPSTREAM,
     web: environment.CLOUDLET_PUBLIC_ORIGIN,
     gateway: `http://127.0.0.1:${env.CLOUDLET_GATEWAY_PORT}`,
-    controlPath: path.join(os.tmpdir(), `cloudlet-${process.getuid()}-${instance}`),
+    controlPath: path.join(os.tmpdir(), `cl-${createHash('sha256').update(`${process.getuid()}:${instance}`).digest('hex').slice(0, 16)}`),
   };
 }
 

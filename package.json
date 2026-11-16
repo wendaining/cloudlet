@@ -2,12 +2,15 @@
   "name": "cloudlet-development",
   "private": true,
   "type": "module",
+  "workspaces": [
+    "web"
+  ],
   "engines": {
     "node": ">=24"
   },
   "scripts": {
     "lint": "npm run lint:docs && npm run lint:config && npm run lint:tooling",
-    "lint:docs": "markdownlint-cli2 '**/*.md' '#node_modules' '#.local' '#dist' '#bin' && node scripts/check-docs.mjs",
+    "lint:docs": "markdownlint-cli2 '**/*.md' '#**/node_modules' '#**/dist' '#.local' '#bin' && node scripts/check-docs.mjs",
     "lint:config": "node scripts/check-repository.mjs",
     "lint:tooling": "sh scripts/check-tooling.sh",
     "repo:sync": "node scripts/github.mjs sync",
@@ -21,17 +24,25 @@
     "@commitlint/lint": "21.2.4",
     "@commitlint/load": "21.2.4",
     "@octokit/rest": "22.0.1",
+    "@playwright/test": "1.65.1",
     "concurrently": "10.0.7",
     "dotenv": "18.0.10",
     "markdownlint-cli2": "0.24.1",
     "proper-lockfile": "4.1.2",
     "remark-parse": "11.0.0",
     "semver": "7.8.6",
+    "shell-quote": "1.12.0",
+    "smol-toml": "1.9.1",
+    "tree-kill": "1.2.2",
     "unified": "11.0.5",
+    "wait-on": "9.5.1",
     "yaml": "2.9.1",
     "zod": "4.6.7"
   },
   "overrides": {
-    "katex": "0.19.1"
+    "katex": "0.19.1",
+    "@typescript-eslint/typescript-estree": {
+      "minimatch": "11.0.8"
+    }
   }
 }

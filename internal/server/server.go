@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/wendaining/cloudlet/internal/config"
@@ -49,7 +50,7 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	results := make(chan error, 2)
 	go func() { results <- api.Serve(apiListener) }()
 	go func() { results <- front.Serve(gatewayListener) }()
-	logger.Info("cloudlet started", "api_address", apiListener.Addr().String(), "gateway_address", gatewayListener.Addr().String(), "routes", len(cfg.Routes))
+	logger.Info("cloudlet started", "pid", os.Getpid(), "api_address", apiListener.Addr().String(), "gateway_address", gatewayListener.Addr().String(), "routes", len(cfg.Routes))
 	var serveError error
 	consumed := 0
 	select {

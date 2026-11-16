@@ -8,16 +8,17 @@
 
 ## 准备环境
 
-安装 Go 1.27.4、Node.js 24 及以上版本、Git、Make 和 ShellCheck。使用容器时安装 Docker，操作 GitHub 时安装并登录 GitHub CLI。
+安装 Go 1.27.4、Node.js 24 及以上版本、Docker Compose、Git、Make 和 ShellCheck。Windows 使用 WSL2。操作 GitHub 时安装并登录 GitHub CLI。
 
 ```sh
 git clone https://github.com/wendaining/cloudlet.git
 cd cloudlet
 make setup
-make check
+make doctor
+make dev
 ```
 
-make setup 安装锁定的依赖，并为当前仓库启用提交信息检查。
+make setup 安装锁定的依赖与测试浏览器，启用提交信息检查，并生成本机开发配置。账号、停止、多实例与调试操作见 [开发环境](docs/development.md)。
 
 ## 选择任务
 
@@ -49,7 +50,7 @@ make check
 make container-check
 ```
 
-make check 执行完整检查。可以按改动范围使用 npm run lint:docs、npm run lint:config、npm run lint:tooling、make test 和 make container-check。CI 的触发范围见 [交付与发布](docs/releases.md)。
+make check 执行完整检查，包括真实数据库、开发环境与浏览器流程。按范围运行的命令见 [测试说明](docs/testing.md)，CI 的触发范围见 [交付与发布](docs/releases.md)。
 
 涉及运行时、容器或交付配置时执行容器验证。测试应覆盖更改后的行为、重要错误路径和资源释放。
 

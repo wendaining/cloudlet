@@ -11,6 +11,8 @@ Cloudlet 是面向单机部署的 Serverless 平台，围绕 Workers、Durable O
 | 模块 | 当前状态 |
 | --- | --- |
 | 管理 API | 健康检查、构建信息、账号登录和持久化会话 |
+| 管理界面 | React 登录、退出和环境概览，通过真实 API 访问 PostgreSQL |
+| 本地开发 | 环境检查、数据库初始化、Go 与前端热更新、多实例与完整停止 |
 | Gateway | 静态域名路由、HTTP 转发和上游错误响应 |
 | CLI | 查询客户端版本、检查 API 健康状态 |
 | Workers、Durable Objects、Containers、Browser Run | 已定义模块边界与开发任务 |
@@ -18,29 +20,29 @@ Cloudlet 是面向单机部署的 Serverless 平台，围绕 Workers、Durable O
 
 ## 本地运行
 
-需要 Go 1.27.4、Node.js 24 及以上版本、Git、Make 和 ShellCheck。容器验证需要 Docker。仓库管理操作需要已登录的 GitHub CLI。
+需要 Go 1.27.4、Node.js 24 及以上版本、Docker Compose、Git、Make 和 ShellCheck。Windows 成员在 WSL2 中开发。
 
 ```sh
 make setup
+make doctor
+make dev
+```
+
+打开 <http://127.0.0.1:5173>。开发账号与密码由 make setup 生成，保存在本机 .env.local。Go、Vite 在本机运行，PostgreSQL 使用本机容器。
+
+退出时按 Ctrl+C，或在另一个终端执行：
+
+```sh
+make dev-stop
+```
+
+停止操作保留数据库与持久化数据。管理 API 默认监听 8080，Gateway 默认监听 8081。多实例、调试、迁移与数据重置见 [开发环境](docs/development.md)。
+
+```sh
 make check
-make run
 ```
 
-在另一个终端执行：
-
-```sh
-go run ./cmd/cloudlet health
-curl http://127.0.0.1:8080/api/v1/version
-curl -H 'Host: demo.localhost' http://127.0.0.1:8081/api/v1/version
-```
-
-默认配置位于 [configs/cloudlet.json](configs/cloudlet.json)。管理 API 监听 8080 端口，Gateway 监听 8081 端口，地址均为本机回环地址。示例域名 demo.localhost 将请求转发至管理 API。
-
-```sh
-make container-check
-```
-
-该命令构建镜像并验证容器启动、CLI、实际转发与未知域名响应。
+完整检查使用真实 PostgreSQL、HTTP 和 Chromium。容器构建检查使用 make container-check，具体范围见 [测试说明](docs/testing.md)。
 
 ## 参与开发
 
