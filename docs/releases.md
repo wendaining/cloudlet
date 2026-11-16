@@ -21,6 +21,8 @@ Go 测试文件改动触发 Go 检查。CI 定义与路径规则改动触发全�
 
 CI 汇总任务持续报告合并检查结果，确认选中的任务全部成功，其他任务按范围跳过。
 
+PR 更新时检查最新内容。master 的每次推送独立执行对应范围的检查并保留结果。
+
 README 最多 90 行，AGENTS.md 最多 70 行，CONTRIBUTING.md 最多 110 行。详细内容放入 docs。
 
 容器检查在实际 Docker 中构建并运行服务，验证 readyz、CLI、Gateway 转发与未知域名响应。运行时使用普通用户、只读文件系统、资源限制和已移除的 Linux capabilities。
