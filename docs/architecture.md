@@ -1,10 +1,26 @@
 # 架构
 
+本文概述目标架构与当前实现。详细规则见 [平台资源与部署设计](platform-design.md) 和 [执行环境设计](runtime-design.md)。
+
 Cloudlet 在一台 Linux 服务器上管理计算资源。本地开发在成员电脑上运行 Go 与前端开发服务器，通过本机 Docker 启动 PostgreSQL 和执行环境。环境边界见 [本地开发与服务器部署](development.md)。
 
 管理 API 和 Gateway 属于同一 Go 工程，分别监听独立端口。外部运行时由对应模块管理。
 
 管理 API 采用 Gin，元数据通过 GORM 访问 PostgreSQL，管理界面采用 React 与 TypeScript。各项技术的职责、接口契约和工程约定见 [技术栈](technology-stack.md)。
+
+## 核心约定
+
+| 范围 | 约定 |
+| --- | --- |
+| 业务归属 | Project 管理成员、资源与配额，CLOUDLET_INSTANCE 标识开发或部署环境 |
+| 资源身份 | Worker、Container 和命名空间使用稳定标识，Deployment 与 Execution 分别记录版本和实际执行 |
+| 发布 | 代码和绑定形成不可变部署，验证就绪后激活，并更新内存路由快照 |
+| 数据 | PostgreSQL 保存平台元数据，本地产物目录保存部署文件，workerd 持有 DO SQLite 状态 |
+| 运行时 | workerd、用户容器和浏览器独立于 Go 进程运行，控制器按元数据重新接管 |
+| DO 所有权 | 命名空间身份跨代码版本保持稳定，同一持久存储只授予一个执行所有者 |
+| 能力声明 | 运行时版本与执行能力通过真实验证后登记，所有调用方使用同一管理 API |
+
+应用服务负责权限、部署事务、操作记录和资源准入。执行模块负责真实运行时操作并返回观测结果。Gateway 读取已经提交的路由快照，执行公开请求转发。
 
 ## 模块边界
 
@@ -58,4 +74,4 @@ API 与 Gateway 使用 HTTP 头读取超时和空闲连接超时。收到 SIGTER
 
 Workers 集成 workerd。Durable Objects 随同运行时验证持久化与并发语义。容器管理使用 Docker Engine API。Browser Run 复用容器生命周期，并通过 Playwright 实现浏览器操作。
 
-接入执行环境时需要确定资源配额、进程隔离、网络权限、启动与退出行为。验收必须使用实际运行时。
+执行单元、配额、隔离、状态恢复与独占交接遵循执行环境设计。对应模块完成时，同步提供 [真实业务验收](testing.md)。

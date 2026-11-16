@@ -4,6 +4,8 @@
 
 本地开发使用每位成员电脑上的 PostgreSQL 容器，Go 与 Vite 在本机运行。服务器通过 Compose 部署相同技术的服务与数据库。连接地址、账户与数据卷的约定见 [本地开发与服务器部署](development.md)。
 
+资源身份、不可变部署、数据归属与运行状态遵循 [平台设计](platform-design.md)。执行单元、DO 所有权和兼容范围遵循 [执行环境设计](runtime-design.md)。
+
 ## 后端与数据
 
 | 部分 | 技术 | 职责 |
@@ -20,6 +22,8 @@
 Gin 提供管理 API 所需的路由分组、参数校验和中间件。管理请求、业务逻辑、数据库访问分别放在各自模块中，业务方法接收 context.Context。HTTP 参数类型与数据库模型分别定义。
 
 GORM 管理 PostgreSQL 中的平台元数据。查询传递请求上下文，多表变更通过事务完成。数据库变更写入 migrations 目录中的 SQL 文件，由 goose 显式执行。服务启动时验证连接与所需的数据库版本，初始化失败时终止启动。
+
+代码包、配置与导出的文件放在平台本地产物目录，PostgreSQL 保存摘要与引用。DO SQLite 由 workerd 持有独立持久化数据卷。平台结构迁移与 DO 迁移分别管理。
 
 ## 管理界面
 
@@ -60,6 +64,8 @@ Go 使用 oapi-codegen 生成接口类型、Gin 服务端接口与客户端代�
 | 单机部署 | Docker、Docker Compose | 部署管理服务、PostgreSQL 与所需运行环境 |
 
 Durable Objects 的 SQLite 存储由 workerd 管理。Browser Run 复用容器模块创建、限制和回收资源，Go 管理服务通过内部接口控制浏览器会话。Playwright 与浏览器镜像使用对应版本。
+
+项目的 workerd 容器承载其 Worker 与 DO，每个用户容器和浏览器会话拥有独立执行实例。Go 重启后通过元数据与实际观测重新接管。运行时版本、原生能力和资源限制经过验证后记录，要求未支持能力的部署返回错误。
 
 ## 工程与验证
 
