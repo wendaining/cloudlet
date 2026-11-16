@@ -1,0 +1,32 @@
+{
+  "name": "cloudlet-development",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "lint": "npm run lint:docs && npm run lint:config",
+    "lint:docs": "markdownlint-cli2 '**/*.md' '#node_modules' '#.local' '#dist' '#bin'",
+    "lint:config": "node scripts/check-repository.mjs",
+    "repo:sync": "node scripts/github.mjs sync",
+    "issue:coordinate": "node scripts/github.mjs coordinate",
+    "pr:check": "node scripts/github.mjs check-pr",
+    "agent:brief": "node scripts/github.mjs agent-brief"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "21.2.4",
+    "@commitlint/config-conventional": "21.2.4",
+    "@commitlint/lint": "21.2.4",
+    "@commitlint/load": "21.2.4",
+    "@octokit/rest": "22.0.1",
+    "markdownlint-cli2": "0.24.1",
+    "remark-parse": "11.0.0",
+    "semver": "7.8.6",
+    "unified": "11.0.5",
+    "yaml": "2.9.1"
+  },
+  "overrides": {
+    "katex": "0.19.1"
+  }
+}
