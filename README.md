@@ -49,6 +49,7 @@ make container-check
 | 文档 | 内容 |
 | --- | --- |
 | [技术栈](docs/technology-stack.md) | 后端、前端、数据库、接口与测试工具 |
+| [开发环境](docs/development.md) | 本机依赖、数据库连接与服务器部署 |
 | [架构](docs/architecture.md) | 模块职责、接口与运行边界 |
 | [协作流程](docs/workflow.md) | Issue、标签、负责人、提交与 PR |
 | [Agent 工作流程](docs/agents.md) | 任务交接、执行证据与人工审查 |

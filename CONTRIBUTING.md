@@ -4,6 +4,8 @@
 
 开发前阅读 [技术栈](docs/technology-stack.md)，按模块采用的技术与接口约定编写代码。
 
+本地开发使用本机 Docker 中的数据库与执行环境，环境配置见 [开发环境](docs/development.md)。
+
 ## 准备环境
 
 安装 Go 1.27.4、Node.js 24 及以上版本、Git、Make 和 ShellCheck。使用容器时安装 Docker，操作 GitHub 时安装并登录 GitHub CLI。
