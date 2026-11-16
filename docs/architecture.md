@@ -2,6 +2,8 @@
 
 Cloudlet 在一台 Linux 主机上管理计算资源。管理 API 和 Gateway 属于同一 Go 工程，分别监听独立端口。外部运行时由对应模块管理。
 
+管理 API 采用 Gin，元数据通过 GORM 访问 PostgreSQL，管理界面采用 React 与 TypeScript。各项技术的职责、接口契约和工程约定见 [技术栈](technology-stack.md)。
+
 ## 模块边界
 
 | 路径 | 职责 |

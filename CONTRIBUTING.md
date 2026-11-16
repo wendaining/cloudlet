@@ -2,6 +2,8 @@
 
 所有开发工作通过 Issue 明确目标、范围、负责人和验收条件。
 
+开发前阅读 [技术栈](docs/technology-stack.md)，按模块采用的技术与接口约定编写代码。
+
 ## 准备环境
 
 安装 Go 1.27.4、Node.js 24 及以上版本、Git、Make 和 ShellCheck。使用容器时安装 Docker，操作 GitHub 时安装并登录 GitHub CLI。

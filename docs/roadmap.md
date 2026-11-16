@@ -1,6 +1,6 @@
 # 开发任务
 
-每个模块通过独立 Issue 确认实现范围、负责人和验收结果。这里定义核心能力的验收目标。
+每个模块通过独立 Issue 确认实现范围、负责人和验收结果。实现遵循 [技术栈](technology-stack.md)，这里定义核心能力的验收目标。
 
 | 模块 | 实现内容 | 验收目标 |
 | --- | --- | --- |
@@ -11,6 +11,7 @@
 | [管理 API](https://github.com/wendaining/cloudlet/issues/6) | 资源模型、PostgreSQL 元数据、认证、生命周期状态 | 创建与查询真实资源，重启后恢复管理信息，拒绝无权限操作 |
 | Gateway | 动态路由登记、请求日志与生命周期联动 | 部署产生可访问路由，销毁后撤销路由，错误请求返回明确状态 |
 | CLI 与 Agent 接口 | 共享客户端、资源操作与 MCP | 同一管理 API 支持命令行和 Agent 调用，错误具有一致语义 |
+| 管理界面 | React、TypeScript、Vite 与 Ant Design | 通过真实管理 API 完成资源操作，展示加载、运行与错误状态 |
 
 Browser Run 依赖 Containers。Durable Objects 依赖 Workers。资源创建流程需要同步明确元数据与路由的变更方式。
 
