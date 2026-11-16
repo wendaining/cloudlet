@@ -1,7 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
-import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'dotenv';
 import { z } from 'zod';
@@ -38,7 +37,7 @@ export async function initialize(file = process.env.ENV_FILE ?? '.env.local') {
 }
 
 export async function loadConfig(file = process.env.ENV_FILE ?? '.env.local') {
-  const filename = path.resolve(root, file);
+  const filename = await realpath(path.resolve(root, file));
   const values = parse(await readFile(filename));
   const overrides = Object.fromEntries(Object.keys(schema.shape)
     .filter(key => process.env[key] !== undefined).map(key => [key, process.env[key]]));
@@ -89,7 +88,7 @@ export async function loadConfig(file = process.env.ENV_FILE ?? '.env.local') {
     api: environment.CLOUDLET_API_UPSTREAM,
     web: environment.CLOUDLET_PUBLIC_ORIGIN,
     gateway: `http://127.0.0.1:${env.CLOUDLET_GATEWAY_PORT}`,
-    controlPath: path.join(os.tmpdir(), `cl-${createHash('sha256').update(`${process.getuid()}:${instance}`).digest('hex').slice(0, 16)}`),
+    controlPath: path.join('/tmp', `cl-${createHash('sha256').update(`${process.getuid()}:${instance}`).digest('hex').slice(0, 16)}`),
   };
 }
 

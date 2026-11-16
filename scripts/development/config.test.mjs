@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, rm, realpath, symlink } from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -16,6 +16,9 @@ test('初始化保留已有凭据并拒绝错误配置', async t => {
   await initialize(filename);
   assert.equal(await readFile(filename, 'utf8'), first);
   const config = await loadConfig(filename);
+  const alias = path.join(directory, 'linked.env');
+  await symlink(filename, alias);
+  assert.equal((await loadConfig(alias)).filename, await realpath(filename));
   assert.equal(config.databasePort, 15432);
   assert.equal(config.env.COMPOSE_PROJECT_NAME, 'cloudlet-default');
   await writeFile(filename, first.replace('CLOUDLET_WEB_PORT=5173', 'CLOUDLET_WEB_PORT=8080'));
