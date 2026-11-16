@@ -11,10 +11,23 @@ import (
 
 	"github.com/wendaining/cloudlet/internal/config"
 	"github.com/wendaining/cloudlet/internal/controlplane"
+	"github.com/wendaining/cloudlet/internal/database"
 	"github.com/wendaining/cloudlet/internal/gateway"
 )
 
 func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
+	var store *database.Store
+	if cfg.DatabaseURL != "" {
+		var err error
+		store, err = database.Open(ctx, cfg.DatabaseURL)
+		if err != nil {
+			return err
+		}
+		defer store.SQL.Close()
+		if err := store.CheckVersion(ctx); err != nil {
+			return err
+		}
+	}
 	proxy, err := gateway.NewHandler(cfg, logger)
 	if err != nil {
 		return err
@@ -29,7 +42,9 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		return fmt.Errorf("listen gateway: %w", err)
 	}
 	defer gatewayListener.Close()
-	api := newServer(controlplane.NewHandler())
+	management, closeSessions := controlplane.NewHandler(store, cfg, logger)
+	defer closeSessions()
+	api := newServer(management)
 	front := newServer(proxy)
 	results := make(chan error, 2)
 	go func() { results <- api.Serve(apiListener) }()

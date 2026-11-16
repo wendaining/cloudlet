@@ -3,7 +3,7 @@ COMMIT ?= $(shell git rev-parse HEAD)
 ISSUE ?=
 LDFLAGS = -X github.com/wendaining/cloudlet/internal/version.Version=$(VERSION) -X github.com/wendaining/cloudlet/internal/version.Commit=$(COMMIT)
 
-.PHONY: setup doctor fmt format-check lint test build audit check run container-check repo-sync agent-brief
+.PHONY: setup doctor fmt format-check lint test test-integration generate build audit check run container-check repo-sync agent-brief
 
 setup:
 	npm ci
@@ -15,10 +15,10 @@ doctor:
 	node scripts/dev.mjs doctor
 
 fmt:
-	gofmt -w cmd internal pkg
+	gofmt -w cmd internal pkg migrations
 
 format-check:
-	@test -z "$$(gofmt -l cmd internal pkg)" || { gofmt -l cmd internal pkg; exit 1; }
+	@test -z "$$(gofmt -l cmd internal pkg migrations)" || { gofmt -l cmd internal pkg migrations; exit 1; }
 	go mod tidy -diff
 
 lint:
@@ -29,10 +29,20 @@ lint:
 test:
 	go test -race -count=1 ./...
 
+test-integration:
+	node scripts/dev.mjs test-integration
+
+generate:
+	go tool oapi-codegen --config api/oapi-codegen.yaml api/openapi.yaml
+
+generate-check:
+	node scripts/check-generated.mjs
+
 build:
 	mkdir -p bin
 	go build -trimpath -ldflags '$(LDFLAGS)' -o bin/cloudlet-server ./cmd/server
 	go build -trimpath -ldflags '$(LDFLAGS)' -o bin/cloudlet ./cmd/cloudlet
+	go build -trimpath -o bin/cloudlet-admin ./cmd/admin
 
 audit:
 	go tool govulncheck ./...

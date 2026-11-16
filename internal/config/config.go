@@ -18,6 +18,10 @@ type Route struct {
 }
 
 type Config struct {
+	Environment    string  `json:"environment,omitempty"`
+	Instance       string  `json:"instance,omitempty"`
+	PublicOrigin   string  `json:"public_origin,omitempty"`
+	DatabaseURL    string  `json:"-"`
 	APIAddress     string  `json:"api_address"`
 	GatewayAddress string  `json:"gateway_address"`
 	Routes         []Route `json:"routes"`
@@ -39,6 +43,7 @@ func Load(path string) (Config, error) {
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 		return Config{}, errors.New("configuration must contain one JSON object")
 	}
+	cfg.DatabaseURL = os.Getenv("CLOUDLET_DATABASE_URL")
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
@@ -46,6 +51,18 @@ func Load(path string) (Config, error) {
 }
 
 func (cfg Config) Validate() error {
+	if cfg.Environment != "" && cfg.Environment != "development" && cfg.Environment != "production" {
+		return errors.New("invalid environment")
+	}
+	if cfg.Environment != "" {
+		if cfg.DatabaseURL == "" || cfg.Instance == "" {
+			return errors.New("management environment requires database URL and instance")
+		}
+		origin, err := url.Parse(cfg.PublicOrigin)
+		if err != nil || origin.Hostname() == "" || (origin.Scheme != "http" && origin.Scheme != "https") {
+			return errors.New("invalid public origin")
+		}
+	}
 	for _, address := range []string{cfg.APIAddress, cfg.GatewayAddress} {
 		host, port, err := net.SplitHostPort(address)
 		if err != nil || host == "" {

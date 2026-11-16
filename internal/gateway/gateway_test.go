@@ -20,7 +20,9 @@ import (
 )
 
 func TestGatewayAndClientAgainstManagementAPI(t *testing.T) {
-	api := httptest.NewServer(controlplane.NewHandler())
+	management, cleanup := controlplane.NewHandler(nil, config.Config{}, slog.Default())
+	defer cleanup()
+	api := httptest.NewServer(management)
 	defer api.Close()
 	handler, err := gateway.NewHandler(config.Config{
 		APIAddress: "127.0.0.1:0", GatewayAddress: "127.0.0.1:0",

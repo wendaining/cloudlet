@@ -1,25 +1,161 @@
 package controlplane
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"io"
+	"log/slog"
 	"net/http"
+	"strings"
+	"time"
 
+	"github.com/alexedwards/scs/postgresstore"
+	"github.com/alexedwards/scs/v2"
+	"github.com/gin-gonic/gin"
+	"github.com/wendaining/cloudlet/internal/apigen"
+	"github.com/wendaining/cloudlet/internal/config"
+	"github.com/wendaining/cloudlet/internal/database"
 	"github.com/wendaining/cloudlet/internal/version"
+	"github.com/wendaining/cloudlet/migrations"
+	"gorm.io/gorm"
 )
 
-func NewHandler() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+type handler struct {
+	store    *database.Store
+	sessions *scs.SessionManager
+	config   config.Config
+	logger   *slog.Logger
+}
+
+func NewHandler(store *database.Store, cfg config.Config, logger *slog.Logger) (http.Handler, func()) {
+	h := &handler{store: store, config: cfg, logger: logger}
+	router := gin.New()
+	router.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
+	router.GET("/readyz", func(c *gin.Context) {
+		if store != nil {
+			ctx, cancel := context.WithTimeout(c.Request.Context(), time.Second)
+			defer cancel()
+			if err := store.SQL.PingContext(ctx); err != nil {
+				h.failure(c, err)
+				return
+			}
+		}
+		c.JSON(http.StatusOK, gin.H{"status": "ready"})
 	})
-	mux.HandleFunc("GET /readyz", func(w http.ResponseWriter, _ *http.Request) {
+	apigen.RegisterHandlers(router, h)
+	if store == nil {
+		return router, func() {}
+	}
+	sessionStore := postgresstore.New(store.SQL)
+	h.sessions = scs.New()
+	h.sessions.Store = sessionStore
+	h.sessions.HashTokenInStore = true
+	h.sessions.Lifetime = 24 * time.Hour
+	h.sessions.IdleTimeout = time.Hour
+	h.sessions.Cookie.Name = "cloudlet_" + cfg.Instance + "_session"
+	h.sessions.Cookie.HttpOnly = true
+	h.sessions.Cookie.SameSite = http.SameSiteLaxMode
+	h.sessions.Cookie.Secure = strings.HasPrefix(cfg.PublicOrigin, "https://")
+	h.sessions.ErrorFunc = func(w http.ResponseWriter, _ *http.Request, err error) {
+		logger.Error("session storage failed", "error", err)
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"status": "ready"})
-	})
-	mux.HandleFunc("GET /api/v1/version", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(version.Current())
-	})
-	return mux
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(apigen.Error{Message: "会话存储失败"})
+	}
+	return http.NewCrossOriginProtection().Handler(h.sessions.LoadAndSave(router)), sessionStore.StopCleanup
+}
+
+func (h *handler) GetVersion(c *gin.Context) { c.JSON(http.StatusOK, version.Current()) }
+
+func (h *handler) Login(c *gin.Context) {
+	if !h.databaseAvailable(c) {
+		return
+	}
+	var body apigen.LoginRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(c.Writer, c.Request.Body, 4096))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil {
+		c.JSON(http.StatusBadRequest, apigen.Error{Message: "登录请求格式无效"})
+		return
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) || body.Email == "" || body.Password == "" || len(body.Password) > 72 {
+		c.JSON(http.StatusBadRequest, apigen.Error{Message: "登录请求格式无效"})
+		return
+	}
+	user, err := h.store.Authenticate(c.Request.Context(), body.Email, body.Password)
+	if errors.Is(err, database.ErrCredentials) {
+		c.JSON(http.StatusUnauthorized, apigen.Error{Message: err.Error()})
+		return
+	}
+	if err != nil {
+		h.failure(c, err)
+		return
+	}
+	if err := h.sessions.RenewToken(c.Request.Context()); err != nil {
+		h.failure(c, err)
+		return
+	}
+	h.sessions.Put(c.Request.Context(), "user_id", user.ID)
+	c.JSON(http.StatusOK, apigen.User{Id: user.ID, Email: user.Email})
+}
+
+func (h *handler) Logout(c *gin.Context) {
+	if !h.databaseAvailable(c) {
+		return
+	}
+	if err := h.sessions.Destroy(c.Request.Context()); err != nil {
+		h.failure(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (h *handler) GetSession(c *gin.Context) {
+	user, ok := h.currentUser(c)
+	if ok {
+		c.JSON(http.StatusOK, apigen.User{Id: user.ID, Email: user.Email})
+	}
+}
+
+func (h *handler) GetEnvironment(c *gin.Context) {
+	if _, ok := h.currentUser(c); !ok {
+		return
+	}
+	c.JSON(http.StatusOK, apigen.Environment{Instance: h.config.Instance, DatabaseVersion: migrations.Version})
+}
+
+func (h *handler) currentUser(c *gin.Context) (database.User, bool) {
+	if !h.databaseAvailable(c) {
+		return database.User{}, false
+	}
+	id := h.sessions.GetString(c.Request.Context(), "user_id")
+	if id == "" {
+		c.JSON(http.StatusUnauthorized, apigen.Error{Message: "请先登录"})
+		return database.User{}, false
+	}
+	user, err := h.store.User(c.Request.Context(), id)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		c.JSON(http.StatusUnauthorized, apigen.Error{Message: "账号不存在"})
+		return database.User{}, false
+	}
+	if err != nil {
+		h.failure(c, err)
+		return database.User{}, false
+	}
+	return user, true
+}
+
+func (h *handler) databaseAvailable(c *gin.Context) bool {
+	if h.store == nil {
+		c.JSON(http.StatusServiceUnavailable, apigen.Error{Message: "管理数据库未配置"})
+		return false
+	}
+	return true
+}
+
+func (h *handler) failure(c *gin.Context, err error) {
+	h.logger.Error("management request failed", "path", c.Request.URL.Path, "error", err)
+	c.JSON(http.StatusInternalServerError, apigen.Error{Message: "管理服务处理请求失败"})
 }

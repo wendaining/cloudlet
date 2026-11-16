@@ -10,7 +10,7 @@ Cloudlet 是面向单机部署的 Serverless 平台，围绕 Workers、Durable O
 
 | 模块 | 当前状态 |
 | --- | --- |
-| 管理 API | 健康检查、就绪检查和构建信息 |
+| 管理 API | 健康检查、构建信息、账号登录和持久化会话 |
 | Gateway | 静态域名路由、HTTP 转发和上游错误响应 |
 | CLI | 查询客户端版本、检查 API 健康状态 |
 | Workers、Durable Objects、Containers、Browser Run | 已定义模块边界与开发任务 |

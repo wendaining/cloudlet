@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | PostgreSQL | 本机 Docker 容器，每位成员拥有独立数据卷 | Linux 服务器上的数据库容器，使用独立持久化数据卷 |
 | Go 管理服务与 Gateway | 本机进程，便于调试与重新编译 | 运行已发布的应用镜像 |
-| React 管理界面 | 本机 Vite 开发服务器，启用热更新 | 静态构建产物，由管理服务提供 |
+| React 管理界面 | 本机 Vite 开发服务器，启用热更新 | 独立 Nginx 镜像，提供静态文件并代理管理 API |
 | workerd、用户容器与浏览器 | 本机 Docker 管理的执行环境 | 服务器 Docker 管理的执行环境 |
 | 数据库迁移 | goose 连接本机 PostgreSQL | 部署任务中的 goose 连接服务器 PostgreSQL |
 

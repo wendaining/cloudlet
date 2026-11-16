@@ -8,11 +8,14 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/gin-gonic/gin"
+
 	"github.com/wendaining/cloudlet/internal/config"
 	"github.com/wendaining/cloudlet/internal/server"
 )
 
 func main() {
+	gin.SetMode(gin.ReleaseMode)
 	path := flag.String("config", "configs/cloudlet.json", "configuration file")
 	flag.Parse()
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))

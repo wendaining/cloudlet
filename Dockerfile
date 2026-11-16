@@ -6,6 +6,7 @@ RUN go mod download
 COPY cmd ./cmd
 COPY internal ./internal
 COPY pkg ./pkg
+COPY migrations ./migrations
 ARG VERSION=dev
 ARG COMMIT=unknown
 RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X github.com/wendaining/cloudlet/internal/version.Version=${VERSION} -X github.com/wendaining/cloudlet/internal/version.Commit=${COMMIT}" -o /out/cloudlet-server ./cmd/server \

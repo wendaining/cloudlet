@@ -13,6 +13,8 @@ docs:
   - deleted: '**'
 
 go:
+  - 'migrations/**'
+  - 'api/**'
   - 'cmd/**'
   - 'internal/**'
   - 'pkg/**'
@@ -37,6 +39,24 @@ tooling:
   - '.gitignore'
   - '!**/*.md'
 
+database:
+  - 'internal/database/**'
+  - 'internal/controlplane/**'
+  - 'internal/config/**'
+  - 'internal/server/**'
+  - 'internal/apigen/**'
+  - 'cmd/server/**'
+  - 'cmd/admin/**'
+  - 'migrations/**'
+  - 'api/**'
+  - 'configs/images.json'
+  - 'go.mod'
+  - 'go.sum'
+  - 'Makefile'
+  - '.github/workflows/ci.yml'
+  - '.github/ci-paths.yml'
+  - '!**/*.md'
+
 workflows:
   - '.github/workflows/**'
   - '.github/ci-paths.yml'
@@ -46,6 +66,7 @@ workflows:
   - '!**/*.md'
 
 container:
+  - 'migrations/**'
   - 'cmd/**'
   - 'internal/**'
   - 'pkg/**'
@@ -79,6 +100,8 @@ unclassified:
   - '!internal/**'
   - '!pkg/**'
   - '!configs/**'
+  - '!migrations/**'
+  - '!api/**'
   - '!scripts/**'
   - '!.github/**'
   - '!.githooks/**'

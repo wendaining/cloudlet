@@ -8,6 +8,7 @@ master 更新和 PR 变化时，CI 根据改动路径选择检查任务。路径
 | --- | --- |
 | docs 目录、Markdown、许可证与文档工具配置 | Markdown、文件链接与入口文档长度 |
 | Go 源码、模块依赖与运行配置 | Go 格式、模块依赖、go vet、race 测试、构建与 govulncheck |
+| 数据库、账号、管理接口与迁移 | 真实 PostgreSQL 上的迁移、账号、会话与重启验证 |
 | 自动化脚本与仓库配置 | JSON、YAML、Issue 表单、脚本语法、ShellCheck 与 npm audit |
 | Actions 工作流与工作流工具依赖 | actionlint |
 | 容器源码、依赖、Dockerfile 与容器配置 | 实际容器构建、启动、转发和退出验证 |

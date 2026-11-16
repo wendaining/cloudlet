@@ -1,0 +1,6 @@
+package: apigen
+output: internal/apigen/api.gen.go
+generate:
+  models: true
+  gin-server: true
+  client: true

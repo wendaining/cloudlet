@@ -14,6 +14,9 @@ Cloudlet 在一台 Linux 服务器上管理计算资源。本地开发在成员�
 | cmd/cloudlet | 基于共享客户端的命令行入口 |
 | internal/config | 严格读取 JSON 配置并验证字段 |
 | internal/controlplane | 管理 HTTP 接口 |
+| internal/database | PostgreSQL 连接、迁移版本与账号数据 |
+| internal/apigen | OpenAPI 生成的类型、Gin 接口和客户端 |
+| migrations | 内嵌 SQL 迁移文件与当前版本 |
 | internal/gateway | 按域名选择上游并转发 HTTP 请求 |
 | internal/server | 监听端口与服务生命周期 |
 | internal/version | 构建版本和提交标识 |
@@ -32,12 +35,18 @@ Cloudlet 在一台 Linux 服务器上管理计算资源。本地开发在成员�
 | /healthz | GET | 返回进程健康状态 |
 | /readyz | GET | 返回服务就绪状态 |
 | /api/v1/version | GET | 返回 version 与 commit |
+| /api/v1/auth/login | POST | 验证账号并建立持久化会话 |
+| /api/v1/auth/logout | POST | 清除当前会话 |
+| /api/v1/auth/session | GET | 返回当前登录账号 |
+| /api/v1/environment | GET | 返回当前实例与数据库版本，需要登录 |
 
-两组监听端口完成初始化后才开始接受请求。当前就绪状态代表 API 与 Gateway 已启动。增加数据库或运行时依赖时，必须同时扩展就绪检查。
+两组监听端口完成初始化后才开始接受请求。管理环境启动前验证数据库连接和迁移版本，就绪接口同时检查数据库连接。
 
 Gateway 使用配置中的 host 匹配请求域名，匹配时忽略大小写、末尾句点和请求端口。target 支持 HTTP 与 HTTPS。请求路径、查询参数和响应经 Go ReverseProxy 转发。未知域名返回 404，上游连接失败返回 502。
 
-管理接口缺少用户认证，默认绑定本机回环地址。配置路由由主机维护者管理。公网管理访问与用户代码执行需要完成相应的认证和隔离任务。
+管理环境通过 PostgreSQL 保存账号与会话，使用 bcrypt 校验密码，使用 SCS 管理 HttpOnly 会话 Cookie。Cookie 名称包含实例名称，写入请求执行来源检查。开发账号经显式初始化流程创建，重复初始化保留已有密码。
+
+默认 JSON 配置可独立运行静态 Gateway、健康检查和版本接口。完整管理环境通过 environment、instance、public_origin 和 CLOUDLET_DATABASE_URL 配置，缺少数据库或迁移版本不匹配时终止启动。账号接口需要已配置的管理数据库。
 
 ## 配置与生命周期
 
