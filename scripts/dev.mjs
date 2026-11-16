@@ -37,6 +37,9 @@ else if (action === 'status') {
   await connectDocker(config);
   await compose(config, ['ps', '--all']);
   console.log(await resourceStatus(config));
+  const databases = await compose(config, ['ps', '--status', 'running', '-q', 'postgres'], false);
+  if (databases) await admin(config, 'db-status');
+  else console.log('数据库已停止');
 }
 else if (action === 'logs') {
   const config = await loadConfig();
