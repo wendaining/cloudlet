@@ -66,6 +66,6 @@ CI 检查使用只读权限。Issue 自动化只修改 Issue 元数据。镜像�
 make repo-sync
 ```
 
-该命令使用当前 GitHub 身份同步标签、合并设置和默认分支保护，需要仓库管理权限。现有标签会更新，配置之外的标签保留。
+该命令使用当前 GitHub 身份同步标签和仓库合并设置，需要仓库管理权限。现有标签会更新，配置之外的标签保留。
 
-默认分支禁止删除与强制推送，合并需要 CI 和一次其他成员的审查。规则适用于仓库管理员。
+默认分支的 Pull Request、审查、CI、分支保护和允许的合并方式统一在 [Repository Rules](https://github.com/wendaining/cloudlet/rules) 中维护。当前仅允许 merge commit，`make repo-sync` 不修改规则集。
