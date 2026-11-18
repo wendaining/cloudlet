@@ -64,36 +64,7 @@ if (command === 'sync') {
     allow_rebase_merge: false,
     delete_branch_on_merge: true,
   });
-  const ruleset = {
-    name: settings.rulesetName,
-    target: 'branch',
-    enforcement: 'active',
-    bypass_actors: [],
-    conditions: { ref_name: { include: ['~DEFAULT_BRANCH'], exclude: [] } },
-    rules: [
-      { type: 'deletion' },
-      { type: 'non_fast_forward' },
-      { type: 'pull_request', parameters: {
-        required_approving_review_count: 1,
-        dismiss_stale_reviews_on_push: false,
-        require_code_owner_review: false,
-        require_last_push_approval: false,
-        required_review_thread_resolution: false,
-        allowed_merge_methods: ['merge'],
-      } },
-      { type: 'required_status_checks', parameters: {
-        strict_required_status_checks_policy: false,
-        do_not_enforce_on_create: true,
-        required_status_checks: settings.requiredChecks.map(context => ({ context })),
-      } },
-    ],
-  };
-  const existingRules = await github.paginate('GET /repos/{owner}/{repo}/rulesets', { ...target, per_page: 100 });
-  const previous = existingRules.find(item => item.name === settings.rulesetName);
-  await github.request(previous ? 'PUT /repos/{owner}/{repo}/rulesets/{ruleset_id}' : 'POST /repos/{owner}/{repo}/rulesets', {
-    ...target, ...(previous ? { ruleset_id: previous.id } : {}), ...ruleset,
-  });
-  console.log(`已同步 ${labels.length} 个标签、合并设置和默认分支规则`);
+  console.log(`已同步 ${labels.length} 个标签和仓库合并设置`);
 } else if (command === 'coordinate') {
   const event = JSON.parse(await readFile(process.env.GITHUB_EVENT_PATH, 'utf8'));
   const issueNumber = event.issue.number;

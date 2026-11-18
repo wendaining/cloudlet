@@ -1,6 +1,4 @@
 {
   "repository": "wendaining/cloudlet",
-  "defaultBranch": "master",
-  "requiredChecks": ["CI"],
-  "rulesetName": "Default branch review and checks"
+  "defaultBranch": "master"
 }
