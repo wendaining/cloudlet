@@ -59,12 +59,10 @@ if (command === 'sync') {
   await github.rest.repos.update({
     ...target,
     has_issues: true,
-    allow_squash_merge: true,
+    allow_squash_merge: false,
     allow_merge_commit: true,
-    allow_rebase_merge: true,
+    allow_rebase_merge: false,
     delete_branch_on_merge: true,
-    squash_merge_commit_title: 'PR_TITLE',
-    squash_merge_commit_message: 'PR_BODY',
   });
   const ruleset = {
     name: settings.rulesetName,
@@ -81,7 +79,7 @@ if (command === 'sync') {
         require_code_owner_review: false,
         require_last_push_approval: false,
         required_review_thread_resolution: false,
-        allowed_merge_methods: ['merge', 'squash', 'rebase'],
+        allowed_merge_methods: ['merge'],
       } },
       { type: 'required_status_checks', parameters: {
         strict_required_status_checks_policy: false,

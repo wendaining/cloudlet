@@ -40,6 +40,8 @@ PR 模板建议提供关联任务、最终更改、实际验证结果、风险�
 
 代码审查者检查行为、边界、测试证据和文档。至少一位其他协作者批准。
 
+仓库仅允许 merge commit，关闭 squash merge 与 rebase merge。
+
 CODEOWNERS 将默认审查责任交给 wendaining。由 wendaining 提交的更改向其他协作者请求审查。仓库规则接受其他有权限成员的批准。
 
 ## 自动化
