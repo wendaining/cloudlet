@@ -33,3 +33,4 @@
 | 文档 | 内容 |
 | --- | --- |
 | [第 1 课需求调研与选题](course/lesson-01-requirements-research.md) | 项目定位、调研计划、现有依据与待验证内容 |
+| [第 2 课用户故事与验收标准](course/lesson-02-user-stories.md) | 三类角色、交付批次、24 条用户故事与 Given、When、Then 验收标准 |
