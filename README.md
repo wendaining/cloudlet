@@ -4,7 +4,7 @@ Cloudlet 是面向单机部署的 Serverless 平台，围绕 Workers、Durable O
 
 项目使用 Go 模块化单体架构，执行环境复用成熟运行时。开发通过 Issue、负责人、PR 审查和自动化验证组织。
 
-后端选用 Gin、GORM 和 PostgreSQL，管理界面选用 React、TypeScript、Vite 和 Ant Design。详细约定见 [技术栈](docs/technology-stack.md)。
+后端选用 Gin、GORM 和 PostgreSQL，管理界面选用 React、TypeScript、Vite 和 Ant Design。完整文档从 [文档索引](docs/README.md) 进入。
 
 ## 当前能力
 
@@ -47,17 +47,6 @@ make check
 ## 参与开发
 
 从 [CONTRIBUTING.md](CONTRIBUTING.md) 开始。Agent 执行任务前阅读 [AGENTS.md](AGENTS.md)。
-
-| 文档 | 内容 |
-| --- | --- |
-| [技术栈](docs/technology-stack.md) | 后端、前端、数据库、接口与测试工具 |
-| [开发环境](docs/development.md) | 本机依赖、数据库连接与服务器部署 |
-| [实施清单](docs/development-deployment-checklist.md) | 本地开发与部署的命令、任务和验收条件 |
-| [架构](docs/architecture.md) | 模块职责、接口与运行边界 |
-| [协作流程](docs/workflow.md) | Issue、标签、负责人、提交与 PR |
-| [Agent 工作流程](docs/agents.md) | 任务交接、执行证据与人工审查 |
-| [开发任务](docs/roadmap.md) | 核心模块的验收目标 |
-| [交付与发布](docs/releases.md) | CI、镜像、版本发布及使用方式 |
 
 ## 许可证
 
