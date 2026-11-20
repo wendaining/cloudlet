@@ -1,6 +1,6 @@
 # Cloudlet
 
-Cloudlet 是一台服务器就能运行的 **Agentic Serverless 平台**。项目的核心目标是让 AI Agent 通过 MCP 使用与管理控制台相同的 API，自主完成部署与验证。
+Cloudlet 是一台服务器就能运行的 **Agentic Serverless 平台**。项目的核心目标是让 AI Agent 使用与管理控制台相同的 API，自主完成部署与验证。
 
 平台计划统一管理 Workers、Durable Objects、Containers 和 Browser Run。Agent 可以在同一工作流程中发布 Worker、按需启动容器，再用独立浏览器访问部署地址并验证结果。
 
