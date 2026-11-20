@@ -1,6 +1,8 @@
 # Cloudlet
 
-Cloudlet 是面向单机部署的 Serverless 平台，围绕 Workers、Durable Objects、Containers 和 Browser Run 提供统一的管理 API 与 HTTP 入口。
+Cloudlet 是一台服务器就能运行的 **Agentic Serverless 平台**。项目的核心目标是让 AI Agent 通过 MCP 使用与管理控制台相同的 API，自主完成部署与验证。
+
+平台计划统一管理 Workers、Durable Objects、Containers 和 Browser Run。Agent 可以在同一工作流程中发布 Worker、按需启动容器，再用独立浏览器访问部署地址并验证结果。
 
 项目使用 Go 模块化单体架构，执行环境复用成熟运行时。开发通过 Issue、负责人、PR 审查和自动化验证组织。
 
