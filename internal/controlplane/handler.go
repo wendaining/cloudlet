@@ -9,10 +9,12 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/alexedwards/scs/postgresstore"
 	"github.com/alexedwards/scs/v2"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/wendaining/cloudlet/internal/apigen"
 	"github.com/wendaining/cloudlet/internal/config"
 	"github.com/wendaining/cloudlet/internal/database"
@@ -125,6 +127,75 @@ func (h *handler) GetEnvironment(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, apigen.Environment{Instance: h.config.Instance, DatabaseVersion: migrations.Version})
+}
+
+func (h *handler) CreateProject(c *gin.Context) {
+	user, ok := h.currentUser(c)
+	if !ok {
+		return
+	}
+	var body apigen.CreateProjectRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(c.Writer, c.Request.Body, 4096))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil {
+		c.JSON(http.StatusBadRequest, apigen.Error{Message: "项目请求格式无效"})
+		return
+	}
+	var trailing any
+	name := strings.TrimSpace(body.Name)
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) || name == "" || utf8.RuneCountInString(name) > 100 || strings.ContainsRune(name, '\x00') {
+		c.JSON(http.StatusBadRequest, apigen.Error{Message: "项目名称需要 1 至 100 个非空字符"})
+		return
+	}
+	project, err := h.store.CreateProject(c.Request.Context(), user.ID, name)
+	if err != nil {
+		h.failure(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, projectResponse(project))
+}
+
+func (h *handler) ListProjects(c *gin.Context) {
+	user, ok := h.currentUser(c)
+	if !ok {
+		return
+	}
+	projects, err := h.store.Projects(c.Request.Context(), user.ID)
+	if err != nil {
+		h.failure(c, err)
+		return
+	}
+	response := make([]apigen.Project, 0, len(projects))
+	for _, project := range projects {
+		response = append(response, projectResponse(project))
+	}
+	c.JSON(http.StatusOK, response)
+}
+
+func (h *handler) GetProject(c *gin.Context, projectID string) {
+	user, ok := h.currentUser(c)
+	if !ok {
+		return
+	}
+	parsedID, err := uuid.Parse(projectID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, apigen.Error{Message: "项目不存在或没有访问权限"})
+		return
+	}
+	project, err := h.store.Project(c.Request.Context(), user.ID, parsedID.String())
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		c.JSON(http.StatusNotFound, apigen.Error{Message: "项目不存在或没有访问权限"})
+		return
+	}
+	if err != nil {
+		h.failure(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, projectResponse(project))
+}
+
+func projectResponse(project database.Project) apigen.Project {
+	return apigen.Project{Id: uuid.MustParse(project.ID), Name: project.Name}
 }
 
 func (h *handler) currentUser(c *gin.Context) (database.User, bool) {
