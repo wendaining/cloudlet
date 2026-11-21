@@ -1,6 +1,6 @@
 # 执行环境设计
 
-本文规定 Workers、Durable Objects、Containers 和 Browser Run 的目标执行规则。资源、部署与操作模型见 [平台设计](platform-design.md)。当前执行模块处于接口与实现任务阶段，能力通过真实运行时验证后才标记可用。
+本文规定 Workers、Durable Objects、Containers 和 Browser Run 的目标执行规则。资源、部署与操作模型见 [平台设计](platform-design.md)。目前已验证无状态 Worker 的基础运行配置。
 
 ## 执行单元与控制边界
 
@@ -19,6 +19,10 @@ workerd、用户容器和浏览器由 Docker Engine 持有，与 Go 管理进程
 内部控制端点验证执行单元身份和允许的操作。凭据保存在独立私有配置中，控制器按需读取。用户代码、浏览器页面与用户容器只取得获授权的资源能力。
 
 ## Worker 版本与运行时
+
+`workers.Prepare` 读取已打包的单个 UTF-8 JavaScript ES Module。入口使用包目录内的相对 `.js` 或 `.mjs` 路径，路径字符支持 ASCII 字母、数字、句点、下划线、连字符和斜杠。兼容日期使用 `YYYY-MM-DD` 格式，支持 2000-01-01 至 2026-10-19，并以 UTC 当天为上限。
+
+调用方将返回的 `Config` 与 `Module` 分别放到容器内的 `ConfigPath` 和 `ModulePath`，使用 `RuntimeImage` 和 `ServeArgs()` 启动。配置提供一个 HTTP 监听，端口为 `HTTPPort`。`ghcr.io/ryanhecht/workerd` 镜像封装 Cloudflare 发布的 workerd 二进制文件，使用版本和多架构镜像摘要固定来源。实际命令及验证结果见 [workerd 集成验证](testing.md#workerd-集成验证)。
 
 部署清单固定运行时版本及摘要、ES Module 入口、模块内容、compatibility date、flags 和绑定。TypeScript 经 tsc 检查并通过 esbuild 生成部署包，运行时执行已验证产物。
 

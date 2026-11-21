@@ -8,7 +8,7 @@
 | npm run lint:config | JSON、YAML、Issue 表单与 Actions 约定 |
 | npm run lint:tooling | 脚本语法、ShellCheck、配置文件与真实端口检查 |
 | make test | Go race 测试、真实 HTTP、Gateway 转发与服务停止 |
-| make test-integration | Testcontainers PostgreSQL、迁移、账号、持久化会话与就绪检查 |
+| make test-integration | Docker 中的 PostgreSQL 迁移、账号、会话、就绪检查和 workerd 执行 |
 | make web-check | TypeScript、ESLint、Prettier、Vite 构建与接口生成一致性 |
 | make dev-check | 真实本机进程、数据库、热重载、完整停止、多实例与失败清理 |
 | make test-e2e | 真实 Chromium 在桌面和手机尺寸下完成登录、刷新和退出 |
@@ -29,6 +29,18 @@ make generate 从 api/openapi.yaml 同时生成 Go 类型、Gin 接口、客户�
 页面测试使用独立环境，验证错误密码、登录成功、刷新后的会话、退出和页面宽度。截图与失败记录位于 .local/playwright，环境日志与配置位于 .local/checks 和各测试实例目录。
 
 测试结束后清理所属容器、网络与数据卷。镜像缓存继续复用。文档检查独立于代码、数据库和浏览器流程。
+
+## workerd 集成验证
+
+使用当前 Docker 连接单独验证 Worker 运行配置。
+
+```sh
+export DOCKER_HOST="$(docker context inspect --format '{{.Endpoints.docker.Host}}')"
+export TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock
+go test -race -count=1 -tags=integration -v ./internal/workers
+```
+
+在 Docker Engine 29.5.2 的 `linux/arm64` 环境中，workerd `1.20261012.1` 执行 `POST /echo`，返回 HTTP 200、`X-Worker: workerd` 和响应正文 `POST /echo cloudlet`。无效兼容日期 `2099-01-01` 使进程以状态码 1 退出，并报告运行时支持的最晚日期 `2026-10-19`。入口用例验证了缺失文件、目录和越界路径的诊断。镜像内的 `linux/arm64` 二进制文件与 Cloudflare 发布文件解压后的 SHA256 一致。
 
 ## 执行模块的业务验收
 
