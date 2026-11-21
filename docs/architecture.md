@@ -36,13 +36,13 @@ Cloudlet 在一台 Linux 服务器上管理计算资源。本地开发在成员�
 | internal/gateway | 按域名选择上游并转发 HTTP 请求 |
 | internal/server | 监听端口与服务生命周期 |
 | internal/version | 构建版本和提交标识 |
-| internal/workers | workerd 进程、代码版本和部署配置 |
+| internal/workers | 无状态 ES Module 的 workerd 配置、启动参数和镜像引用 |
 | internal/durableobjects | 对象命名空间、绑定和持久化配置 |
 | internal/containers | Docker Engine 资源与容器生命周期 |
 | internal/browser | 复用容器管理的 Playwright 会话 |
 | pkg/client | CLI 与其他客户端共享的 API 客户端 |
 
-PostgreSQL 当前保存账号与登录会话。执行模块当前提供包边界，资源元数据和生命周期的开发目标见 [开发任务](roadmap.md)。Durable Objects 的存储能力随 workerd 集成验证。
+PostgreSQL 当前保存账号与登录会话。Workers 模块已提供独立的运行配置，资源元数据和生命周期的开发目标见 [开发任务](roadmap.md)。Durable Objects 的存储能力随 workerd 集成验证。
 
 ## 当前接口
 

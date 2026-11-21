@@ -1,2 +1,2 @@
-// Package workers 为 workerd 进程、代码版本和部署配置提供集成边界。
+// Package workers 生成无状态 Worker 的 workerd 运行配置。
 package workers
