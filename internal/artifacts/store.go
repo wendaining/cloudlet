@@ -53,10 +53,17 @@ func (s *Store) Put(input io.Reader) (digest string, err error) {
 	if err != nil {
 		return "", fmt.Errorf("create temporary artifact in %q: %w", s.root.Name(), err)
 	}
+	removed := false
+	removeTemporary := func() error {
+		if err := s.root.Remove(name); err != nil {
+			return fmt.Errorf("remove temporary artifact %q: %w", name, err)
+		}
+		removed = true
+		return nil
+	}
 	defer func() {
-		if removeErr := s.root.Remove(name); removeErr != nil {
-			digest = ""
-			err = errors.Join(err, fmt.Errorf("remove temporary artifact %q: %w", name, removeErr))
+		if !removed {
+			err = errors.Join(err, removeTemporary())
 		}
 	}()
 
@@ -74,8 +81,10 @@ func (s *Store) Put(input io.Reader) (digest string, err error) {
 			return "", fmt.Errorf("reuse artifact %s: %w", digest, err)
 		}
 	}
-	// Duplicate writers also sync the directory because the winner might
-	// have published the link without completing its own sync yet.
+	if err := removeTemporary(); err != nil {
+		return "", err
+	}
+	// Sync both the published link and the removal of the temporary entry.
 	if err := s.syncDirectory(); err != nil {
 		return "", fmt.Errorf("persist published artifact %s: %w", digest, err)
 	}
