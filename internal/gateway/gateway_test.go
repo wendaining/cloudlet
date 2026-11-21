@@ -203,6 +203,10 @@ func TestGatewayReplacesDynamicRoutesWhileStreaming(t *testing.T) {
 		assertRoute(dynamicHost, http.StatusOK, "B")
 		assertRoute(staticHost, http.StatusOK, "B")
 	}
+	if err := handler.ReplaceRoutes([]config.Route{{Host: dynamicHost, Target: "http://127.0.0.1:65536"}}); err == nil {
+		t.Error("replacement with an out-of-range upstream port was accepted")
+	}
+	assertRoute(dynamicHost, http.StatusOK, "B")
 	if err := handler.ReplaceRoutes(nil); err != nil {
 		t.Fatal(err)
 	}

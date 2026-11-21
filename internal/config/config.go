@@ -92,6 +92,15 @@ func ValidateRoutes(routes []Route) error {
 		if err != nil || target.Hostname() == "" || (target.Scheme != "http" && target.Scheme != "https") || target.User != nil || target.RawQuery != "" || target.Fragment != "" {
 			return fmt.Errorf("invalid HTTP route target: %q", route.Target)
 		}
+		if port := target.Port(); port != "" || strings.HasSuffix(target.Host, ":") {
+			number, err := strconv.ParseUint(port, 10, 16)
+			if err != nil {
+				return fmt.Errorf("invalid HTTP route target port in %q: %w", route.Target, err)
+			}
+			if number == 0 {
+				return fmt.Errorf("invalid HTTP route target port in %q: port must be between 1 and 65535", route.Target)
+			}
+		}
 	}
 	return nil
 }
