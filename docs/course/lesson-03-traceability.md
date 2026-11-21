@@ -1,6 +1,8 @@
 # 第 3 课需求追溯矩阵 v0
 
-需求 ID 来自[需求规约](lesson-03-srs.md)，用例编号延续[用户故事](lesson-02-user-stories.md)的原编号。UC-18 至 UC-22 是质量验证场景。F1 至 F6 对应[第 1 课调研报告](lesson-01-requirements-research.md#五调研发现)中的依据和待验证假设。验收标准见各 Issue。
+追溯链的结构为：调研证据（F1 至 F6）到用户故事（Issue #31 至 #54）到验收标准（Given/When/Then）到测试用例（后续补充）。本矩阵记录需求 ID、用例编号和调研依据的对应关系，验收标准在各 Issue 中维护。
+
+需求 ID 来自[需求规约](lesson-03-srs.md)，用例编号延续[用户故事](lesson-02-user-stories.md)的原编号。UC-18 至 UC-22 是质量验证场景。F1 至 F6 对应[第 1 课调研报告](lesson-01-requirements-research.md#五调研发现)中的依据和待验证假设。
 
 | 需求 ID | 用例编号 | 用户故事 | 调研依据 |
 | --- | --- | --- | --- |
