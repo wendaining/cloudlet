@@ -34,3 +34,6 @@
 | --- | --- |
 | [第 1 课需求调研与选题](course/lesson-01-requirements-research.md) | 项目定位、调研计划、现有依据与待验证内容 |
 | [第 2 课用户故事与验收标准](course/lesson-02-user-stories.md) | 三类角色、交付批次、24 条用户故事与 Given、When、Then 验收标准 |
+| [第 3 课需求规约](course/lesson-03-srs.md) | 功能、非功能需求、用例图和核心场景 |
+| [第 3 课需求追溯矩阵 v0](course/lesson-03-traceability.md) | 需求 ID、用例、Issue 和调研依据 |
+| [第 3 课课堂讲解提纲](course/lesson-03-presentation.md) | 8 分钟讲解安排和评审问题 |
