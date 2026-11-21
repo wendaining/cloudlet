@@ -8,6 +8,7 @@
 | npm run lint:config | JSON、YAML、Issue 表单与 Actions 约定 |
 | npm run lint:tooling | 脚本语法、ShellCheck、配置文件与真实端口检查 |
 | make test | Go race 测试、真实 HTTP、Gateway 转发与服务停止 |
+| go test -race -count=1 ./internal/artifacts | 在真实临时目录验证产物读写、并发发布、失败清理和路径边界 |
 | make test-integration | Testcontainers PostgreSQL、迁移、账号、持久化会话与就绪检查 |
 | make web-check | TypeScript、ESLint、Prettier、Vite 构建与接口生成一致性 |
 | make dev-check | 真实本机进程、数据库、热重载、完整停止、多实例与失败清理 |
