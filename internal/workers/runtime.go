@@ -19,8 +19,10 @@ const (
 	ModulePath = "/worker/worker.mjs"
 	HTTPPort   = 8080
 
-	maxCompatibilityDate = "2026-10-19"
+	maxCompatibilityDateText = "2026-10-19"
 )
+
+var maxCompatibilityDate = time.Date(2026, time.October, 19, 0, 0, 0, 0, time.UTC)
 
 var entryPathPattern = regexp.MustCompile(`^[a-zA-Z0-9._/-]+$`)
 
@@ -47,10 +49,10 @@ func Prepare(bundleDir, entry, compatibilityDate string) (RuntimeConfig, error) 
 	if err != nil {
 		return RuntimeConfig{}, fmt.Errorf("compatibility date %q must be a calendar date in YYYY-MM-DD format: %w", compatibilityDate, err)
 	}
-	if date.Year() < 2000 || compatibilityDate > maxCompatibilityDate {
-		return RuntimeConfig{}, fmt.Errorf("compatibility date %q is outside the range 2000-01-01 through %s for workerd %s", compatibilityDate, maxCompatibilityDate, RuntimeVersion)
+	if date.Year() < 2000 || date.After(maxCompatibilityDate) {
+		return RuntimeConfig{}, fmt.Errorf("compatibility date %q is outside the range 2000-01-01 through %s for workerd %s", compatibilityDate, maxCompatibilityDateText, RuntimeVersion)
 	}
-	if compatibilityDate > time.Now().UTC().Format(time.DateOnly) {
+	if date.After(time.Now().UTC()) {
 		return RuntimeConfig{}, fmt.Errorf("compatibility date %q is in the future (UTC)", compatibilityDate)
 	}
 
