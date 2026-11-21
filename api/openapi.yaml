@@ -69,6 +69,63 @@ paths:
                 $ref: '#/components/schemas/Environment'
         '401':
           $ref: '#/components/responses/Error'
+  /api/v1/projects:
+    post:
+      operationId: createProject
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProjectRequest'
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '201':
+          $ref: '#/components/responses/Project'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+    get:
+      operationId: listProjects
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 当前用户可见的项目
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Project'
+        '401':
+          $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}:
+    parameters:
+      - name: projectID
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: getProject
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          $ref: '#/components/responses/Project'
+        '401':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
 components:
   securitySchemes:
     SessionCookie:
@@ -114,6 +171,25 @@ components:
         database_version:
           type: integer
           format: int64
+    CreateProjectRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 100
+          description: 去除首尾空白后的项目名称。
+    Project:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
     Error:
       type: object
       required: [message]
@@ -121,6 +197,12 @@ components:
         message:
           type: string
   responses:
+    Project:
+      description: 项目身份
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Project'
     User:
       description: 当前账号
       content:

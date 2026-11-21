@@ -144,3 +144,62 @@ func (s *Store) User(ctx context.Context, id string) (User, error) {
 	err := s.DB.WithContext(ctx).Where("id = ?", id).First(&user).Error
 	return user, err
 }
+
+type Project struct {
+	ID        string    `json:"id"`
+	Name      string    `json:"name"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+type ProjectMember struct {
+	ProjectID string `json:"project_id"`
+	UserID    string `json:"user_id"`
+	Role      string `json:"role"`
+	CreatedAt time.Time
+}
+
+func (s *Store) CreateProject(ctx context.Context, ownerID, name string) (Project, error) {
+	project := Project{ID: uuid.NewString(), Name: name}
+	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&project).Error; err != nil {
+			return fmt.Errorf("创建项目 %s: %w", project.ID, err)
+		}
+		member := ProjectMember{ProjectID: project.ID, UserID: ownerID, Role: "owner"}
+		if err := tx.Create(&member).Error; err != nil {
+			return fmt.Errorf("创建项目 %s 的所有者关系: %w", project.ID, err)
+		}
+		return nil
+	})
+	if err != nil {
+		return Project{}, err
+	}
+	return project, nil
+}
+
+func (s *Store) Projects(ctx context.Context, userID string) ([]Project, error) {
+	var projects []Project
+	err := s.DB.WithContext(ctx).
+		Select("projects.*").
+		Joins("JOIN project_members ON project_members.project_id = projects.id").
+		Where("project_members.user_id = ?", userID).
+		Order("projects.created_at, projects.id").
+		Find(&projects).Error
+	return projects, err
+}
+
+func (s *Store) Project(ctx context.Context, userID, projectID string) (Project, error) {
+	var project Project
+	err := s.DB.WithContext(ctx).
+		Select("projects.*").
+		Joins("JOIN project_members ON project_members.project_id = projects.id").
+		Where("projects.id = ? AND project_members.user_id = ?", projectID, userID).
+		First(&project).Error
+	return project, err
+}
+
+func (s *Store) ProjectMember(ctx context.Context, projectID, userID string) (ProjectMember, error) {
+	var member ProjectMember
+	err := s.DB.WithContext(ctx).Where("project_id = ? AND user_id = ?", projectID, userID).First(&member).Error
+	return member, err
+}
