@@ -20,7 +20,7 @@ import (
 
 // CreateProjectRequest defines model for CreateProjectRequest.
 type CreateProjectRequest struct {
-	// Name 去除首尾空白后的项目名称。
+	// Name 服务端去除首尾空白后必须包含 1 至 100 个 Unicode 字符；原始字符串可以包含首尾空白。
 	Name string `json:"name"`
 }
 

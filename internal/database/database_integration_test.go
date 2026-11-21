@@ -147,7 +147,7 @@ func TestPostgresMigrationAccountsSessionsAndProjects(t *testing.T) {
 		t.Fatal(err)
 	}
 	request("POST", api.URL+"/api/v1/projects", string(longName), http.StatusBadRequest)
-	boundaryName, err := json.Marshal(map[string]string{"name": strings.Repeat("项", 100)})
+	boundaryName, err := json.Marshal(map[string]string{"name": "  " + strings.Repeat("项", 100) + "  "})
 	if err != nil {
 		t.Fatal(err)
 	}

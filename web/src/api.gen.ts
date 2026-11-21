@@ -140,7 +140,7 @@ export interface components {
             database_version: number;
         };
         CreateProjectRequest: {
-            /** @description 去除首尾空白后的项目名称。 */
+            /** @description 服务端去除首尾空白后必须包含 1 至 100 个 Unicode 字符；原始字符串可以包含首尾空白。 */
             name: string;
         };
         Project: {
