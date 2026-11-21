@@ -60,6 +60,8 @@ PostgreSQL 当前保存账号与登录会话。执行模块当前提供包边界
 
 Gateway 使用配置中的 host 匹配请求域名，匹配时忽略大小写、末尾句点和请求端口。target 支持 HTTP 与 HTTPS。请求路径、查询参数和响应经 Go ReverseProxy 转发。未知域名返回 404，上游连接失败返回 502。
 
+内部调用方可以通过 Gateway 的 Go 接口 `ReplaceRoutes` 整体替换动态路由。启动配置中的路由始终保留，并占用对应域名。新路由通过校验后才整体生效。每个请求使用开始转发时选定的上游，在途响应继续传输。
+
 管理环境通过 PostgreSQL 保存账号与会话，使用 bcrypt 校验密码，使用 SCS 管理 HttpOnly 会话 Cookie。Cookie 名称包含实例名称，写入请求执行来源检查。开发账号经显式初始化流程创建，重复初始化保留已有密码。
 
 默认 JSON 配置可独立运行静态 Gateway、健康检查和版本接口。完整管理环境通过 environment、instance、public_origin 和 CLOUDLET_DATABASE_URL 配置，缺少数据库或迁移版本不匹配时终止启动。账号接口需要已配置的管理数据库。
