@@ -84,7 +84,7 @@ test('真实本机环境支持热重载、完整停止、多实例和失败清�
   assert.equal((await other.result).code, 0);
 
   await compose(first, ['up', '-d', '--wait', '--wait-timeout', '90', '--quiet-pull']);
-  await compose(first, ['exec', '-T', 'postgres', 'psql', '-U', first.env.CLOUDLET_POSTGRES_USER, '-d', first.env.CLOUDLET_POSTGRES_DB, '-v', 'ON_ERROR_STOP=1', '-c', 'INSERT INTO goose_db_version (version_id, is_applied) VALUES (2, TRUE)']);
+  await compose(first, ['exec', '-T', 'postgres', 'psql', '-U', first.env.CLOUDLET_POSTGRES_USER, '-d', first.env.CLOUDLET_POSTGRES_DB, '-v', 'ON_ERROR_STOP=1', '-c', 'INSERT INTO goose_db_version (version_id, is_applied) VALUES (3, TRUE)']);
   await compose(first, ['stop', '--timeout', '10']);
   assert.equal(await processResult(first, 'start'), 1);
   await assertPortsFree(first.ports);
