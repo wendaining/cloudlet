@@ -274,6 +274,20 @@ func projectLifecycle(t *testing.T, api *httptest.Server, ownerClient *http.Clie
 	if fetched != project {
 		t.Fatalf("读取项目返回错误: %+v", fetched)
 	}
+	response = request(ownerClient, "GET", base+"/projects/urn:uuid:"+project.Id.String(), "", http.StatusOK)
+	if err := json.NewDecoder(response.Body).Decode(&fetched); err != nil {
+		t.Fatal(err)
+	}
+	if fetched != project {
+		t.Fatalf("UUID URN 读取项目返回错误: %+v", fetched)
+	}
+	response = request(ownerClient, "GET", base+"/projects/"+strings.ReplaceAll(project.Id.String(), "-", ""), "", http.StatusOK)
+	if err := json.NewDecoder(response.Body).Decode(&fetched); err != nil {
+		t.Fatal(err)
+	}
+	if fetched != project {
+		t.Fatalf("无连字符 UUID 读取项目返回错误: %+v", fetched)
+	}
 	response = request(otherClient, "GET", base+"/projects", "", http.StatusOK)
 	if err := json.NewDecoder(response.Body).Decode(&projects); err != nil {
 		t.Fatal(err)
@@ -282,6 +296,7 @@ func projectLifecycle(t *testing.T, api *httptest.Server, ownerClient *http.Clie
 		t.Fatalf("其他用户读取到项目列表: %+v", projects)
 	}
 	request(otherClient, "GET", base+"/projects/"+project.Id.String(), "", http.StatusNotFound)
+	request(otherClient, "GET", base+"/projects/urn:uuid:"+project.Id.String(), "", http.StatusNotFound)
 	request(otherClient, "GET", base+"/projects/not-a-project", "", http.StatusNotFound)
 	if ownerID == otherUserID {
 		t.Fatal("测试账号必须不同")

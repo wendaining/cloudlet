@@ -177,11 +177,12 @@ func (h *handler) GetProject(c *gin.Context, projectID string) {
 	if !ok {
 		return
 	}
-	if _, err := uuid.Parse(projectID); err != nil {
+	parsedID, err := uuid.Parse(projectID)
+	if err != nil {
 		c.JSON(http.StatusNotFound, apigen.Error{Message: "项目不存在或没有访问权限"})
 		return
 	}
-	project, err := h.store.Project(c.Request.Context(), user.ID, projectID)
+	project, err := h.store.Project(c.Request.Context(), user.ID, parsedID.String())
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		c.JSON(http.StatusNotFound, apigen.Error{Message: "项目不存在或没有访问权限"})
 		return
