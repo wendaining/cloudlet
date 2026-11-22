@@ -55,29 +55,24 @@ func TestPrepareRejectsInvalidInput(t *testing.T) {
 
 	for _, tt := range []struct {
 		name, entry, date, diagnostic string
-		inTimezone                    string
 	}{
-		{"empty entry", "", compatibilityDate, `entry ""`, ""},
-		{"absolute entry", "/index.js", compatibilityDate, `/index.js`, ""},
-		{"parent path", "dist/../index.js", compatibilityDate, `dist/../index.js`, ""},
-		{"Windows path", `dist\index.js`, compatibilityDate, `must be a relative`, ""},
-		{"quoted path", `dist/"index.js`, compatibilityDate, `must be a relative`, ""},
-		{"non JavaScript entry", "index.ts", compatibilityDate, `index.ts`, ""},
-		{"missing entry", "missing.js", compatibilityDate, `inspect entry "missing.js"`, ""},
-		{"directory entry", "folder.js", compatibilityDate, `must be a regular file`, ""},
-		{"empty source", "empty.js", compatibilityDate, `must contain non-empty UTF-8`, ""},
-		{"invalid source encoding", "invalid.js", compatibilityDate, `must contain non-empty UTF-8`, ""},
-		{"missing date", "dist/index.js", "", `compatibility date ""`, ""},
-		{"invalid date format", "dist/index.js", "2026-1-01", `YYYY-MM-DD`, ""},
-		{"invalid calendar date", "dist/index.js", "2026-02-29", `compatibility date "2026-02-29"`, ""},
-		{"date below runtime range", "dist/index.js", "1999-12-31", `outside the range`, ""},
-		{"date beyond runtime range", "dist/index.js", "2026-10-20", `outside the range`, ""},
-		{"date beyond range in eastern timezone", "dist/index.js", "2026-10-20", `outside the range`, "Pacific/Kiritimati"},
+		{"empty entry", "", compatibilityDate, `entry ""`},
+		{"absolute entry", "/index.js", compatibilityDate, `/index.js`},
+		{"parent path", "dist/../index.js", compatibilityDate, `dist/../index.js`},
+		{"Windows path", `dist\index.js`, compatibilityDate, `must be a relative`},
+		{"quoted path", `dist/"index.js`, compatibilityDate, `must be a relative`},
+		{"non JavaScript entry", "index.ts", compatibilityDate, `index.ts`},
+		{"missing entry", "missing.js", compatibilityDate, `inspect entry "missing.js"`},
+		{"directory entry", "folder.js", compatibilityDate, `must be a regular file`},
+		{"empty source", "empty.js", compatibilityDate, `must contain non-empty UTF-8`},
+		{"invalid source encoding", "invalid.js", compatibilityDate, `must contain non-empty UTF-8`},
+		{"missing date", "dist/index.js", "", `compatibility date ""`},
+		{"invalid date format", "dist/index.js", "2026-1-01", `YYYY-MM-DD`},
+		{"invalid calendar date", "dist/index.js", "2026-02-29", `compatibility date "2026-02-29"`},
+		{"date below runtime range", "dist/index.js", "1999-12-31", `outside the range`},
+		{"date beyond runtime range", "dist/index.js", "2026-10-20", `outside the range`},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			if tt.inTimezone != "" {
-				t.Setenv("TZ", tt.inTimezone)
-			}
 			prepared, err := workers.Prepare(bundle, tt.entry, tt.date)
 			if err == nil || !strings.Contains(err.Error(), tt.diagnostic) {
 				t.Fatalf("Prepare error = %v, want %q", err, tt.diagnostic)

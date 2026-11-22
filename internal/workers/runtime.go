@@ -18,8 +18,6 @@ const (
 	ConfigPath = "/worker/config.capnp"
 	ModulePath = "/worker/worker.mjs"
 	HTTPPort   = 8080
-
-	maxCompatibilityDateText = "2026-10-19"
 )
 
 var maxCompatibilityDate = time.Date(2026, time.October, 19, 0, 0, 0, 0, time.UTC)
@@ -45,15 +43,8 @@ func Prepare(bundleDir, entry, compatibilityDate string) (RuntimeConfig, error) 
 	if !fs.ValidPath(entry) || !entryPathPattern.MatchString(entry) || (ext != ".js" && ext != ".mjs") {
 		return RuntimeConfig{}, fmt.Errorf("entry %q must be a relative .js or .mjs path with supported characters", entry)
 	}
-	date, err := time.Parse(time.DateOnly, compatibilityDate)
-	if err != nil {
-		return RuntimeConfig{}, fmt.Errorf("compatibility date %q must be a calendar date in YYYY-MM-DD format: %w", compatibilityDate, err)
-	}
-	if date.Year() < 2000 || date.After(maxCompatibilityDate) {
-		return RuntimeConfig{}, fmt.Errorf("compatibility date %q is outside the range 2000-01-01 through %s for workerd %s", compatibilityDate, maxCompatibilityDateText, RuntimeVersion)
-	}
-	if date.After(time.Now().UTC()) {
-		return RuntimeConfig{}, fmt.Errorf("compatibility date %q is in the future (UTC)", compatibilityDate)
+	if err := validateCompatibilityDate(compatibilityDate, time.Now()); err != nil {
+		return RuntimeConfig{}, err
 	}
 
 	root, err := os.OpenRoot(bundleDir)
@@ -80,6 +71,20 @@ func Prepare(bundleDir, entry, compatibilityDate string) (RuntimeConfig, error) 
 		Config: fmt.Appendf(nil, configTemplate, HTTPPort, entry, path.Base(ModulePath), compatibilityDate),
 		Module: module,
 	}, nil
+}
+
+func validateCompatibilityDate(compatibilityDate string, now time.Time) error {
+	date, err := time.Parse(time.DateOnly, compatibilityDate)
+	if err != nil {
+		return fmt.Errorf("compatibility date %q must be a calendar date in YYYY-MM-DD format: %w", compatibilityDate, err)
+	}
+	if date.Year() < 2000 || date.After(maxCompatibilityDate) {
+		return fmt.Errorf("compatibility date %q is outside the range 2000-01-01 through %s for workerd %s", compatibilityDate, maxCompatibilityDate.Format(time.DateOnly), RuntimeVersion)
+	}
+	if date.After(now) {
+		return fmt.Errorf("compatibility date %q is in the future (UTC)", compatibilityDate)
+	}
+	return nil
 }
 
 const configTemplate = `using Workerd = import "/workerd/workerd.capnp";
