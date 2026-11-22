@@ -64,6 +64,9 @@ func Extract(store *artifacts.Store, digest, parent string, limits Limits) (dire
 	if err := unpack(staging, archive.File); err != nil {
 		return "", fmt.Errorf("expand site archive %s: %w", digest, err)
 	}
+	if err := syncDirectory(parent); err != nil {
+		return "", fmt.Errorf("persist site directory under %q: %w", parent, err)
+	}
 	return staging, nil
 }
 
@@ -134,7 +137,7 @@ func unpack(staging string, files []*zip.File) (err error) {
 			return err
 		}
 	}
-	return nil
+	return syncTree(root)
 }
 
 func extractEntry(root *os.Root, file *zip.File) (err error) {
@@ -169,6 +172,45 @@ func extractEntry(root *os.Root, file *zip.File) (err error) {
 	// archive/zip verifies the declared size and checksum while reading.
 	if _, err := io.Copy(output, input); err != nil {
 		return fmt.Errorf("extract ZIP entry %q: %w", name, err)
+	}
+	if err := output.Sync(); err != nil {
+		return fmt.Errorf("sync site file %q: %w", name, err)
+	}
+	return nil
+}
+
+func syncTree(root *os.Root) error {
+	return fs.WalkDir(root.FS(), ".", func(name string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return fmt.Errorf("walk site directory %q: %w", name, err)
+		}
+		if !entry.IsDir() {
+			return nil
+		}
+		directory, err := root.Open(name)
+		if err != nil {
+			return fmt.Errorf("open site directory %q: %w", name, err)
+		}
+		return closeAfterSync(directory, name)
+	})
+}
+
+func syncDirectory(name string) error {
+	directory, err := os.Open(name)
+	if err != nil {
+		return fmt.Errorf("open directory %q: %w", name, err)
+	}
+	return closeAfterSync(directory, name)
+}
+
+func closeAfterSync(directory *os.File, name string) (err error) {
+	defer func() {
+		if closeErr := directory.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("close directory %q: %w", name, closeErr))
+		}
+	}()
+	if err := directory.Sync(); err != nil {
+		return fmt.Errorf("sync directory %q: %w", name, err)
 	}
 	return nil
 }
