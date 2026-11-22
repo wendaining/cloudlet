@@ -1,0 +1,112 @@
+// Package sitehttp serves files from a validated, read-only static site.
+package sitehttp
+
+import (
+	"bufio"
+	"errors"
+	"fmt"
+	"io"
+	"io/fs"
+	"mime"
+	"net/http"
+	"path"
+	"strconv"
+	"strings"
+)
+
+// New returns a handler for the provided site filesystem. The caller keeps
+// the filesystem readable for the lifetime of the handler.
+func New(site fs.FS) (http.Handler, error) {
+	if site == nil {
+		return nil, fmt.Errorf("configure static site handler: filesystem is required: %w", fs.ErrInvalid)
+	}
+	return handler{site: site}, nil
+}
+
+type handler struct {
+	site fs.FS
+}
+
+func (h handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		w.Header().Set("Allow", "GET, HEAD")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	name, ok := strings.CutPrefix(r.URL.Path, "/")
+	if !ok || strings.ContainsAny(name, "\x00\\:") {
+		http.NotFound(w, r)
+		return
+	}
+	directoryURL := strings.HasSuffix(r.URL.Path, "/")
+	name = strings.TrimSuffix(name, "/")
+	if r.URL.Path == "/" {
+		name = "."
+	} else if name == "." || !fs.ValidPath(name) {
+		http.NotFound(w, r)
+		return
+	}
+
+	info, err := fs.Stat(h.site, name)
+	if err != nil {
+		serveFileError(w, r, err)
+		return
+	}
+	if info.IsDir() {
+		name = path.Join(name, "index.html")
+		info, err = fs.Stat(h.site, name)
+		if err != nil {
+			serveFileError(w, r, err)
+			return
+		}
+		if info.Mode().IsRegular() && !directoryURL {
+			target := r.URL.EscapedPath() + "/"
+			if r.URL.RawQuery != "" {
+				target += "?" + r.URL.RawQuery
+			}
+			http.Redirect(w, r, target, http.StatusMovedPermanently)
+			return
+		}
+	} else if directoryURL {
+		http.NotFound(w, r)
+		return
+	}
+	if !info.Mode().IsRegular() {
+		http.NotFound(w, r)
+		return
+	}
+
+	file, err := h.site.Open(name)
+	if err != nil {
+		serveFileError(w, r, err)
+		return
+	}
+	defer file.Close()
+	body := bufio.NewReader(file)
+	contentType := mime.TypeByExtension(path.Ext(name))
+	if contentType == "" {
+		sample, err := body.Peek(512)
+		if err != nil && !errors.Is(err, io.EOF) {
+			serveFileError(w, r, err)
+			return
+		}
+		contentType = http.DetectContentType(sample)
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
+	if r.Method == http.MethodHead {
+		return
+	}
+	written, err := io.Copy(w, body)
+	if err != nil || written != info.Size() {
+		panic(http.ErrAbortHandler)
+	}
+}
+
+func serveFileError(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, fs.ErrNotExist) {
+		http.NotFound(w, r)
+		return
+	}
+	http.Error(w, "could not read site file", http.StatusInternalServerError)
+}
