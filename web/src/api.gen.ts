@@ -377,7 +377,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description 项目内最近操作 */
+            /** @description 项目内操作，按创建时间升序返回 */
             200: {
                 headers: {
                     [name: string]: unknown;
