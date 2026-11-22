@@ -204,6 +204,13 @@ func (h *handler) ListProjectOperations(c *gin.Context, projectID string) {
 		c.JSON(http.StatusNotFound, apigen.Error{Message: "项目不存在或没有访问权限"})
 		return
 	}
+	if _, err := h.store.Project(c.Request.Context(), user.ID, parsedID.String()); errors.Is(err, gorm.ErrRecordNotFound) {
+		c.JSON(http.StatusNotFound, apigen.Error{Message: "项目不存在或没有访问权限"})
+		return
+	} else if err != nil {
+		h.failure(c, err)
+		return
+	}
 	operations, err := h.store.ProjectOperations(c.Request.Context(), user.ID, parsedID.String())
 	if err != nil {
 		h.failure(c, err)

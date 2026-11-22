@@ -299,6 +299,16 @@ func projectLifecycle(t *testing.T, api *httptest.Server, ownerClient *http.Clie
 	if fetched != project {
 		t.Fatalf("无连字符 UUID 读取项目返回错误: %+v", fetched)
 	}
+	response = request(ownerClient, "GET", base+"/projects/"+project.Id.String()+"/operations", "", http.StatusOK)
+	var operations []apigen.Operation
+	if err := json.NewDecoder(response.Body).Decode(&operations); err != nil {
+		t.Fatal(err)
+	}
+	if len(operations) != 0 {
+		t.Fatalf("新项目应没有操作记录: %+v", operations)
+	}
+	request(otherClient, "GET", base+"/projects/"+project.Id.String()+"/operations", "", http.StatusNotFound)
+	request(ownerClient, "GET", base+"/projects/"+uuid.NewString()+"/operations", "", http.StatusNotFound)
 	response = request(otherClient, "GET", base+"/projects", "", http.StatusOK)
 	if err := json.NewDecoder(response.Body).Decode(&projects); err != nil {
 		t.Fatal(err)
