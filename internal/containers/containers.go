@@ -160,7 +160,12 @@ func isLetterOrDigit(char byte) bool {
 }
 
 func (o Ownership) containerName() string {
-	return fmt.Sprintf("cloudlet-%s-%s-%s-%d", o.Environment, o.Project, o.Resource, o.Generation)
+	// Length prefixes keep identifiers containing hyphens unambiguous.
+	return fmt.Sprintf("cloudlet-%d-%s-%d-%s-%d-%s-%d",
+		len(o.Environment), o.Environment,
+		len(o.Project), o.Project,
+		len(o.Resource), o.Resource,
+		o.Generation)
 }
 
 func (o Ownership) labels() map[string]string {

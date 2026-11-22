@@ -150,13 +150,27 @@ func TestSpecValidate(t *testing.T) {
 	}
 }
 
+func TestContainerNameDistinguishesOwnershipFields(t *testing.T) {
+	left := Ownership{Environment: "default", Project: "alpha-beta", Resource: "gamma", Generation: 1}
+	right := Ownership{Environment: "default", Project: "alpha", Resource: "beta-gamma", Generation: 1}
+	if left.containerName() == right.containerName() {
+		t.Fatalf("不同归属得到相同容器名称: %q", left.containerName())
+	}
+	if got, want := left.containerName(), "cloudlet-7-default-10-alpha-beta-5-gamma-1"; got != want {
+		t.Fatalf("containerName() = %q, want %q", got, want)
+	}
+	if got, want := right.containerName(), "cloudlet-7-default-5-alpha-10-beta-gamma-1"; got != want {
+		t.Fatalf("containerName() = %q, want %q", got, want)
+	}
+}
+
 func TestCreateOptions(t *testing.T) {
 	spec := validSpec()
 	options, err := spec.createOptions()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if options.Name != "cloudlet-default-project-1-resource-1-1" {
+	if options.Name != "cloudlet-7-default-9-project-1-10-resource-1-1" {
 		t.Fatalf("name = %q", options.Name)
 	}
 	if options.Config == nil || options.HostConfig == nil {
@@ -215,7 +229,7 @@ func TestCreateOptions(t *testing.T) {
 func TestObserve(t *testing.T) {
 	info := container.InspectResponse{
 		ID:   "0123456789abcdef",
-		Name: "/cloudlet-default-project-1-resource-1-1",
+		Name: "/cloudlet-7-default-9-project-1-10-resource-1-1",
 		Config: &container.Config{
 			Image:  "nginx:1.29.3-alpine",
 			Labels: validOwnership().labels(),
