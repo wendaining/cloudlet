@@ -8,7 +8,7 @@
 | npm run lint:config | JSON、YAML、Issue 表单与 Actions 约定 |
 | npm run lint:tooling | 脚本语法、ShellCheck、配置文件与真实端口检查 |
 | make test | Go race 测试、真实 HTTP、Gateway 转发与服务停止 |
-| make test-integration | Docker 中的 PostgreSQL 迁移、账号、会话、项目、操作记录、就绪检查、workerd 执行和容器创建、启动、观测、停止与删除 |
+| make test-integration | Docker 中的 PostgreSQL 迁移、账号、会话、项目与成员角色、操作记录、就绪检查、workerd 执行和容器创建、启动、观测、停止与删除 |
 | make web-check | TypeScript、ESLint、Prettier、Vite 构建与接口生成一致性 |
 | make dev-check | 真实本机进程、数据库、热重载、完整停止、多实例与失败清理 |
 | make test-e2e | 真实 Chromium 在桌面和手机尺寸下完成登录、刷新和退出 |

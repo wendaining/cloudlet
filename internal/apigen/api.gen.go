@@ -19,6 +19,45 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
+// Defines values for ProjectMemberRole.
+const (
+	ProjectMemberRoleDeveloper ProjectMemberRole = "developer"
+	ProjectMemberRoleViewer    ProjectMemberRole = "viewer"
+)
+
+// Valid indicates whether the value is a known member of the ProjectMemberRole enum.
+func (e ProjectMemberRole) Valid() bool {
+	switch e {
+	case ProjectMemberRoleDeveloper:
+		return true
+	case ProjectMemberRoleViewer:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ProjectRole.
+const (
+	ProjectRoleDeveloper ProjectRole = "developer"
+	ProjectRoleOwner     ProjectRole = "owner"
+	ProjectRoleViewer    ProjectRole = "viewer"
+)
+
+// Valid indicates whether the value is a known member of the ProjectRole enum.
+func (e ProjectRole) Valid() bool {
+	switch e {
+	case ProjectRoleDeveloper:
+		return true
+	case ProjectRoleOwner:
+		return true
+	case ProjectRoleViewer:
+		return true
+	default:
+		return false
+	}
+}
+
 // CreateProjectRequest defines model for CreateProjectRequest.
 type CreateProjectRequest struct {
 	// Name 服务端去除首尾空白后必须包含 1 至 100 个 Unicode 字符；原始字符串可以包含首尾空白。
@@ -58,10 +97,30 @@ type Project struct {
 	Name string             `json:"name"`
 }
 
+// ProjectMember defines model for ProjectMember.
+type ProjectMember struct {
+	Email  string      `json:"email"`
+	Role   ProjectRole `json:"role"`
+	UserId string      `json:"user_id"`
+}
+
+// ProjectMemberRole defines model for ProjectMemberRole.
+type ProjectMemberRole string
+
+// ProjectRole defines model for ProjectRole.
+type ProjectRole string
+
 // Session defines model for Session.
 type Session struct {
 	Projects []Project `json:"projects"`
 	User     User      `json:"user"`
+}
+
+// UpsertProjectMemberRequest defines model for UpsertProjectMemberRequest.
+type UpsertProjectMemberRequest struct {
+	// Email 已有账号的邮箱；服务端去除首尾空白并转为小写后查找。
+	Email string            `json:"email"`
+	Role  ProjectMemberRole `json:"role"`
 }
 
 // User defines model for User.
@@ -81,6 +140,9 @@ type LoginJSONRequestBody = LoginRequest
 
 // CreateProjectJSONRequestBody defines body for CreateProject for application/json ContentType.
 type CreateProjectJSONRequestBody = CreateProjectRequest
+
+// UpsertProjectMemberJSONRequestBody defines body for UpsertProjectMember for application/json ContentType.
+type UpsertProjectMemberJSONRequestBody = UpsertProjectMemberRequest
 
 // RequestEditorFn is the function signature for the RequestEditor callback function
 type RequestEditorFn func(ctx context.Context, req *http.Request) error
@@ -186,6 +248,23 @@ type ClientInterface interface {
 
 	// GetProject performs a GET /api/v1/projects/{projectID} (the `GetProject` operationId) request.
 	GetProject(ctx context.Context, projectID string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListProjectMembers performs a GET /api/v1/projects/{projectID}/members (the `ListProjectMembers` operationId) request.
+	//
+	// 返回项目成员及其角色，项目成员可以读取。.
+	ListProjectMembers(ctx context.Context, projectID string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UpsertProjectMemberWithBody performs a POST /api/v1/projects/{projectID}/members (the `UpsertProjectMember` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// 添加已有账号为项目成员，或更新其 developer/viewer 角色；仅项目所有者可以调用。.
+	UpsertProjectMemberWithBody(ctx context.Context, projectID string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UpsertProjectMember performs a POST /api/v1/projects/{projectID}/members (the `UpsertProjectMember` operationId) request.
+	// Takes a body of the `application/json` content type.
+	//
+	// 添加已有账号为项目成员，或更新其 developer/viewer 角色；仅项目所有者可以调用。.
+	UpsertProjectMember(ctx context.Context, projectID string, body UpsertProjectMemberJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListProjectOperations performs a GET /api/v1/projects/{projectID}/operations (the `ListProjectOperations` operationId) request.
 	ListProjectOperations(ctx context.Context, projectID string, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -305,6 +384,53 @@ func (c *Client) CreateProject(ctx context.Context, body CreateProjectJSONReques
 // GetProject performs a GET /api/v1/projects/{projectID} (the `GetProject` operationId) request.
 func (c *Client) GetProject(ctx context.Context, projectID string, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetProjectRequest(c.Server, projectID)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListProjectMembers performs a GET /api/v1/projects/{projectID}/members (the `ListProjectMembers` operationId) request.
+//
+// 返回项目成员及其角色，项目成员可以读取。.
+func (c *Client) ListProjectMembers(ctx context.Context, projectID string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListProjectMembersRequest(c.Server, projectID)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// UpsertProjectMemberWithBody performs a POST /api/v1/projects/{projectID}/members (the `UpsertProjectMember` operationId) request,
+// with any type of body and a specified content type.
+//
+// 添加已有账号为项目成员，或更新其 developer/viewer 角色；仅项目所有者可以调用。.
+func (c *Client) UpsertProjectMemberWithBody(ctx context.Context, projectID string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpsertProjectMemberRequestWithBody(c.Server, projectID, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// UpsertProjectMember performs a POST /api/v1/projects/{projectID}/members (the `UpsertProjectMember` operationId) request.
+// Takes a body of the `application/json` content type.
+//
+// 添加已有账号为项目成员，或更新其 developer/viewer 角色；仅项目所有者可以调用。.
+func (c *Client) UpsertProjectMember(ctx context.Context, projectID string, body UpsertProjectMemberJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpsertProjectMemberRequest(c.Server, projectID, body)
 	if err != nil {
 		return nil, err
 	}
@@ -563,6 +689,87 @@ func NewGetProjectRequest(server string, projectID string) (*http.Request, error
 	return req, nil
 }
 
+// NewListProjectMembersRequest constructs an http.Request for the ListProjectMembers method
+func NewListProjectMembersRequest(server string, projectID string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/members", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewUpsertProjectMemberRequest calls the generic UpsertProjectMember builder with application/json body
+func NewUpsertProjectMemberRequest(server string, projectID string, body UpsertProjectMemberJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewUpsertProjectMemberRequestWithBody(server, projectID, "application/json", bodyReader)
+}
+
+// NewUpsertProjectMemberRequestWithBody constructs an http.Request for the UpsertProjectMember method, with any body, and a specified content type
+func NewUpsertProjectMemberRequestWithBody(server string, projectID string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/members", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewListProjectOperationsRequest constructs an http.Request for the ListProjectOperations method
 func NewListProjectOperationsRequest(server string, projectID string) (*http.Request, error) {
 	var err error
@@ -712,6 +919,27 @@ type ClientWithResponsesInterface interface {
 	//
 	// Returns a wrapper object for the known response body format(s).
 	GetProjectWithResponse(ctx context.Context, projectID string, reqEditors ...RequestEditorFn) (*GetProjectResponse, error)
+
+	// ListProjectMembersWithResponse performs a GET /api/v1/projects/{projectID}/members (the `ListProjectMembers` operationId) request.
+	//
+	// 返回项目成员及其角色，项目成员可以读取。.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	ListProjectMembersWithResponse(ctx context.Context, projectID string, reqEditors ...RequestEditorFn) (*ListProjectMembersResponse, error)
+
+	// UpsertProjectMemberWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/members (the `UpsertProjectMember` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// 添加已有账号为项目成员，或更新其 developer/viewer 角色；仅项目所有者可以调用。.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	UpsertProjectMemberWithBodyWithResponse(ctx context.Context, projectID string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpsertProjectMemberResponse, error)
+
+	// UpsertProjectMemberWithResponse performs a POST /api/v1/projects/{projectID}/members (the `UpsertProjectMember` operationId) request.
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// 添加已有账号为项目成员，或更新其 developer/viewer 角色；仅项目所有者可以调用。.
+	UpsertProjectMemberWithResponse(ctx context.Context, projectID string, body UpsertProjectMemberJSONRequestBody, reqEditors ...RequestEditorFn) (*UpsertProjectMemberResponse, error)
 
 	// ListProjectOperationsWithResponse performs a GET /api/v1/projects/{projectID}/operations (the `ListProjectOperations` operationId) request.
 	//
@@ -1116,6 +1344,151 @@ func (r GetProjectResponse) ContentType() string {
 	return ""
 }
 
+type ListProjectMembersResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *[]ProjectMember
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Error
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *Error
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListProjectMembersResponse) GetJSON200() *[]ProjectMember {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r ListProjectMembersResponse) GetJSON401() *Error {
+	return r.JSON401
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r ListProjectMembersResponse) GetJSON404() *Error {
+	return r.JSON404
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r ListProjectMembersResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r ListProjectMembersResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListProjectMembersResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListProjectMembersResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListProjectMembersResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type UpsertProjectMemberResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *ProjectMember
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *Error
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Error
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Error
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *Error
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r UpsertProjectMemberResponse) GetJSON200() *ProjectMember {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r UpsertProjectMemberResponse) GetJSON400() *Error {
+	return r.JSON400
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r UpsertProjectMemberResponse) GetJSON401() *Error {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r UpsertProjectMemberResponse) GetJSON403() *Error {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r UpsertProjectMemberResponse) GetJSON404() *Error {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r UpsertProjectMemberResponse) GetJSON409() *Error {
+	return r.JSON409
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r UpsertProjectMemberResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r UpsertProjectMemberResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r UpsertProjectMemberResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r UpsertProjectMemberResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r UpsertProjectMemberResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type ListProjectOperationsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -1323,6 +1696,45 @@ func (c *ClientWithResponses) GetProjectWithResponse(ctx context.Context, projec
 		return nil, err
 	}
 	return ParseGetProjectResponse(rsp)
+}
+
+// ListProjectMembersWithResponse performs a GET /api/v1/projects/{projectID}/members (the `ListProjectMembers` operationId) request.
+//
+// 返回项目成员及其角色，项目成员可以读取。.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) ListProjectMembersWithResponse(ctx context.Context, projectID string, reqEditors ...RequestEditorFn) (*ListProjectMembersResponse, error) {
+	rsp, err := c.ListProjectMembers(ctx, projectID, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListProjectMembersResponse(rsp)
+}
+
+// UpsertProjectMemberWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/members (the `UpsertProjectMember` operationId) request,
+// with any type of body and a specified content type.
+//
+// 添加已有账号为项目成员，或更新其 developer/viewer 角色；仅项目所有者可以调用。.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) UpsertProjectMemberWithBodyWithResponse(ctx context.Context, projectID string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpsertProjectMemberResponse, error) {
+	rsp, err := c.UpsertProjectMemberWithBody(ctx, projectID, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpsertProjectMemberResponse(rsp)
+}
+
+// UpsertProjectMemberWithResponse performs a POST /api/v1/projects/{projectID}/members (the `UpsertProjectMember` operationId) request.
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// 添加已有账号为项目成员，或更新其 developer/viewer 角色；仅项目所有者可以调用。.
+func (c *ClientWithResponses) UpsertProjectMemberWithResponse(ctx context.Context, projectID string, body UpsertProjectMemberJSONRequestBody, reqEditors ...RequestEditorFn) (*UpsertProjectMemberResponse, error) {
+	rsp, err := c.UpsertProjectMember(ctx, projectID, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpsertProjectMemberResponse(rsp)
 }
 
 // ListProjectOperationsWithResponse performs a GET /api/v1/projects/{projectID}/operations (the `ListProjectOperations` operationId) request.
@@ -1637,6 +2049,121 @@ func ParseGetProjectResponse(rsp *http.Response) (*GetProjectResponse, error) {
 	return response, nil
 }
 
+// ParseListProjectMembersResponse parses an HTTP response from a ListProjectMembersWithResponse call
+func ParseListProjectMembersResponse(rsp *http.Response) (*ListProjectMembersResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListProjectMembersResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest []ProjectMember
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseUpsertProjectMemberResponse parses an HTTP response from a UpsertProjectMemberWithResponse call
+func ParseUpsertProjectMemberResponse(rsp *http.Response) (*UpsertProjectMemberResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &UpsertProjectMemberResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ProjectMember
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseListProjectOperationsResponse parses an HTTP response from a ListProjectOperationsWithResponse call
 func ParseListProjectOperationsResponse(rsp *http.Response) (*ListProjectOperationsResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -1740,6 +2267,12 @@ type ServerInterface interface {
 
 	// (GET /api/v1/projects/{projectID})
 	GetProject(c *gin.Context, projectID string)
+
+	// (GET /api/v1/projects/{projectID}/members)
+	ListProjectMembers(c *gin.Context, projectID string)
+
+	// (POST /api/v1/projects/{projectID}/members)
+	UpsertProjectMember(c *gin.Context, projectID string)
 
 	// (GET /api/v1/projects/{projectID}/operations)
 	ListProjectOperations(c *gin.Context, projectID string)
@@ -1860,6 +2393,56 @@ func (siw *ServerInterfaceWrapper) GetProject(c *gin.Context) {
 	siw.Handler.GetProject(c, projectID)
 }
 
+// ListProjectMembers operation middleware
+func (siw *ServerInterfaceWrapper) ListProjectMembers(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ListProjectMembers(c, projectID)
+}
+
+// UpsertProjectMember operation middleware
+func (siw *ServerInterfaceWrapper) UpsertProjectMember(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.UpsertProjectMember(c, projectID)
+}
+
 // ListProjectOperations operation middleware
 func (siw *ServerInterfaceWrapper) ListProjectOperations(c *gin.Context) {
 
@@ -1934,4 +2517,6 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/api/v1/projects", wrapper.CreateProject)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/operations", wrapper.ListProjectOperations)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID", wrapper.GetProject)
+	router.GET(options.BaseURL+"/api/v1/projects/:projectID/members", wrapper.ListProjectMembers)
+	router.POST(options.BaseURL+"/api/v1/projects/:projectID/members", wrapper.UpsertProjectMember)
 }
