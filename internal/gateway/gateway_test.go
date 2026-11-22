@@ -130,7 +130,10 @@ func TestGatewayMatchesLongestPathPrefix(t *testing.T) {
 	site, api, admin := upstream("site"), upstream("api"), upstream("admin")
 	handler, err := gateway.NewHandler(config.Config{
 		APIAddress: "127.0.0.1:0", GatewayAddress: "127.0.0.1:0",
-		Routes: []config.Route{{Host: "app.localhost", Target: site.URL}},
+		Routes: []config.Route{
+			{Host: "static.localhost", Target: site.URL},
+			{Host: "static.localhost", PathPrefix: "/api", Target: api.URL},
+		},
 	}, slog.Default())
 	if err != nil {
 		t.Fatal(err)
@@ -138,6 +141,7 @@ func TestGatewayMatchesLongestPathPrefix(t *testing.T) {
 	front := httptest.NewServer(handler)
 	defer front.Close()
 	routes := []config.Route{
+		{Host: "app.localhost", Target: site.URL},
 		{Host: "APP.localhost.", PathPrefix: "/api", Target: api.URL},
 		{Host: "app.localhost", PathPrefix: "/api/admin", Target: admin.URL},
 		{Host: "api.localhost", PathPrefix: "/api", Target: api.URL},
@@ -188,6 +192,12 @@ func TestGatewayMatchesLongestPathPrefix(t *testing.T) {
 	}
 	assertRequest("app.localhost", "/api", "api /api", http.StatusOK)
 	assertRequest("app.localhost", "/", "site /", http.StatusOK)
+	assertRequest("static.localhost", "/api", "api /api", http.StatusOK)
+	if err := handler.ReplaceRoutes([]config.Route{{Host: "STATIC.localhost.", PathPrefix: "/other", Target: admin.URL}}); err == nil {
+		t.Error("dynamic route was accepted for a statically configured host")
+	}
+	assertRequest("static.localhost", "/other", "site /other", http.StatusOK)
+	assertRequest("app.localhost", "/api", "api /api", http.StatusOK)
 }
 
 func TestGatewayReplacesDynamicRoutesWhileStreaming(t *testing.T) {

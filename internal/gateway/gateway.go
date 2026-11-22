@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"cmp"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -44,11 +45,20 @@ func NewHandler(cfg config.Config, logger *slog.Logger) (*Handler, error) {
 }
 
 // ReplaceRoutes atomically replaces all dynamic routes and preserves startup routes.
-// A dynamic route cannot duplicate a startup route's host and path prefix.
+// A dynamic route cannot use a host reserved by startup configuration.
 func (h *Handler) ReplaceRoutes(routes []config.Route) error {
 	combined := slices.Concat(h.staticRoutes, routes)
 	if err := config.ValidateRoutes(combined); err != nil {
 		return err
+	}
+	staticHosts := make(map[string]bool, len(h.staticRoutes))
+	for _, route := range h.staticRoutes {
+		staticHosts[canonicalHost(route.Host)] = true
+	}
+	for _, route := range routes {
+		if staticHosts[canonicalHost(route.Host)] {
+			return fmt.Errorf("route host %q is reserved by startup configuration", route.Host)
+		}
 	}
 	proxies := make(routeSnapshot, len(combined))
 	for _, route := range combined {
