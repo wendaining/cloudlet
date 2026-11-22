@@ -30,7 +30,8 @@ Cloudlet 在一台 Linux 服务器上管理计算资源。本地开发在成员�
 | cmd/cloudlet | 基于共享客户端的命令行入口 |
 | internal/config | 严格读取 JSON 配置并验证字段 |
 | internal/controlplane | 管理 HTTP 接口 |
-| internal/database | PostgreSQL 连接、迁移版本与账号数据 |
+| internal/database | PostgreSQL 连接、迁移版本、账号与项目数据 |
+| internal/operations | 操作记录的幂等登记、按项目查询与阶段推进 |
 | internal/apigen | OpenAPI 生成的类型、Gin 接口和客户端 |
 | migrations | 内嵌 SQL 迁移文件与当前版本 |
 | internal/gateway | 按域名选择上游并转发 HTTP 请求 |
@@ -42,7 +43,7 @@ Cloudlet 在一台 Linux 服务器上管理计算资源。本地开发在成员�
 | internal/browser | 复用容器管理的 Playwright 会话 |
 | pkg/client | CLI 与其他客户端共享的 API 客户端 |
 
-PostgreSQL 当前保存账号与登录会话。Workers 模块已提供独立的运行配置，资源元数据和生命周期的开发目标见 [开发任务](roadmap.md)。Durable Objects 的存储能力随 workerd 集成验证。
+PostgreSQL 当前保存账号、登录会话、项目与操作记录。Workers 模块已提供独立的运行配置，资源元数据和生命周期的开发目标见 [开发任务](roadmap.md)。Durable Objects 的存储能力随 workerd 集成验证。
 
 项目拥有稳定的 project_id。创建项目在事务内写入项目和创建者的 owner 成员记录。项目列表和单项目读取同时校验当前会话账号的项目成员关系。成员邀请与角色变更由独立任务提供。
 
