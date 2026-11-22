@@ -22,6 +22,7 @@ import (
 	"github.com/wendaining/cloudlet/internal/config"
 	"github.com/wendaining/cloudlet/internal/controlplane"
 	"github.com/wendaining/cloudlet/internal/database"
+	"github.com/wendaining/cloudlet/migrations"
 	"gorm.io/gorm"
 )
 
@@ -190,6 +191,9 @@ func TestPostgresMigrationAccountsSessionsAndProjects(t *testing.T) {
 	if err := reopened.SQL.Close(); err != nil {
 		t.Fatal(err)
 	}
+	t.Run("operations", func(t *testing.T) {
+		testOperations(t, ctx, store, connection, project.Id, user.ID)
+	})
 	request("POST", api.URL+"/api/v1/auth/logout", "", http.StatusNoContent)
 	request("GET", api.URL+"/api/v1/auth/session", "", http.StatusUnauthorized)
 	req, err := http.NewRequest("POST", api.URL+"/api/v1/auth/login", strings.NewReader(`{}`))
@@ -205,7 +209,7 @@ func TestPostgresMigrationAccountsSessionsAndProjects(t *testing.T) {
 	if response.StatusCode != http.StatusForbidden {
 		t.Fatal("跨来源请求未被拒绝")
 	}
-	if err := store.DB.Exec("INSERT INTO goose_db_version (version_id, is_applied) VALUES (3, TRUE)").Error; err != nil {
+	if err := store.DB.Exec("INSERT INTO goose_db_version (version_id, is_applied) VALUES (?, TRUE)", migrations.Version+1).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := store.CheckVersion(ctx); err == nil {
