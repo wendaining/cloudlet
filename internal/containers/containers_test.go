@@ -81,13 +81,13 @@ func TestOwnershipLabelsAndVerify(t *testing.T) {
 	if !maps.Equal(labels, want) {
 		t.Fatalf("labels = %v, want %v", labels, want)
 	}
-	if err := ownership.verify(labels); err != nil {
+	if err := ownership.verifyLabels(labels); err != nil {
 		t.Fatal(err)
 	}
 	withExtra := maps.Clone(labels)
 	withExtra["org.example.extra"] = "value"
-	if err := ownership.verify(withExtra); err != nil {
-		t.Fatalf("verify() with extra label = %v", err)
+	if err := ownership.verifyLabels(withExtra); err != nil {
+		t.Fatalf("verifyLabels() with extra label = %v", err)
 	}
 	for name, change := range map[string]func(map[string]string){
 		"missing label": func(labels map[string]string) { delete(labels, LabelProject) },
@@ -100,10 +100,34 @@ func TestOwnershipLabelsAndVerify(t *testing.T) {
 			if name == "nil labels" {
 				labels = nil
 			}
-			if err := ownership.verify(labels); !errors.Is(err, ErrNotOwned) {
-				t.Fatalf("verify() = %v, want ErrNotOwned", err)
+			if err := ownership.verifyLabels(labels); !errors.Is(err, ErrNotOwned) {
+				t.Fatalf("verifyLabels() = %v, want ErrNotOwned", err)
 			}
 		})
+	}
+}
+
+func TestOwnershipVerify(t *testing.T) {
+	ownership := validOwnership()
+	info := container.InspectResponse{
+		Name: "/" + ownership.containerName(),
+		Config: &container.Config{
+			Labels: ownership.labels(),
+		},
+	}
+	if err := ownership.verify(info); err != nil {
+		t.Fatal(err)
+	}
+
+	info.Name = "/foreign-container"
+	if err := ownership.verify(info); !errors.Is(err, ErrNotOwned) {
+		t.Fatalf("verify() with mismatched name = %v, want ErrNotOwned", err)
+	}
+
+	info.Name = "/" + ownership.containerName()
+	info.Config = nil
+	if err := ownership.verify(info); err == nil || !errors.Is(err, fs.ErrInvalid) {
+		t.Fatalf("verify() without config = %v, want fs.ErrInvalid", err)
 	}
 }
 

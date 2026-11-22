@@ -138,6 +138,42 @@ func TestAdapterLifecycle(t *testing.T) {
 		t.Fatalf("unmanaged container was changed: %v", err)
 	}
 
+	impostor, err := docker.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Name: "foreign-" + created.Name,
+		Config: &container.Config{
+			Image:  spec.Image,
+			User:   spec.User,
+			Labels: ownershipLabels(spec.Ownership),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cleanupCancel()
+		_, _ = docker.ContainerRemove(cleanupCtx, impostor.ID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true})
+	})
+	if _, err := adapter.Start(ctx, ownership, impostor.ID); !errors.Is(err, containers.ErrNotOwned) {
+		t.Fatalf("start with mismatched container name = %v, want ErrNotOwned", err)
+	}
+	if _, err := adapter.Observe(ctx, ownership, impostor.ID); !errors.Is(err, containers.ErrNotOwned) {
+		t.Fatalf("observe with mismatched container name = %v, want ErrNotOwned", err)
+	}
+	if err := adapter.Stop(ctx, ownership, impostor.ID); !errors.Is(err, containers.ErrNotOwned) {
+		t.Fatalf("stop with mismatched container name = %v, want ErrNotOwned", err)
+	}
+	if err := adapter.Remove(ctx, ownership, impostor.ID); !errors.Is(err, containers.ErrNotOwned) {
+		t.Fatalf("remove with mismatched container name = %v, want ErrNotOwned", err)
+	}
+	impostorState, err := docker.ContainerInspect(ctx, impostor.ID, client.ContainerInspectOptions{})
+	if err != nil {
+		t.Fatalf("mismatched-name container was changed: %v", err)
+	}
+	if impostorState.Container.State == nil || impostorState.Container.State.Running {
+		t.Fatalf("mismatched-name container state changed: %+v", impostorState.Container.State)
+	}
+
 	if err := adapter.Stop(ctx, ownership, created.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -208,14 +244,7 @@ func assertCreatedContainer(t *testing.T, ctx context.Context, docker *client.Cl
 	if info.Config == nil || info.HostConfig == nil {
 		t.Fatal("inspect response is missing config or host config")
 	}
-	wantLabels := map[string]string{
-		containers.LabelManaged:     "true",
-		containers.LabelEnvironment: spec.Ownership.Environment,
-		containers.LabelComponent:   containers.ComponentRuntime,
-		containers.LabelProject:     spec.Ownership.Project,
-		containers.LabelResource:    spec.Ownership.Resource,
-		containers.LabelGeneration:  strconv.FormatUint(spec.Ownership.Generation, 10),
-	}
+	wantLabels := ownershipLabels(spec.Ownership)
 	for key, want := range wantLabels {
 		if got := info.Config.Labels[key]; got != want {
 			t.Fatalf("label %s = %q, want %q", key, got, want)
@@ -238,6 +267,17 @@ func assertCreatedContainer(t *testing.T, ctx context.Context, docker *client.Cl
 	}
 	if nofile == nil || nofile.Soft != spec.Limits.OpenFiles || nofile.Hard != spec.Limits.OpenFiles {
 		t.Fatalf("nofile limit = %+v", nofile)
+	}
+}
+
+func ownershipLabels(ownership containers.Ownership) map[string]string {
+	return map[string]string{
+		containers.LabelManaged:     "true",
+		containers.LabelEnvironment: ownership.Environment,
+		containers.LabelComponent:   containers.ComponentRuntime,
+		containers.LabelProject:     ownership.Project,
+		containers.LabelResource:    ownership.Resource,
+		containers.LabelGeneration:  strconv.FormatUint(ownership.Generation, 10),
 	}
 }
 

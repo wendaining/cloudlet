@@ -179,7 +179,22 @@ func (o Ownership) labels() map[string]string {
 	}
 }
 
-func (o Ownership) verify(labels map[string]string) error {
+func (o Ownership) verify(info container.InspectResponse) error {
+	if info.Config == nil {
+		return fmt.Errorf("verify container ownership: configuration is missing: %w", fs.ErrInvalid)
+	}
+	if err := o.verifyLabels(info.Config.Labels); err != nil {
+		return err
+	}
+	actualName := strings.TrimPrefix(info.Name, "/")
+	expectedName := o.containerName()
+	if actualName != expectedName {
+		return fmt.Errorf("%w: container name is %q, want %q", ErrNotOwned, actualName, expectedName)
+	}
+	return nil
+}
+
+func (o Ownership) verifyLabels(labels map[string]string) error {
 	for key, want := range o.labels() {
 		got, found := labels[key]
 		if !found || got != want {

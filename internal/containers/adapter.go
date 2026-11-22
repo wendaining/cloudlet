@@ -18,7 +18,8 @@ import (
 // Adapter manages containers on one Docker Engine. It is safe for concurrent
 // use. The caller owns the Docker client and must close it after the adapter is
 // no longer used. Every operation other than Create inspects the container
-// first and returns ErrNotOwned when its ownership labels do not match.
+// first and returns ErrNotOwned when its canonical name or ownership labels do
+// not match.
 type Adapter struct {
 	docker *client.Client
 }
@@ -50,7 +51,7 @@ func (a *Adapter) Create(ctx context.Context, spec Spec) (Container, error) {
 	result, err := a.docker.ContainerCreate(ctx, options)
 	if err != nil {
 		if cerrdefs.IsConflict(err) {
-			return Container{}, fmt.Errorf("create container %s: %w", options.Name, ErrConflict)
+			return Container{}, fmt.Errorf("create container %s: %w: %w", options.Name, ErrConflict, err)
 		}
 		return Container{}, fmt.Errorf("create container %s: %w", options.Name, err)
 	}
@@ -72,7 +73,7 @@ func (a *Adapter) Start(ctx context.Context, ownership Ownership, id string) (Ob
 	}
 	if !info.State.Running {
 		if _, err := a.docker.ContainerStart(ctx, id, client.ContainerStartOptions{}); err != nil {
-			return Observation{}, fmt.Errorf("start container %s: %w", id, err)
+			return Observation{}, dockerOperationError("start", id, err)
 		}
 	}
 	return a.Observe(ctx, ownership, id)
@@ -103,7 +104,7 @@ func (a *Adapter) Stop(ctx context.Context, ownership Ownership, id string) erro
 	if info.State.Running {
 		seconds := int(stopTimeout / time.Second)
 		if _, err := a.docker.ContainerStop(ctx, id, client.ContainerStopOptions{Timeout: &seconds}); err != nil {
-			return fmt.Errorf("stop container %s: %w", id, err)
+			return dockerOperationError("stop", id, err)
 		}
 	}
 	observation, err := a.Observe(ctx, ownership, id)
@@ -124,14 +125,14 @@ func (a *Adapter) Remove(ctx context.Context, ownership Ownership, id string) er
 	if err != nil {
 		return err
 	}
-	if info.State != nil && info.State.Running {
+	if info.State == nil {
+		return fmt.Errorf("remove container %s: state is missing: %w", id, fs.ErrInvalid)
+	}
+	if info.State.Running {
 		return fmt.Errorf("remove container %s: container is running, stop it first: %w", id, fs.ErrInvalid)
 	}
 	if _, err := a.docker.ContainerRemove(ctx, id, client.ContainerRemoveOptions{RemoveVolumes: false}); err != nil {
-		if cerrdefs.IsNotFound(err) {
-			return fmt.Errorf("remove container %s: %w", id, ErrNotFound)
-		}
-		return fmt.Errorf("remove container %s: %w", id, err)
+		return dockerOperationError("remove", id, err)
 	}
 	// Confirm removal so callers can rely on the container and its ports being
 	// released.
@@ -153,17 +154,21 @@ func (a *Adapter) inspectOwned(ctx context.Context, ownership Ownership, id stri
 	result, err := a.docker.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
 	if err != nil {
 		if cerrdefs.IsNotFound(err) {
-			return container.InspectResponse{}, fmt.Errorf("inspect container %s: %w", id, ErrNotFound)
+			return container.InspectResponse{}, fmt.Errorf("inspect container %s: %w: %w", id, ErrNotFound, err)
 		}
 		return container.InspectResponse{}, fmt.Errorf("inspect container %s: %w", id, err)
 	}
-	if result.Container.Config == nil {
-		return container.InspectResponse{}, fmt.Errorf("inspect container %s: configuration is missing: %w", id, fs.ErrInvalid)
-	}
-	if err := ownership.verify(result.Container.Config.Labels); err != nil {
+	if err := ownership.verify(result.Container); err != nil {
 		return container.InspectResponse{}, fmt.Errorf("inspect container %s: %w", id, err)
 	}
 	return result.Container, nil
+}
+
+func dockerOperationError(operation, id string, err error) error {
+	if cerrdefs.IsNotFound(err) {
+		return fmt.Errorf("%s container %s: %w: %w", operation, id, ErrNotFound, err)
+	}
+	return fmt.Errorf("%s container %s: %w", operation, id, err)
 }
 
 func validateContainerID(id string) error {

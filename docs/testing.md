@@ -59,7 +59,7 @@ npm --prefix runtimes/browser run test:integration
 
 ## 容器执行适配器验收
 
-使用真实 Docker 启动 configs/images.json 中的固定镜像，读取适配器观测到的回环端口并请求预期响应。归属不匹配的容器不会被停止或删除。停止和删除后容器与端口释放。
+使用真实 Docker 启动 configs/images.json 中的固定镜像，读取适配器观测到的回环端口并请求预期响应。名称或归属标签不匹配的容器不会被启动、观测、停止或删除。停止和删除后容器与端口释放。
 
 ```sh
 make test-integration
