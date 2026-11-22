@@ -165,4 +165,23 @@ func testOperations(t *testing.T, ctx context.Context, databaseStore *database.S
 	if err != nil || persisted != terminal {
 		t.Fatalf("重新连接后查询操作返回 %+v, %v", persisted, err)
 	}
+	visible, err := databaseStore.ProjectOperations(ctx, ownerID, projectID.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, operation := range visible {
+		if operation.ID == terminal.ID {
+			if operation.Progress != terminal.Progress {
+				t.Fatalf("项目内操作查询的终态错误: %+v", operation)
+			}
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("项目内操作查询未返回终态操作: %+v", visible)
+	}
+	if visible, err := databaseStore.ProjectOperations(ctx, ownerID, uuid.Nil.String()); err != nil || len(visible) != 0 {
+		t.Fatalf("未知项目操作查询返回 %+v, %v", visible, err)
+	}
 }

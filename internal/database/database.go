@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/pressly/goose/v3"
 	"github.com/pressly/goose/v3/lock"
+	"github.com/wendaining/cloudlet/internal/operations"
 	"github.com/wendaining/cloudlet/migrations"
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/driver/postgres"
@@ -196,6 +197,16 @@ func (s *Store) Project(ctx context.Context, userID, projectID string) (Project,
 		Where("projects.id = ? AND project_members.user_id = ?", projectID, userID).
 		First(&project).Error
 	return project, err
+}
+
+func (s *Store) ProjectOperations(ctx context.Context, userID, projectID string) ([]operations.Operation, error) {
+	var records []operations.Operation
+	err := s.DB.WithContext(ctx).
+		Joins("JOIN project_members ON project_members.project_id = operations.project_id").
+		Where("operations.project_id = ? AND project_members.user_id = ?", projectID, userID).
+		Order("operations.created_at, operations.id").
+		Find(&records).Error
+	return records, err
 }
 
 func (s *Store) ProjectMember(ctx context.Context, projectID, userID string) (ProjectMember, error) {

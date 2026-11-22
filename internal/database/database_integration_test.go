@@ -174,6 +174,13 @@ func TestPostgresMigrationAccountsSessionsAndProjects(t *testing.T) {
 	if member.Role != "owner" || member.UserID != user.ID {
 		t.Fatalf("项目所有者关系错误: %+v", member)
 	}
+	operationsInProject, err := store.ProjectOperations(ctx, user.ID, projectID)
+	if err != nil || len(operationsInProject) != 0 {
+		t.Fatalf("重启后项目内操作查询返回 %+v, %v", operationsInProject, err)
+	}
+	if visible, err := store.ProjectOperations(ctx, user.ID, uuid.NewString()); err != nil || len(visible) != 0 {
+		t.Fatalf("未知项目操作查询返回 %+v, %v", visible, err)
+	}
 	if _, err := store.ProjectMember(ctx, projectID, otherUser.ID); !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatalf("其他用户取得了项目成员关系: %v", err)
 	}

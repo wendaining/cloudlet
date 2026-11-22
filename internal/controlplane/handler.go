@@ -194,6 +194,35 @@ func (h *handler) GetProject(c *gin.Context, projectID string) {
 	c.JSON(http.StatusOK, projectResponse(project))
 }
 
+func (h *handler) ListProjectOperations(c *gin.Context, projectID string) {
+	user, ok := h.currentUser(c)
+	if !ok {
+		return
+	}
+	parsedID, err := uuid.Parse(projectID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, apigen.Error{Message: "项目不存在或没有访问权限"})
+		return
+	}
+	operations, err := h.store.ProjectOperations(c.Request.Context(), user.ID, parsedID.String())
+	if err != nil {
+		h.failure(c, err)
+		return
+	}
+	response := make([]apigen.Operation, 0, len(operations))
+	for _, operation := range operations {
+		response = append(response, apigen.Operation{
+			Id:        operation.ID,
+			Action:    operation.Action,
+			Phase:     string(operation.Phase),
+			Outcome:   string(operation.Outcome),
+			CreatedAt: operation.CreatedAt,
+			UpdatedAt: operation.UpdatedAt,
+		})
+	}
+	c.JSON(http.StatusOK, response)
+}
+
 func projectResponse(project database.Project) apigen.Project {
 	return apigen.Project{Id: uuid.MustParse(project.ID), Name: project.Name}
 }
