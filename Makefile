@@ -41,6 +41,7 @@ db-status:
 
 web-check:
 	npm run lint --workspace web
+	npm run test --workspace web
 	npm run build --workspace web
 	node scripts/check-generated.mjs web
 
