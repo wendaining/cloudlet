@@ -36,6 +36,35 @@ func TestRepositoryConfigurations(t *testing.T) {
 	}
 }
 
+func TestValidateRoutePathPrefixes(t *testing.T) {
+	defaultRoute := config.Route{Host: "app.localhost", Target: "http://localhost"}
+	for _, test := range []struct {
+		prefix string
+		valid  bool
+	}{
+		{prefix: "/api", valid: true},
+		{prefix: "/api/中文", valid: true},
+		{prefix: "/"}, // Same route as the default prefix.
+		{prefix: "api"},
+		{prefix: "/api/"},
+		{prefix: "/api//v1"},
+		{prefix: "/api/../v1"},
+		{prefix: "/api?mode=1"},
+		{prefix: "/api#fragment"},
+		{prefix: "/api%2Fv1"},
+	} {
+		t.Run(test.prefix, func(t *testing.T) {
+			route := defaultRoute
+			route.Host = "APP.localhost."
+			route.PathPrefix = test.prefix
+			err := config.ValidateRoutes([]config.Route{defaultRoute, route})
+			if (err == nil) != test.valid {
+				t.Fatalf("valid = %v, validation returned %v", test.valid, err)
+			}
+		})
+	}
+}
+
 func TestValidateRoutesUpstreamPort(t *testing.T) {
 	for _, test := range []struct {
 		target string

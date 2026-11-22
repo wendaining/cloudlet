@@ -1,6 +1,8 @@
 package gateway
 
 import (
+	"cmp"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -14,7 +16,12 @@ import (
 	"github.com/wendaining/cloudlet/internal/config"
 )
 
-type routeSnapshot map[string]*httputil.ReverseProxy
+type pathRoute struct {
+	segments []string
+	proxy    *httputil.ReverseProxy
+}
+
+type routeSnapshot map[string][]pathRoute
 
 // Handler serves requests using the current immutable route snapshot.
 type Handler struct {
@@ -38,11 +45,20 @@ func NewHandler(cfg config.Config, logger *slog.Logger) (*Handler, error) {
 }
 
 // ReplaceRoutes atomically replaces all dynamic routes and preserves startup routes.
-// A dynamic route cannot use a host already reserved by a startup route.
+// A dynamic route cannot use a host reserved by startup configuration.
 func (h *Handler) ReplaceRoutes(routes []config.Route) error {
 	combined := slices.Concat(h.staticRoutes, routes)
 	if err := config.ValidateRoutes(combined); err != nil {
 		return err
+	}
+	staticHosts := make(map[string]bool, len(h.staticRoutes))
+	for _, route := range h.staticRoutes {
+		staticHosts[canonicalHost(route.Host)] = true
+	}
+	for _, route := range routes {
+		if staticHosts[canonicalHost(route.Host)] {
+			return fmt.Errorf("route host %q is reserved by startup configuration", route.Host)
+		}
 	}
 	proxies := make(routeSnapshot, len(combined))
 	for _, route := range combined {
@@ -61,19 +77,51 @@ func (h *Handler) ReplaceRoutes(routes []config.Route) error {
 				http.Error(w, "upstream unavailable", http.StatusBadGateway)
 			},
 		}
-		proxies[canonicalHost(route.Host)] = proxy
+		var segments []string
+		if route.PathPrefix != "" && route.PathPrefix != "/" {
+			segments = strings.Split(route.PathPrefix[1:], "/")
+		}
+		host := canonicalHost(route.Host)
+		proxies[host] = append(proxies[host], pathRoute{segments: segments, proxy: proxy})
+	}
+	for _, routes := range proxies {
+		slices.SortFunc(routes, func(a, b pathRoute) int {
+			return cmp.Compare(len(b.segments), len(a.segments))
+		})
 	}
 	h.snapshot.Store(&proxies)
 	return nil
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	proxy, found := (*h.snapshot.Load())[canonicalHost(r.Host)]
-	if !found {
-		http.NotFound(w, r)
-		return
+	routes := (*h.snapshot.Load())[canonicalHost(r.Host)]
+	if len(routes) > 0 {
+		if len(routes[0].segments) == 0 {
+			routes[0].proxy.ServeHTTP(w, r)
+			return
+		}
+		// Split before decoding so an escaped slash stays in its original segment.
+		segments := strings.Split(strings.TrimPrefix(r.URL.EscapedPath(), "/"), "/")
+		for i, segment := range segments {
+			decoded, err := url.PathUnescape(segment)
+			if err != nil {
+				http.Error(w, "invalid request path", http.StatusBadRequest)
+				return
+			}
+			if decoded == "." || decoded == ".." {
+				http.Error(w, "invalid request path", http.StatusBadRequest)
+				return
+			}
+			segments[i] = decoded
+		}
+		for _, route := range routes {
+			if n := len(route.segments); n <= len(segments) && slices.Equal(route.segments, segments[:n]) {
+				route.proxy.ServeHTTP(w, r)
+				return
+			}
+		}
 	}
-	proxy.ServeHTTP(w, r)
+	http.NotFound(w, r)
 }
 
 func canonicalHost(host string) string {
