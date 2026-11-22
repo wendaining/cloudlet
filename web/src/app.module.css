@@ -30,6 +30,35 @@
   margin-bottom: 16px;
 }
 
+.projects {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 48px 24px;
+}
+
+.projectsHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 24px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+}
+
+.createCard {
+  width: min(100%, 420px);
+}
+
+.listCard {
+  margin-bottom: 24px;
+}
+
+.detail {
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 48px 24px;
+}
+
 .loading {
   width: 240px;
   height: 100px;

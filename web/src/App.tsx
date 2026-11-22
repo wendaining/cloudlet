@@ -4,6 +4,8 @@ import { Route, Routes } from 'react-router';
 import { session } from './client';
 import { Login } from './Login';
 import { Overview } from './Overview';
+import { Projects } from './Projects';
+import { ProjectDetail } from './ProjectDetail';
 import styles from './app.module.css';
 
 function Home() {
@@ -35,6 +37,8 @@ export function App() {
   return (
     <Routes>
       <Route path="/" element={<Home />} />
+      <Route path="/projects" element={<Projects />} />
+      <Route path="/projects/:projectID" element={<ProjectDetail />} />
       <Route path="*" element={<Result status="404" title="页面不存在" />} />
     </Routes>
   );

@@ -1,5 +1,6 @@
 import { Alert, Button, Card, Descriptions, Space, Typography } from 'antd';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link } from 'react-router';
 import { environment, logout, version } from './client';
 import type { User } from './client';
 import styles from './app.module.css';
@@ -38,6 +39,11 @@ export function Overview({ user }: { user: User }) {
           </Button>
         </Space>
       </header>
+      <Space>
+        <Button type="primary">
+          <Link to="/projects">进入项目控制台</Link>
+        </Button>
+      </Space>
       {failure ? (
         <Alert
           type="error"
