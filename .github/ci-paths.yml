@@ -75,6 +75,16 @@ browser:
   - '.github/ci-paths.yml'
   - '!**/*.md'
 
+containers:
+  - 'internal/containers/**'
+  - 'configs/images.json'
+  - 'go.mod'
+  - 'go.sum'
+  - 'Makefile'
+  - '.github/workflows/ci.yml'
+  - '.github/ci-paths.yml'
+  - '!**/*.md'
+
 web:
   - 'web/**'
   - 'api/**'
