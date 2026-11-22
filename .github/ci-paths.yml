@@ -61,6 +61,7 @@ database:
 
 workers:
   - 'internal/workers/**'
+  - 'internal/durableobjects/**'
   - 'go.mod'
   - 'go.sum'
   - '.github/workflows/ci.yml'

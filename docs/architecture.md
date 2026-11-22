@@ -36,8 +36,8 @@ Cloudlet 在一台 Linux 服务器上管理计算资源。本地开发在成员�
 | internal/gateway | 按域名选择上游并转发 HTTP 请求 |
 | internal/server | 监听端口与服务生命周期 |
 | internal/version | 构建版本和提交标识 |
-| internal/workers | 无状态 ES Module 的 workerd 配置、启动参数和镜像引用 |
-| internal/durableobjects | 对象命名空间、绑定和持久化配置 |
+| internal/workers | ES Module 与 Durable Objects 的 workerd 配置、启动参数和镜像引用 |
+| internal/durableobjects | SQLite 命名空间、类绑定和存储挂载路径 |
 | internal/containers | Docker Engine 资源与容器生命周期 |
 | internal/browser | 复用容器管理的 Playwright 会话 |
 | pkg/client | CLI 与其他客户端共享的 API 客户端 |
@@ -78,6 +78,6 @@ API 与 Gateway 使用 HTTP 头读取超时和空闲连接超时。收到 SIGTER
 
 ## 执行环境
 
-Workers 集成 workerd。Durable Objects 随同运行时验证持久化与并发语义。容器管理使用 Docker Engine API。Browser Run 复用容器生命周期，并通过 Playwright 实现浏览器操作。
+Workers 集成 workerd，支持原生 Durable Object SQLite 绑定。真实运行时测试验证对象隔离和重启后的持久化。容器管理使用 Docker Engine API。Browser Run 复用容器生命周期，并通过 Playwright 实现浏览器操作。
 
 执行单元、配额、隔离、状态恢复与独占交接遵循执行环境设计。对应模块完成时，同步提供 [真实业务验收](testing.md)。

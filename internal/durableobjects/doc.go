@@ -1,2 +1,2 @@
-// Package durableobjects 为对象绑定、命名空间和持久化配置提供集成边界。
+// Package durableobjects 定义 Worker 的 SQLite 命名空间、类绑定和存储挂载路径。
 package durableobjects

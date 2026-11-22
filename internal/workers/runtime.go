@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"time"
 	"unicode/utf8"
+
+	"github.com/wendaining/cloudlet/internal/durableobjects"
 )
 
 const (
@@ -39,6 +41,19 @@ func ServeArgs() []string {
 // a relative .js or .mjs path with ASCII letters, digits, periods, underscores,
 // hyphens and slash separators.
 func Prepare(bundleDir, entry, compatibilityDate string) (RuntimeConfig, error) {
+	return prepare(bundleDir, entry, compatibilityDate, nil)
+}
+
+// PrepareWithDurableObjects configures SQLite namespaces in the same module.
+// The caller must mount an exclusive writable volume at durableobjects.StoragePath.
+func PrepareWithDurableObjects(bundleDir, entry, compatibilityDate string, namespaces []durableobjects.Namespace) (RuntimeConfig, error) {
+	if err := durableobjects.Validate(namespaces); err != nil {
+		return RuntimeConfig{}, fmt.Errorf("configure Durable Objects for %q: %w", entry, err)
+	}
+	return prepare(bundleDir, entry, compatibilityDate, namespaces)
+}
+
+func prepare(bundleDir, entry, compatibilityDate string, namespaces []durableobjects.Namespace) (RuntimeConfig, error) {
 	ext := path.Ext(entry)
 	if !fs.ValidPath(entry) || !entryPathPattern.MatchString(entry) || (ext != ".js" && ext != ".mjs") {
 		return RuntimeConfig{}, fmt.Errorf("entry %q must be a relative .js or .mjs path with supported characters", entry)
@@ -68,7 +83,7 @@ func Prepare(bundleDir, entry, compatibilityDate string) (RuntimeConfig, error) 
 	}
 
 	return RuntimeConfig{
-		Config: fmt.Appendf(nil, configTemplate, HTTPPort, entry, path.Base(ModulePath), compatibilityDate),
+		Config: renderConfig(entry, compatibilityDate, namespaces),
 		Module: module,
 	}, nil
 }
@@ -87,15 +102,34 @@ func validateCompatibilityDate(compatibilityDate string, now time.Time) error {
 	return nil
 }
 
+func renderConfig(entry, compatibilityDate string, namespaces []durableobjects.Namespace) []byte {
+	var storageService, workerFields []byte
+	if len(namespaces) > 0 {
+		storageService = fmt.Appendf(nil, `, (name = "durable-storage", disk = (path = "%s", writable = true))`, durableobjects.StoragePath)
+		workerFields = append(workerFields, "  durableObjectStorage = (localDisk = \"durable-storage\"),\n  durableObjectNamespaces = [\n"...)
+		for _, namespace := range namespaces {
+			workerFields = fmt.Appendf(workerFields, "    (className = \"%s\", uniqueKey = \"%s\", enableSql = true),\n", namespace.ClassName, namespace.ID)
+		}
+		workerFields = append(workerFields, "  ],\n  bindings = [\n"...)
+		for _, namespace := range namespaces {
+			for _, binding := range namespace.Bindings {
+				workerFields = fmt.Appendf(workerFields, "    (name = \"%s\", durableObjectNamespace = \"%s\"),\n", binding, namespace.ClassName)
+			}
+		}
+		workerFields = append(workerFields, "  ],\n"...)
+	}
+	return fmt.Appendf(nil, configTemplate, storageService, HTTPPort, entry, path.Base(ModulePath), compatibilityDate, workerFields)
+}
+
 const configTemplate = `using Workerd = import "/workerd/workerd.capnp";
 
 const config :Workerd.Config = (
-  services = [(name = "worker", worker = .worker)],
+  services = [(name = "worker", worker = .worker)%s],
   sockets = [(name = "http", address = "*:%d", http = (), service = "worker")],
 );
 
 const worker :Workerd.Worker = (
   modules = [(name = "%s", esModule = embed "%s")],
   compatibilityDate = "%s",
-);
+%s);
 `
