@@ -35,3 +35,25 @@ func TestRepositoryConfigurations(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateRoutesUpstreamPort(t *testing.T) {
+	for _, test := range []struct {
+		target string
+		valid  bool
+	}{
+		{target: "http://localhost", valid: true},
+		{target: "http://localhost:1", valid: true},
+		{target: "https://[::1]:65535", valid: true},
+		{target: "http://[::1]", valid: true},
+		{target: "http://localhost:0"},
+		{target: "http://localhost:65536"},
+		{target: "http://[::1]:"},
+	} {
+		t.Run(test.target, func(t *testing.T) {
+			err := config.ValidateRoutes([]config.Route{{Host: "app.localhost", Target: test.target}})
+			if (err == nil) != test.valid {
+				t.Fatalf("valid = %v, validation returned %v", test.valid, err)
+			}
+		})
+	}
+}

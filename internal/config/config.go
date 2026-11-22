@@ -72,8 +72,13 @@ func (cfg Config) Validate() error {
 			return fmt.Errorf("invalid listen port: %q", address)
 		}
 	}
+	return ValidateRoutes(cfg.Routes)
+}
+
+// ValidateRoutes checks the host and upstream rules shared by static and dynamic routes.
+func ValidateRoutes(routes []Route) error {
 	seen := make(map[string]bool)
-	for _, route := range cfg.Routes {
+	for _, route := range routes {
 		host, err := url.Parse("http://" + route.Host)
 		if err != nil || route.Host == "" || host.Host != route.Host || host.Hostname() != route.Host || host.User != nil || host.Path != "" || host.RawQuery != "" || host.Fragment != "" {
 			return fmt.Errorf("route host must be a hostname without port: %q", route.Host)
@@ -86,6 +91,15 @@ func (cfg Config) Validate() error {
 		target, err := url.Parse(route.Target)
 		if err != nil || target.Hostname() == "" || (target.Scheme != "http" && target.Scheme != "https") || target.User != nil || target.RawQuery != "" || target.Fragment != "" {
 			return fmt.Errorf("invalid HTTP route target: %q", route.Target)
+		}
+		if port := target.Port(); port != "" || strings.HasSuffix(target.Host, ":") {
+			number, err := strconv.ParseUint(port, 10, 16)
+			if err != nil {
+				return fmt.Errorf("invalid HTTP route target port in %q: %w", route.Target, err)
+			}
+			if number == 0 {
+				return fmt.Errorf("invalid HTTP route target port in %q: port must be between 1 and 65535", route.Target)
+			}
 		}
 	}
 	return nil
