@@ -8,7 +8,7 @@ export function Login() {
   const cache = useQueryClient();
   const mutation = useMutation({
     mutationFn: login,
-    onSuccess: (user) => cache.setQueryData(['session'], user),
+    onSuccess: (session) => cache.setQueryData(['session'], session),
   });
   return (
     <main className={styles.login}>

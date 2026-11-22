@@ -148,6 +148,10 @@ export interface components {
             id: string;
             name: string;
         };
+        Session: {
+            user: components["schemas"]["User"];
+            projects: components["schemas"]["Project"][];
+        };
         Error: {
             message: string;
         };
@@ -169,6 +173,15 @@ export interface components {
             };
             content: {
                 "application/json": components["schemas"]["User"];
+            };
+        };
+        /** @description 当前账号与可见项目 */
+        Session: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Session"];
             };
         };
         /** @description 请求失败 */
@@ -222,7 +235,7 @@ export interface operations {
             };
         };
         responses: {
-            200: components["responses"]["User"];
+            200: components["responses"]["Session"];
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             default: components["responses"]["Error"];
@@ -256,7 +269,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            200: components["responses"]["User"];
+            200: components["responses"]["Session"];
             401: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
