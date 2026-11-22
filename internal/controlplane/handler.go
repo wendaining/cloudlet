@@ -7,7 +7,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/mail"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -237,9 +236,8 @@ func (h *handler) UpsertProjectMember(c *gin.Context, projectID string) {
 		c.JSON(http.StatusBadRequest, apigen.Error{Message: "成员请求格式无效"})
 		return
 	}
-	email := strings.ToLower(strings.TrimSpace(body.Email))
-	address, err := mail.ParseAddress(email)
-	if err != nil || address.Address != email || len(email) > 254 {
+	email, err := database.NormalizeEmail(body.Email)
+	if err != nil {
 		c.JSON(http.StatusBadRequest, apigen.Error{Message: "成员邮箱格式无效"})
 		return
 	}

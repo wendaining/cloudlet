@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"net/mail"
 	"strings"
 	"time"
 
@@ -101,12 +100,12 @@ func (s *Store) Status(ctx context.Context) ([]*goose.MigrationStatus, error) {
 }
 
 func (s *Store) SeedUser(ctx context.Context, email, password string) error {
-	address, err := mail.ParseAddress(email)
-	if err != nil || address.Address != email || len(password) < 16 || len(password) > 72 {
+	normalized, err := NormalizeEmail(email)
+	if err != nil || len(password) < 16 || len(password) > 72 {
 		return errors.New("开发账号需要有效邮箱与长度为 16 至 72 字节的密码")
 	}
 	var existing User
-	err = s.DB.WithContext(ctx).Where("email = ?", strings.ToLower(email)).First(&existing).Error
+	err = s.DB.WithContext(ctx).Where("email = ?", normalized).First(&existing).Error
 	if err == nil {
 		return nil
 	}
@@ -117,7 +116,7 @@ func (s *Store) SeedUser(ctx context.Context, email, password string) error {
 	if err != nil {
 		return err
 	}
-	user := User{ID: uuid.NewString(), Email: strings.ToLower(email), PasswordHash: string(hash)}
+	user := User{ID: uuid.NewString(), Email: normalized, PasswordHash: string(hash)}
 	return s.DB.WithContext(ctx).Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "email"}}, DoNothing: true}).Create(&user).Error
 }
 

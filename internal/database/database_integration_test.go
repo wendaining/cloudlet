@@ -338,6 +338,30 @@ func projectMemberLifecycle(t *testing.T, ctx context.Context, api *httptest.Ser
 	if err != nil || ownerMember.Role != "owner" {
 		t.Fatalf("存储层修改所有者后关系错误: %+v, %v", ownerMember, err)
 	}
+
+	longEmail := strings.Repeat("a", 168) + strings.Repeat("é", 40) + "@example.com"
+	const longPassword = "long-email-integration-password"
+	if err := store.SeedUser(ctx, longEmail, longPassword); err != nil {
+		t.Fatal(err)
+	}
+	longUser, err := store.Authenticate(ctx, longEmail, longPassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	longClient := newSessionClient(t)
+	loginSession(t, api, longClient, longEmail, longPassword)
+	longProject := decodeProject(t, memberRequest(t, ownerClient, http.MethodPost, api.URL+"/api/v1/projects", map[string]string{"name": "长邮箱项目"}, http.StatusCreated))
+	longBase := api.URL + "/api/v1/projects/" + longProject.Id.String() + "/members"
+	added = decodeProjectMember(t, memberRequest(t, ownerClient, http.MethodPost, longBase, map[string]string{"email": longEmail, "role": "viewer"}, http.StatusOK))
+	if added.UserId != longUser.ID || added.Email != strings.ToLower(longEmail) || added.Role != apigen.ProjectRole("viewer") {
+		t.Fatalf("长邮箱账号加入项目错误: %+v", added)
+	}
+	memberRequest(t, longClient, http.MethodGet, api.URL+"/api/v1/projects/"+longProject.Id.String(), nil, http.StatusOK).Body.Close()
+	tooLongEmail := strings.Repeat("a", 243) + "@example.com"
+	if err := store.SeedUser(ctx, tooLongEmail, longPassword); err == nil {
+		t.Fatal("超长邮箱通过了账号创建")
+	}
+	memberRequest(t, ownerClient, http.MethodPost, longBase, map[string]string{"email": tooLongEmail, "role": "viewer"}, http.StatusBadRequest).Body.Close()
 }
 
 func newSessionClient(t *testing.T) *http.Client {
