@@ -176,6 +176,13 @@ func TestPostgresMigrationAccountsSessionsAndProjects(t *testing.T) {
 	if member.Role != "owner" || member.UserID != user.ID {
 		t.Fatalf("项目所有者关系错误: %+v", member)
 	}
+	operationsInProject, err := store.ProjectOperations(ctx, user.ID, projectID)
+	if err != nil || len(operationsInProject) != 0 {
+		t.Fatalf("重启后项目内操作查询返回 %+v, %v", operationsInProject, err)
+	}
+	if visible, err := store.ProjectOperations(ctx, user.ID, uuid.NewString()); err != nil || len(visible) != 0 {
+		t.Fatalf("未知项目操作查询返回 %+v, %v", visible, err)
+	}
 	if _, err := store.ProjectMember(ctx, projectID, otherUser.ID); !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatalf("其他用户取得了项目成员关系: %v", err)
 	}
@@ -523,6 +530,16 @@ func projectLifecycle(t *testing.T, api *httptest.Server, ownerClient *http.Clie
 	if fetched != project {
 		t.Fatalf("无连字符 UUID 读取项目返回错误: %+v", fetched)
 	}
+	response = request(ownerClient, "GET", base+"/projects/"+project.Id.String()+"/operations", "", http.StatusOK)
+	var operations []apigen.Operation
+	if err := json.NewDecoder(response.Body).Decode(&operations); err != nil {
+		t.Fatal(err)
+	}
+	if len(operations) != 0 {
+		t.Fatalf("新项目应没有操作记录: %+v", operations)
+	}
+	request(otherClient, "GET", base+"/projects/"+project.Id.String()+"/operations", "", http.StatusNotFound)
+	request(ownerClient, "GET", base+"/projects/"+uuid.NewString()+"/operations", "", http.StatusNotFound)
 	response = request(otherClient, "GET", base+"/projects", "", http.StatusOK)
 	if err := json.NewDecoder(response.Body).Decode(&projects); err != nil {
 		t.Fatal(err)

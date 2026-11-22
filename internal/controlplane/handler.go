@@ -297,6 +297,43 @@ func (h *handler) UpsertProjectMember(c *gin.Context, projectID string) {
 	})
 }
 
+func (h *handler) ListProjectOperations(c *gin.Context, projectID string) {
+	user, ok := h.currentUser(c)
+	if !ok {
+		return
+	}
+	parsedID, err := uuid.Parse(projectID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, apigen.Error{Message: "项目不存在或没有访问权限"})
+		return
+	}
+	// Resolve project access first so an invisible project is a 404 rather than an empty list.
+	if _, err := h.store.Project(c.Request.Context(), user.ID, parsedID.String()); errors.Is(err, gorm.ErrRecordNotFound) {
+		c.JSON(http.StatusNotFound, apigen.Error{Message: "项目不存在或没有访问权限"})
+		return
+	} else if err != nil {
+		h.failure(c, err)
+		return
+	}
+	operations, err := h.store.ProjectOperations(c.Request.Context(), user.ID, parsedID.String())
+	if err != nil {
+		h.failure(c, err)
+		return
+	}
+	response := make([]apigen.Operation, 0, len(operations))
+	for _, operation := range operations {
+		response = append(response, apigen.Operation{
+			Id:        operation.ID,
+			Action:    operation.Action,
+			Phase:     string(operation.Phase),
+			Outcome:   string(operation.Outcome),
+			CreatedAt: operation.CreatedAt,
+			UpdatedAt: operation.UpdatedAt,
+		})
+	}
+	c.JSON(http.StatusOK, response)
+}
+
 func (h *handler) projectAccess(c *gin.Context, projectID string) (database.User, string, database.ProjectMember, bool) {
 	user, ok := h.currentUser(c)
 	if !ok {

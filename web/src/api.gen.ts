@@ -100,6 +100,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{projectID}/operations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        get: operations["listProjectOperations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{projectID}": {
         parameters: {
             query?: never;
@@ -185,6 +203,17 @@ export interface components {
         Session: {
             user: components["schemas"]["User"];
             projects: components["schemas"]["Project"][];
+        };
+        Operation: {
+            /** Format: uuid */
+            id: string;
+            action: string;
+            phase: string;
+            outcome: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
         };
         Error: {
             message: string;
@@ -377,6 +406,31 @@ export interface operations {
             201: components["responses"]["Project"];
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listProjectOperations: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 项目内操作，按创建时间升序返回 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Operation"][];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };

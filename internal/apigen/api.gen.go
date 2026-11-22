@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/oapi-codegen/runtime"
@@ -78,6 +79,16 @@ type Error struct {
 type LoginRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
+}
+
+// Operation defines model for Operation.
+type Operation struct {
+	Action    string             `json:"action"`
+	CreatedAt time.Time          `json:"created_at"`
+	Id        openapi_types.UUID `json:"id"`
+	Outcome   string             `json:"outcome"`
+	Phase     string             `json:"phase"`
+	UpdatedAt time.Time          `json:"updated_at"`
 }
 
 // Project defines model for Project.
@@ -255,6 +266,9 @@ type ClientInterface interface {
 	// 添加已有账号为项目成员，或更新其 developer/viewer 角色；仅项目所有者可以调用。.
 	UpsertProjectMember(ctx context.Context, projectID string, body UpsertProjectMemberJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListProjectOperations performs a GET /api/v1/projects/{projectID}/operations (the `ListProjectOperations` operationId) request.
+	ListProjectOperations(ctx context.Context, projectID string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetVersion performs a GET /api/v1/version (the `GetVersion` operationId) request.
 	GetVersion(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 }
@@ -417,6 +431,19 @@ func (c *Client) UpsertProjectMemberWithBody(ctx context.Context, projectID stri
 // 添加已有账号为项目成员，或更新其 developer/viewer 角色；仅项目所有者可以调用。.
 func (c *Client) UpsertProjectMember(ctx context.Context, projectID string, body UpsertProjectMemberJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewUpsertProjectMemberRequest(c.Server, projectID, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListProjectOperations performs a GET /api/v1/projects/{projectID}/operations (the `ListProjectOperations` operationId) request.
+func (c *Client) ListProjectOperations(ctx context.Context, projectID string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListProjectOperationsRequest(c.Server, projectID)
 	if err != nil {
 		return nil, err
 	}
@@ -743,6 +770,40 @@ func NewUpsertProjectMemberRequestWithBody(server string, projectID string, cont
 	return req, nil
 }
 
+// NewListProjectOperationsRequest constructs an http.Request for the ListProjectOperations method
+func NewListProjectOperationsRequest(server string, projectID string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/operations", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewGetVersionRequest constructs an http.Request for the GetVersion method
 func NewGetVersionRequest(server string) (*http.Request, error) {
 	var err error
@@ -879,6 +940,11 @@ type ClientWithResponsesInterface interface {
 	//
 	// 添加已有账号为项目成员，或更新其 developer/viewer 角色；仅项目所有者可以调用。.
 	UpsertProjectMemberWithResponse(ctx context.Context, projectID string, body UpsertProjectMemberJSONRequestBody, reqEditors ...RequestEditorFn) (*UpsertProjectMemberResponse, error)
+
+	// ListProjectOperationsWithResponse performs a GET /api/v1/projects/{projectID}/operations (the `ListProjectOperations` operationId) request.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	ListProjectOperationsWithResponse(ctx context.Context, projectID string, reqEditors ...RequestEditorFn) (*ListProjectOperationsResponse, error)
 
 	// GetVersionWithResponse performs a GET /api/v1/version (the `GetVersion` operationId) request.
 	//
@@ -1423,6 +1489,68 @@ func (r UpsertProjectMemberResponse) ContentType() string {
 	return ""
 }
 
+type ListProjectOperationsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *[]Operation
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Error
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *Error
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListProjectOperationsResponse) GetJSON200() *[]Operation {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r ListProjectOperationsResponse) GetJSON401() *Error {
+	return r.JSON401
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r ListProjectOperationsResponse) GetJSON404() *Error {
+	return r.JSON404
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r ListProjectOperationsResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r ListProjectOperationsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListProjectOperationsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListProjectOperationsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListProjectOperationsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type GetVersionResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -1607,6 +1735,17 @@ func (c *ClientWithResponses) UpsertProjectMemberWithResponse(ctx context.Contex
 		return nil, err
 	}
 	return ParseUpsertProjectMemberResponse(rsp)
+}
+
+// ListProjectOperationsWithResponse performs a GET /api/v1/projects/{projectID}/operations (the `ListProjectOperations` operationId) request.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) ListProjectOperationsWithResponse(ctx context.Context, projectID string, reqEditors ...RequestEditorFn) (*ListProjectOperationsResponse, error) {
+	rsp, err := c.ListProjectOperations(ctx, projectID, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListProjectOperationsResponse(rsp)
 }
 
 // GetVersionWithResponse performs a GET /api/v1/version (the `GetVersion` operationId) request.
@@ -2025,6 +2164,53 @@ func ParseUpsertProjectMemberResponse(rsp *http.Response) (*UpsertProjectMemberR
 	return response, nil
 }
 
+// ParseListProjectOperationsResponse parses an HTTP response from a ListProjectOperationsWithResponse call
+func ParseListProjectOperationsResponse(rsp *http.Response) (*ListProjectOperationsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListProjectOperationsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest []Operation
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseGetVersionResponse parses an HTTP response from a GetVersionWithResponse call
 func ParseGetVersionResponse(rsp *http.Response) (*GetVersionResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -2087,6 +2273,9 @@ type ServerInterface interface {
 
 	// (POST /api/v1/projects/{projectID}/members)
 	UpsertProjectMember(c *gin.Context, projectID string)
+
+	// (GET /api/v1/projects/{projectID}/operations)
+	ListProjectOperations(c *gin.Context, projectID string)
 
 	// (GET /api/v1/version)
 	GetVersion(c *gin.Context)
@@ -2254,6 +2443,31 @@ func (siw *ServerInterfaceWrapper) UpsertProjectMember(c *gin.Context) {
 	siw.Handler.UpsertProjectMember(c, projectID)
 }
 
+// ListProjectOperations operation middleware
+func (siw *ServerInterfaceWrapper) ListProjectOperations(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ListProjectOperations(c, projectID)
+}
+
 // GetVersion operation middleware
 func (siw *ServerInterfaceWrapper) GetVersion(c *gin.Context) {
 
@@ -2301,6 +2515,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/api/v1/environment", wrapper.GetEnvironment)
 	router.GET(options.BaseURL+"/api/v1/projects", wrapper.ListProjects)
 	router.POST(options.BaseURL+"/api/v1/projects", wrapper.CreateProject)
+	router.GET(options.BaseURL+"/api/v1/projects/:projectID/operations", wrapper.ListProjectOperations)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID", wrapper.GetProject)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/members", wrapper.ListProjectMembers)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/members", wrapper.UpsertProjectMember)

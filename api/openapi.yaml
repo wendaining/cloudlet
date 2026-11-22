@@ -106,6 +106,32 @@ paths:
                   $ref: '#/components/schemas/Project'
         '401':
           $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/operations:
+    parameters:
+      - name: projectID
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: listProjectOperations
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: "#/components/responses/Error"
+        "200":
+          description: 项目内操作，按创建时间升序返回
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Operation"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
   /api/v1/projects/{projectID}:
     parameters:
       - name: projectID
@@ -279,6 +305,25 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Project"
+    Operation:
+      type: object
+      required: [id, action, phase, outcome, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        action:
+          type: string
+        phase:
+          type: string
+        outcome:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
     Error:
       type: object
       required: [message]
