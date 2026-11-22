@@ -96,14 +96,14 @@ func TestPostgresMigrationAccountsSessionsAndProjects(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	newServer := func() *httptest.Server {
-		handler, cleanup := controlplane.NewHandler(store, config.Config{Instance: "integration", PublicOrigin: "http://localhost"}, slog.Default())
+	newServer := func(serverStore *database.Store) *httptest.Server {
+		handler, cleanup := controlplane.NewHandler(serverStore, config.Config{Instance: "integration", PublicOrigin: "http://localhost"}, slog.Default())
 		t.Cleanup(cleanup)
 		server := httptest.NewServer(handler)
 		t.Cleanup(server.Close)
 		return server
 	}
-	api := newServer()
+	api := newServer(store)
 	jar, err := cookiejar.New(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -166,7 +166,7 @@ func TestPostgresMigrationAccountsSessionsAndProjects(t *testing.T) {
 		t.Fatal("所有者写入失败后残留了项目")
 	}
 	api.Close()
-	api = newServer()
+	api = newServer(store)
 	request("GET", api.URL+"/api/v1/auth/session", "", http.StatusOK)
 	request("GET", api.URL+"/api/v1/projects/"+projectID, "", http.StatusOK)
 	member, err := store.ProjectMember(ctx, projectID, user.ID)
@@ -180,9 +180,16 @@ func TestPostgresMigrationAccountsSessionsAndProjects(t *testing.T) {
 		t.Fatalf("其他用户取得了项目成员关系: %v", err)
 	}
 	projectMemberLifecycle(t, ctx, api, store, client, project, user, otherUser, otherPassword)
+	api.Close()
 	reopened, err := database.Open(ctx, connection)
 	if err != nil {
 		t.Fatal(err)
+	}
+	api = newServer(reopened)
+	memberBase := api.URL + "/api/v1/projects/" + projectID + "/members"
+	membersAfterRestart := decodeProjectMembers(t, memberRequest(t, client, http.MethodGet, memberBase, nil, http.StatusOK))
+	if len(membersAfterRestart) != 3 || membersAfterRestart[0].Role != apigen.ProjectRoleOwner || membersAfterRestart[1].Role != apigen.ProjectRoleDeveloper || membersAfterRestart[2].Role != apigen.ProjectRoleViewer {
+		t.Fatalf("服务重连后通过 HTTP 读取项目成员错误: %+v", membersAfterRestart)
 	}
 	persisted, err := reopened.ProjectMember(ctx, projectID, user.ID)
 	if err != nil {
@@ -198,9 +205,11 @@ func TestPostgresMigrationAccountsSessionsAndProjects(t *testing.T) {
 	if len(persistedMembers) != 3 || persistedMembers[0].Role != "owner" || persistedMembers[1].Role != "developer" || persistedMembers[2].Role != "viewer" {
 		t.Fatalf("重新连接后项目成员错误: %+v", persistedMembers)
 	}
+	api.Close()
 	if err := reopened.SQL.Close(); err != nil {
 		t.Fatal(err)
 	}
+	api = newServer(store)
 	t.Run("operations", func(t *testing.T) {
 		testOperations(t, ctx, store, connection, project.Id, user.ID)
 	})
