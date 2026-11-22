@@ -1,2 +1,2 @@
-// Package workers 生成无状态 Worker 的 workerd 运行配置。
+// Package workers 生成 Worker 和 Durable Objects 的 workerd 运行配置。
 package workers

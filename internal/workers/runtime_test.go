@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+	"github.com/wendaining/cloudlet/internal/durableobjects"
 	"github.com/wendaining/cloudlet/internal/workers"
 )
 
@@ -36,8 +38,24 @@ func TestPrepare(t *testing.T) {
 			t.Errorf("config does not contain %q:\n%s", expected, prepared.Config)
 		}
 	}
+	if bytes.Contains(prepared.Config, []byte("durableObjectStorage")) {
+		t.Fatal("stateless config enables Durable Object storage")
+	}
 	if args := workers.ServeArgs(); !slices.Equal(args, []string{"serve", "/worker/config.capnp"}) {
 		t.Errorf("serve arguments = %q", args)
+	}
+}
+
+func TestPrepareWithDurableObjectsRejectsInvalidBinding(t *testing.T) {
+	entry := "worker.mjs"
+	bundle := writeBundle(t, entry, []byte("export default {fetch() { return new Response() }}"))
+	namespaces := []durableobjects.Namespace{{ID: uuid.New(), ClassName: "Counter", Bindings: []string{`BAD"BINDING`}}}
+	prepared, err := workers.PrepareWithDurableObjects(bundle, entry, compatibilityDate, namespaces)
+	if err == nil || !strings.Contains(err.Error(), "must be an ASCII JavaScript identifier") {
+		t.Fatalf("PrepareWithDurableObjects error = %v, want binding diagnostic", err)
+	}
+	if prepared.Config != nil || prepared.Module != nil {
+		t.Fatal("PrepareWithDurableObjects returned files after a validation error")
 	}
 }
 

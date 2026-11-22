@@ -1,6 +1,6 @@
 # 执行环境设计
 
-本文规定 Workers、Durable Objects、Containers 和 Browser Run 的目标执行规则。资源、部署与操作模型见 [平台设计](platform-design.md)。目前已验证无状态 Worker 的基础运行配置。
+本文规定 Workers、Durable Objects、Containers 和 Browser Run 的目标执行规则。资源、部署与操作模型见 [平台设计](platform-design.md)。目前已验证无状态 Worker 和具备 SQLite 绑定的 Worker 运行配置。
 
 ## 执行单元与控制边界
 
@@ -35,6 +35,10 @@ workerd 常驻执行 Worker isolate。请求复用已准备的运行环境。运
 同一项目存在 DO 时，配置更新同时遵循命名空间所有权交接。运行时适配器必须报告实际支持的版本更新机制和影响范围，部署操作据此选择对应的交接流程。
 
 ## DO 命名空间与存储
+
+`workers.PrepareWithDurableObjects` 接收一个或多个 `durableobjects.Namespace`。每个命名空间声明稳定的 UUID、模块中的类导出名称和至少一个 Worker 绑定名称。类与绑定名称使用 ASCII JavaScript 标识符。UUID、类名称和绑定名称在同一个 Worker 配置中分别保持唯一。同一命名空间的多个绑定指向同一个类和存储。
+
+配置使用命名空间 UUID 作为 workerd 的 `uniqueKey`，通过 `enableSql` 开启 `ctx.storage.sql`，通过 `localDisk` 写入持久化存储。调用方将专用的可写数据卷挂载到容器内的 `durableobjects.StoragePath`（`/durable-objects`）。每次启动只将该卷交给一个运行中的执行。重启时先停止原执行，再将原数据卷挂载到新执行，并保留命名空间 UUID。
 
 namespace_id 是稳定业务标识。Worker 的绑定名称和类声明引用该标识，代码版本变更保留命名空间身份。对象标识、对象调度、storage 事务和输出门由 workerd 执行。
 
