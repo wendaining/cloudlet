@@ -16,11 +16,11 @@ export async function session() {
 }
 
 export async function login(body: LoginRequest) {
-  const { data, response } = await client.POST('/api/v1/auth/login', {
+  const { data, error } = await client.POST('/api/v1/auth/login', {
     body,
   });
-  const status = response.status;
-  if (!data) throw new Error(`登录失败，状态码 ${status}`);
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error('登录成功但缺少数据');
   return data;
 }
 
