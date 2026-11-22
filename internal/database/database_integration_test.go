@@ -3,9 +3,11 @@
 package database_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/http/cookiejar"
@@ -177,6 +179,7 @@ func TestPostgresMigrationAccountsSessionsAndProjects(t *testing.T) {
 	if _, err := store.ProjectMember(ctx, projectID, otherUser.ID); !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatalf("其他用户取得了项目成员关系: %v", err)
 	}
+	projectMemberLifecycle(t, ctx, api, store, client, project, user, otherUser, otherPassword)
 	reopened, err := database.Open(ctx, connection)
 	if err != nil {
 		t.Fatal(err)
@@ -187,6 +190,13 @@ func TestPostgresMigrationAccountsSessionsAndProjects(t *testing.T) {
 	}
 	if persisted.Role != "owner" {
 		t.Fatalf("重新连接后项目所有者关系错误: %+v", persisted)
+	}
+	persistedMembers, err := reopened.ProjectMembers(ctx, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(persistedMembers) != 3 || persistedMembers[0].Role != "owner" || persistedMembers[1].Role != "developer" || persistedMembers[2].Role != "viewer" {
+		t.Fatalf("重新连接后项目成员错误: %+v", persistedMembers)
 	}
 	if err := reopened.SQL.Close(); err != nil {
 		t.Fatal(err)
@@ -222,6 +232,194 @@ func TestPostgresMigrationAccountsSessionsAndProjects(t *testing.T) {
 		t.Fatal(err)
 	}
 	request("GET", api.URL+"/readyz", "", http.StatusServiceUnavailable)
+}
+
+func projectMemberLifecycle(t *testing.T, ctx context.Context, api *httptest.Server, store *database.Store, ownerClient *http.Client, project apigen.Project, owner, developer database.User, developerPassword string) {
+	t.Helper()
+	const viewerEmail = "observer@cloudlet.local"
+	const viewerPassword = "observer-integration-password"
+	const outsiderEmail = "outsider@cloudlet.local"
+	const outsiderPassword = "outsider-integration-password"
+	for _, account := range []struct {
+		email    string
+		password string
+	}{
+		{viewerEmail, viewerPassword},
+		{outsiderEmail, outsiderPassword},
+	} {
+		if err := store.SeedUser(ctx, account.email, account.password); err != nil {
+			t.Fatal(err)
+		}
+	}
+	viewer, err := store.Authenticate(ctx, viewerEmail, viewerPassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	developerClient := newSessionClient(t)
+	loginSession(t, api, developerClient, developer.Email, developerPassword)
+	viewerClient := newSessionClient(t)
+	loginSession(t, api, viewerClient, viewerEmail, viewerPassword)
+	outsiderClient := newSessionClient(t)
+	loginSession(t, api, outsiderClient, outsiderEmail, outsiderPassword)
+
+	base := api.URL + "/api/v1/projects/" + project.Id.String() + "/members"
+	members := decodeProjectMembers(t, memberRequest(t, ownerClient, http.MethodGet, base, nil, http.StatusOK))
+	if len(members) != 1 || members[0].UserId != owner.ID || members[0].Email != owner.Email || members[0].Role != apigen.ProjectRole("owner") {
+		t.Fatalf("初始项目成员错误: %+v", members)
+	}
+
+	added := decodeProjectMember(t, memberRequest(t, ownerClient, http.MethodPost, base, map[string]string{"email": developer.Email, "role": "developer"}, http.StatusOK))
+	if added.UserId != developer.ID || added.Email != developer.Email || added.Role != apigen.ProjectRole("developer") {
+		t.Fatalf("添加开发者返回错误: %+v", added)
+	}
+	members = decodeProjectMembers(t, memberRequest(t, ownerClient, http.MethodGet, base, nil, http.StatusOK))
+	if len(members) != 2 || members[0].Role != apigen.ProjectRole("owner") || members[1].UserId != developer.ID || members[1].Role != apigen.ProjectRole("developer") {
+		t.Fatalf("添加开发者后的成员列表错误: %+v", members)
+	}
+
+	projects := decodeProjects(t, memberRequest(t, developerClient, http.MethodGet, api.URL+"/api/v1/projects", nil, http.StatusOK))
+	if len(projects) != 1 || projects[0].Id != project.Id {
+		t.Fatalf("开发者读取项目列表错误: %+v", projects)
+	}
+	memberRequest(t, developerClient, http.MethodGet, api.URL+"/api/v1/projects/"+project.Id.String(), nil, http.StatusOK).Body.Close()
+	memberRequest(t, developerClient, http.MethodGet, base, nil, http.StatusOK).Body.Close()
+	memberRequest(t, developerClient, http.MethodPost, base, map[string]string{"email": viewerEmail, "role": "viewer"}, http.StatusForbidden).Body.Close()
+
+	added = decodeProjectMember(t, memberRequest(t, ownerClient, http.MethodPost, base, map[string]string{"email": "  " + strings.ToUpper(viewerEmail) + "  ", "role": "viewer"}, http.StatusOK))
+	if added.UserId != viewer.ID || added.Email != viewerEmail || added.Role != apigen.ProjectRole("viewer") {
+		t.Fatalf("添加观察者返回错误: %+v", added)
+	}
+	projects = decodeProjects(t, memberRequest(t, viewerClient, http.MethodGet, api.URL+"/api/v1/projects", nil, http.StatusOK))
+	if len(projects) != 1 || projects[0].Id != project.Id {
+		t.Fatalf("观察者读取项目列表错误: %+v", projects)
+	}
+	memberRequest(t, viewerClient, http.MethodGet, api.URL+"/api/v1/projects/"+project.Id.String(), nil, http.StatusOK).Body.Close()
+	memberRequest(t, viewerClient, http.MethodGet, base, nil, http.StatusOK).Body.Close()
+	memberRequest(t, viewerClient, http.MethodPost, base, map[string]string{"email": developer.Email, "role": "viewer"}, http.StatusForbidden).Body.Close()
+
+	updated := decodeProjectMember(t, memberRequest(t, ownerClient, http.MethodPost, base, map[string]string{"email": developer.Email, "role": "viewer"}, http.StatusOK))
+	if updated.UserId != developer.ID || updated.Role != apigen.ProjectRole("viewer") {
+		t.Fatalf("更新开发者角色错误: %+v", updated)
+	}
+	updated = decodeProjectMember(t, memberRequest(t, ownerClient, http.MethodPost, base, map[string]string{"email": developer.Email, "role": "developer"}, http.StatusOK))
+	if updated.UserId != developer.ID || updated.Role != apigen.ProjectRole("developer") {
+		t.Fatalf("恢复开发者角色错误: %+v", updated)
+	}
+
+	memberRequest(t, ownerClient, http.MethodPost, base, map[string]string{"email": owner.Email, "role": "developer"}, http.StatusConflict).Body.Close()
+	memberRequest(t, ownerClient, http.MethodPost, base, map[string]string{"email": "missing@cloudlet.local", "role": "developer"}, http.StatusNotFound).Body.Close()
+	memberRequest(t, ownerClient, http.MethodPost, base, map[string]string{"email": "not-an-email", "role": "developer"}, http.StatusBadRequest).Body.Close()
+	memberRequest(t, ownerClient, http.MethodPost, base, map[string]string{"email": viewerEmail, "role": "owner"}, http.StatusBadRequest).Body.Close()
+	memberRequest(t, ownerClient, http.MethodPost, base, map[string]any{"email": viewerEmail, "role": "viewer", "typo": true}, http.StatusBadRequest).Body.Close()
+
+	otherProject := decodeProject(t, memberRequest(t, outsiderClient, http.MethodPost, api.URL+"/api/v1/projects", map[string]string{"name": "其他项目"}, http.StatusCreated))
+	otherBase := api.URL + "/api/v1/projects/" + otherProject.Id.String() + "/members"
+	memberRequest(t, ownerClient, http.MethodPost, otherBase, map[string]string{"email": viewerEmail, "role": "viewer"}, http.StatusNotFound).Body.Close()
+	memberRequest(t, developerClient, http.MethodGet, otherBase, nil, http.StatusNotFound).Body.Close()
+	memberRequest(t, viewerClient, http.MethodGet, otherBase, nil, http.StatusNotFound).Body.Close()
+	memberRequest(t, outsiderClient, http.MethodGet, base, nil, http.StatusNotFound).Body.Close()
+	memberRequest(t, outsiderClient, http.MethodPost, base, map[string]string{"email": viewerEmail, "role": "viewer"}, http.StatusNotFound).Body.Close()
+
+	storedMembers, err := store.ProjectMembers(ctx, project.Id.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(storedMembers) != 3 || storedMembers[0].UserID != owner.ID || storedMembers[0].Role != "owner" || storedMembers[1].UserID != developer.ID || storedMembers[1].Role != "developer" || storedMembers[2].UserID != viewer.ID || storedMembers[2].Role != "viewer" {
+		t.Fatalf("持久化的项目成员错误: %+v", storedMembers)
+	}
+	ownerMember, err := store.ProjectMember(ctx, project.Id.String(), owner.ID)
+	if err != nil || ownerMember.Role != "owner" {
+		t.Fatalf("项目所有者关系发生变化: %+v, %v", ownerMember, err)
+	}
+	if err := store.UpsertProjectMember(ctx, project.Id.String(), owner.ID, "viewer"); err == nil {
+		t.Fatal("存储层允许修改项目所有者角色")
+	}
+	ownerMember, err = store.ProjectMember(ctx, project.Id.String(), owner.ID)
+	if err != nil || ownerMember.Role != "owner" {
+		t.Fatalf("存储层修改所有者后关系错误: %+v, %v", ownerMember, err)
+	}
+}
+
+func newSessionClient(t *testing.T) *http.Client {
+	t.Helper()
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &http.Client{Jar: jar}
+}
+
+func loginSession(t *testing.T, api *httptest.Server, client *http.Client, email, password string) {
+	t.Helper()
+	response := memberRequest(t, client, http.MethodPost, api.URL+"/api/v1/auth/login", map[string]string{"email": email, "password": password}, http.StatusOK)
+	response.Body.Close()
+}
+
+func memberRequest(t *testing.T, client *http.Client, method, endpoint string, body any, expected int) *http.Response {
+	t.Helper()
+	var reader io.Reader
+	if body != nil {
+		encoded, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reader = bytes.NewReader(encoded)
+	}
+	request, err := http.NewRequest(method, endpoint, reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != expected {
+		defer response.Body.Close()
+		data, _ := io.ReadAll(response.Body)
+		t.Fatalf("%s %s 返回 %d，要求 %d，响应 %s", method, endpoint, response.StatusCode, expected, data)
+	}
+	return response
+}
+
+func decodeProject(t *testing.T, response *http.Response) apigen.Project {
+	t.Helper()
+	defer response.Body.Close()
+	var project apigen.Project
+	if err := json.NewDecoder(response.Body).Decode(&project); err != nil {
+		t.Fatal(err)
+	}
+	return project
+}
+
+func decodeProjects(t *testing.T, response *http.Response) []apigen.Project {
+	t.Helper()
+	defer response.Body.Close()
+	var projects []apigen.Project
+	if err := json.NewDecoder(response.Body).Decode(&projects); err != nil {
+		t.Fatal(err)
+	}
+	return projects
+}
+
+func decodeProjectMember(t *testing.T, response *http.Response) apigen.ProjectMember {
+	t.Helper()
+	defer response.Body.Close()
+	var member apigen.ProjectMember
+	if err := json.NewDecoder(response.Body).Decode(&member); err != nil {
+		t.Fatal(err)
+	}
+	return member
+}
+
+func decodeProjectMembers(t *testing.T, response *http.Response) []apigen.ProjectMember {
+	t.Helper()
+	defer response.Body.Close()
+	var members []apigen.ProjectMember
+	if err := json.NewDecoder(response.Body).Decode(&members); err != nil {
+		t.Fatal(err)
+	}
+	return members
 }
 
 func projectLifecycle(t *testing.T, api *httptest.Server, ownerClient *http.Client, ownerID, otherUserID string) apigen.Project {
