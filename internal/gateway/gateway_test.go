@@ -176,6 +176,9 @@ func TestGatewayMatchesLongestPathPrefix(t *testing.T) {
 		assertRequest("APP.localhost.:8081", path, want, http.StatusOK)
 	}
 	assertRequest("api.localhost", "/apix", "404 page not found\n", http.StatusNotFound)
+	for _, path := range []string{"/api/../admin", "/api/%2e%2e/admin", "/./api"} {
+		assertRequest("app.localhost", path, "invalid request path\n", http.StatusBadRequest)
+	}
 	invalid := []config.Route{
 		{Host: "app.localhost", PathPrefix: "/api", Target: site.URL},
 		{Host: "APP.localhost.", PathPrefix: "/api", Target: admin.URL},

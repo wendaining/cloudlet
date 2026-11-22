@@ -98,6 +98,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "invalid request path", http.StatusBadRequest)
 				return
 			}
+			if decoded == "." || decoded == ".." {
+				http.Error(w, "invalid request path", http.StatusBadRequest)
+				return
+			}
 			segments[i] = decoded
 		}
 		for _, route := range routes {
