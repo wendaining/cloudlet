@@ -1,7 +1,8 @@
 import { Alert, Button, Card, Descriptions, Result } from 'antd';
 import { Link, useParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import { project } from './client';
+import { project, projectMembers, session } from './client';
+import { ProjectMembers } from './ProjectMembers';
 import styles from './app.module.css';
 
 export function ProjectDetail() {
@@ -11,6 +12,15 @@ export function ProjectDetail() {
     queryFn: () => {
       if (!projectID) throw new Error('项目标识缺失');
       return project(projectID);
+    },
+    enabled: Boolean(projectID),
+  });
+  const account = useQuery({ queryKey: ['session'], queryFn: session });
+  const members = useQuery({
+    queryKey: ['project-members', projectID],
+    queryFn: () => {
+      if (!projectID) throw new Error('项目标识缺失');
+      return projectMembers(projectID);
     },
     enabled: Boolean(projectID),
   });
@@ -44,6 +54,10 @@ export function ProjectDetail() {
         />
       </main>
     );
+  const owner = members.data?.some(
+    (member) =>
+      member.user_id === account.data?.user.id && member.role === 'owner',
+  );
   return (
     <main className={styles.detail}>
       <Card
@@ -59,6 +73,7 @@ export function ProjectDetail() {
           </Descriptions.Item>
         </Descriptions>
       </Card>
+      <ProjectMembers projectID={query.data.id} canManage={Boolean(owner)} />
     </main>
   );
 }
