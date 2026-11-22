@@ -222,6 +222,7 @@ func (h *handler) ListProjectOperations(c *gin.Context, projectID string) {
 		c.JSON(http.StatusNotFound, apigen.Error{Message: "项目不存在或没有访问权限"})
 		return
 	}
+	// Resolve project access first so an invisible project is a 404 rather than an empty list.
 	if _, err := h.store.Project(c.Request.Context(), user.ID, parsedID.String()); errors.Is(err, gorm.ErrRecordNotFound) {
 		c.JSON(http.StatusNotFound, apigen.Error{Message: "项目不存在或没有访问权限"})
 		return

@@ -56,10 +56,11 @@ PostgreSQL 当前保存账号、登录会话、项目与操作记录。Workers �
 | /api/v1/version | GET | 返回 version 与 commit |
 | /api/v1/auth/login | POST | 验证账号并建立持久化会话 |
 | /api/v1/auth/logout | POST | 清除当前会话 |
-| /api/v1/auth/session | GET | 返回当前登录账号 |
+| /api/v1/auth/session | GET | 返回当前登录账号与可见项目 |
 | /api/v1/environment | GET | 返回当前实例与数据库版本，需要登录 |
 | /api/v1/projects | GET、POST | 列出当前用户可见项目，创建项目并授予创建者 owner 角色 |
 | /api/v1/projects/{projectID} | GET | 读取当前用户可访问的项目 |
+| /api/v1/projects/{projectID}/operations | GET | 按时间升序读取项目内操作 |
 
 两组监听端口完成初始化后才开始接受请求。管理环境启动前验证数据库连接和迁移版本，就绪接口同时检查数据库连接，数据库不可用时返回 503。
 
