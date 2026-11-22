@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"mime"
 	"net/http"
 	"path"
@@ -49,14 +50,14 @@ func (h handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	info, err := fs.Stat(h.site, name)
 	if err != nil {
-		serveFileError(w, r, err)
+		serveFileError(w, r, name, err)
 		return
 	}
 	if info.IsDir() {
 		name = path.Join(name, "index.html")
 		info, err = fs.Stat(h.site, name)
 		if err != nil {
-			serveFileError(w, r, err)
+			serveFileError(w, r, name, err)
 			return
 		}
 		if info.Mode().IsRegular() && !directoryURL {
@@ -78,16 +79,20 @@ func (h handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	file, err := h.site.Open(name)
 	if err != nil {
-		serveFileError(w, r, err)
+		serveFileError(w, r, name, err)
 		return
 	}
-	defer file.Close()
+	defer func() {
+		if err := file.Close(); err != nil {
+			slog.ErrorContext(r.Context(), "close static site file", "path", name, "error", err)
+		}
+	}()
 	body := bufio.NewReader(file)
 	contentType := mime.TypeByExtension(path.Ext(name))
 	if contentType == "" {
 		sample, err := body.Peek(512)
 		if err != nil && !errors.Is(err, io.EOF) {
-			serveFileError(w, r, err)
+			serveFileError(w, r, name, err)
 			return
 		}
 		contentType = http.DetectContentType(sample)
@@ -98,15 +103,20 @@ func (h handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	written, err := io.Copy(w, body)
-	if err != nil || written != info.Size() {
+	if err == nil && written != info.Size() {
+		err = fmt.Errorf("sent %d of %d bytes: %w", written, info.Size(), io.ErrUnexpectedEOF)
+	}
+	if err != nil {
+		slog.ErrorContext(r.Context(), "send static site file", "path", name, "error", err)
 		panic(http.ErrAbortHandler)
 	}
 }
 
-func serveFileError(w http.ResponseWriter, r *http.Request, err error) {
+func serveFileError(w http.ResponseWriter, r *http.Request, name string, err error) {
 	if errors.Is(err, fs.ErrNotExist) {
 		http.NotFound(w, r)
 		return
 	}
+	slog.ErrorContext(r.Context(), "read static site file", "path", name, "error", err)
 	http.Error(w, "could not read site file", http.StatusInternalServerError)
 }
