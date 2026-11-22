@@ -28,7 +28,7 @@ function Home() {
         />
       </main>
     );
-  return account.data ? <Overview user={account.data} /> : <Login />;
+  return account.data ? <Overview session={account.data} /> : <Login />;
 }
 
 export function App() {

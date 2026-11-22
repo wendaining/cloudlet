@@ -28,7 +28,7 @@ paths:
         default:
           $ref: '#/components/responses/Error'
         '200':
-          $ref: '#/components/responses/User'
+          $ref: '#/components/responses/Session'
         '400':
           $ref: '#/components/responses/Error'
         '401':
@@ -50,7 +50,7 @@ paths:
         default:
           $ref: '#/components/responses/Error'
         '200':
-          $ref: '#/components/responses/User'
+          $ref: '#/components/responses/Session'
         '401':
           $ref: '#/components/responses/Error'
   /api/v1/environment:
@@ -269,6 +269,16 @@ components:
           maxLength: 254
         role:
           $ref: '#/components/schemas/ProjectMemberRole'
+    Session:
+      type: object
+      required: [user, projects]
+      properties:
+        user:
+          $ref: "#/components/schemas/User"
+        projects:
+          type: array
+          items:
+            $ref: "#/components/schemas/Project"
     Error:
       type: object
       required: [message]
@@ -294,6 +304,12 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/User'
+    Session:
+      description: 当前账号与可见项目
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Session"
     Error:
       description: 请求失败
       content:

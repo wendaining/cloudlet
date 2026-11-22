@@ -125,11 +125,11 @@ func TestPostgresMigrationAccountsSessionsAndProjects(t *testing.T) {
 			t.Fatalf("%s %s 返回 %d，要求 %d", method, endpoint, response.StatusCode, expected)
 		}
 		if expected == http.StatusOK && strings.HasSuffix(endpoint, "/auth/session") {
-			var actual database.User
+			var actual apigen.Session
 			if err := json.NewDecoder(response.Body).Decode(&actual); err != nil {
 				t.Fatal(err)
 			}
-			if actual.ID != user.ID {
+			if actual.User.Id != user.ID {
 				t.Fatalf("会话账号发生变化: %+v", actual)
 			}
 		}

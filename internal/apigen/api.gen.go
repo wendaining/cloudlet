@@ -99,6 +99,12 @@ type ProjectMemberRole string
 // ProjectRole defines model for ProjectRole.
 type ProjectRole string
 
+// Session defines model for Session.
+type Session struct {
+	Projects []Project `json:"projects"`
+	User     User      `json:"user"`
+}
+
 // UpsertProjectMemberRequest defines model for UpsertProjectMemberRequest.
 type UpsertProjectMemberRequest struct {
 	// Email 已有账号的邮箱；服务端去除首尾空白并转为小写后查找。
@@ -884,7 +890,7 @@ type LoginResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *User
+	JSON200 *Session
 	// JSON400 the response for an HTTP 400 `application/json` response
 	JSON400 *Error
 	// JSON401 the response for an HTTP 401 `application/json` response
@@ -894,7 +900,7 @@ type LoginResponse struct {
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r LoginResponse) GetJSON200() *User {
+func (r LoginResponse) GetJSON200() *Session {
 	return r.JSON200
 }
 
@@ -987,7 +993,7 @@ type GetSessionResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *User
+	JSON200 *Session
 	// JSON401 the response for an HTTP 401 `application/json` response
 	JSON401 *Error
 	// JSONDefault the response for an HTTP default `application/json` response
@@ -995,7 +1001,7 @@ type GetSessionResponse struct {
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r GetSessionResponse) GetJSON200() *User {
+func (r GetSessionResponse) GetJSON200() *Session {
 	return r.JSON200
 }
 
@@ -1629,7 +1635,7 @@ func ParseLoginResponse(rsp *http.Response) (*LoginResponse, error) {
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest User
+		var dest Session
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -1705,7 +1711,7 @@ func ParseGetSessionResponse(rsp *http.Response) (*GetSessionResponse, error) {
 
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest User
+		var dest Session
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
