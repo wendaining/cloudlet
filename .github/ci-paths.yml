@@ -59,6 +59,14 @@ database:
   - '.github/ci-paths.yml'
   - '!**/*.md'
 
+workers:
+  - 'internal/workers/**'
+  - 'go.mod'
+  - 'go.sum'
+  - '.github/workflows/ci.yml'
+  - '.github/ci-paths.yml'
+  - '!**/*.md'
+
 web:
   - 'web/**'
   - 'api/**'
