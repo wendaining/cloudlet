@@ -53,7 +53,7 @@ docker build -t cloudlet-browser:check runtimes/browser
 npm --prefix runtimes/browser run test:integration
 ```
 
-集成测试自行构建镜像，启动非 root Chromium 容器，并使用测试进程提供的真实 HTTP 页面验证导航地址和标题。测试也检查无效凭据、非法导航协议、导航超时以及发送 SIGTERM 后的正常退出。容器通过 `host-gateway` 访问测试页面，内部接口只发布至主机回环地址。Docker 主机需支持 Chromium sandbox 使用的用户命名空间。
+集成测试自行构建镜像，启动非 root Chromium 容器，并使用测试进程提供的真实 HTTP 页面验证导航地址和标题。测试也检查无效凭据、非法导航协议、导航超时返回 504 并退出，以及发送 SIGTERM 后的正常退出。容器通过 `host-gateway` 访问测试页面，内部接口只发布至主机回环地址。Docker 主机需支持 Chromium sandbox 使用的用户命名空间。
 
 ## 执行模块的业务验收
 

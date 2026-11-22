@@ -49,22 +49,35 @@ test('non-root Chromium container navigates and shuts down', { timeout: 300000 }
   created = true;
   await docker(['start', name]);
 
-  const { stdout: endpoint } = await docker(['port', name, '8080/tcp']);
-  const origin = `http://${endpoint.trim()}`;
-  let ready;
-  for (let i = 0; i < 100; i++) {
-    ready = await fetch(`${origin}/readyz`).catch(() => undefined);
-    if (ready?.ok) break;
-    await ready?.body?.cancel();
-    const { stdout: running } = await docker(['inspect', '--format', '{{.State.Running}}', name]);
-    if (running.trim() !== 'true') break;
-    await delay(150);
-  }
-  if (!ready?.ok) {
+  async function waitReady() {
+    const { stdout: endpoint } = await docker(['port', name, '8080/tcp']);
+    const origin = `http://${endpoint.trim()}`;
+    for (let i = 0; i < 100; i++) {
+      const ready = await fetch(`${origin}/readyz`).catch(() => undefined);
+      if (ready?.ok) {
+        assert.deepEqual(await ready.json(), { status: 'ready' });
+        return origin;
+      }
+      await ready?.body?.cancel();
+      const { stdout: running } = await docker(['inspect', '--format', '{{.State.Running}}', name]);
+      if (running.trim() !== 'true') break;
+      await delay(150);
+    }
     const { stdout, stderr } = await docker(['logs', name]);
     assert.fail(`Browser Run did not become ready:\n${stdout}${stderr}`);
   }
-  assert.deepEqual(await ready.json(), { status: 'ready' });
+  async function assertStopped() {
+    for (let i = 0; i < 50; i++) {
+      const { stdout: state } = await docker(['inspect', '--format', '{{.State.Running}} {{.State.ExitCode}}', name]);
+      if (state.startsWith('false ')) {
+        assert.equal(state.trim(), 'false 0');
+        return;
+      }
+      await delay(100);
+    }
+    assert.fail('Browser Run did not exit');
+  }
+  const origin = await waitReady();
   const { stdout: uid } = await docker(['exec', name, 'id', '-u']);
   assert.notEqual(uid.trim(), '0');
   const { stdout: nodeVersion } = await docker(['exec', name, '/usr/local/bin/node', '--version']);
@@ -84,10 +97,6 @@ test('non-root Chromium container navigates and shuts down', { timeout: 300000 }
   assert.equal(response.status, 400);
   assert.deepEqual(await response.json(), { error: 'invalid_url' });
 
-  response = await navigate({ url: `${url}/slow`, timeout_ms: 200 });
-  assert.equal(response.status, 504);
-  assert.deepEqual(await response.json(), { error: 'navigation_timeout' });
-
   const page = `${url}/page?example=1`;
   response = await navigate({ url: page });
   assert.equal(response.status, 200);
@@ -96,7 +105,14 @@ test('non-root Chromium container navigates and shuts down', { timeout: 300000 }
   const { stdout: processes } = await docker(['top', name, '-eo', 'pid,args']);
   assert.match(processes, /chrome/);
   assert.doesNotMatch(processes, /(?:^|\s)--no-sandbox(?:\s|$)/m);
+
+  response = await navigate({ url: `${url}/slow`, timeout_ms: 200 });
+  assert.equal(response.status, 504);
+  assert.deepEqual(await response.json(), { error: 'navigation_timeout' });
+  await assertStopped();
+
+  await docker(['start', name]);
+  await waitReady();
   await docker(['stop', '--timeout', '8', name]);
-  const { stdout: state } = await docker(['inspect', '--format', '{{.State.Running}} {{.State.ExitCode}}', name]);
-  assert.equal(state.trim(), 'false 0');
+  await assertStopped();
 });

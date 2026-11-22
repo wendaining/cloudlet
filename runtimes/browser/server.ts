@@ -1,6 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { chromium, errors } from 'playwright';
+import { setTimeout as delay } from 'node:timers/promises';
+import { chromium } from 'playwright';
 
 const token = process.env.CLOUDLET_BROWSER_TOKEN;
 if (!token || !/^[A-Za-z0-9_-]{32,}$/.test(token)) {
@@ -52,14 +53,10 @@ const browser = await chromium.launch({ chromiumSandbox: true, handleSIGTERM: fa
 let stopping = false;
 let navigating = false;
 const server = createServer({ requestTimeout: 15000, headersTimeout: 5000 }, (request, response) => {
-  void handle(request, response).catch((error: unknown) => {
+  void handle(request, response).catch(() => {
     if (response.destroyed) return;
     if (response.headersSent) {
       response.destroy();
-      return;
-    }
-    if (error instanceof errors.TimeoutError) {
-      send(response, 504, { error: 'navigation_timeout' });
       return;
     }
     send(response, 502, { error: 'navigation_failed' });
@@ -72,10 +69,13 @@ async function shutdown(code: number) {
   process.exitCode = code;
   server.close();
   server.closeAllConnections();
+  const forceExit = setTimeout(() => process.exit(1), 5000).unref();
   try {
     await browser.close();
   } catch {
     process.exitCode = 1;
+  } finally {
+    clearTimeout(forceExit);
   }
 }
 
@@ -120,11 +120,33 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
   }
 
   navigating = true;
+  let expired = false;
+  const timer = new AbortController();
   try {
-    await page.goto(navigation.url, { timeout: navigation.timeout, waitUntil: 'domcontentloaded' });
-    send(response, 200, { url: page.url(), title: await page.title() });
+    const result = await Promise.race([
+      delay(navigation.timeout, undefined, { signal: timer.signal }),
+      page.goto(navigation.url, { timeout: 0, waitUntil: 'domcontentloaded' }).then(async () => ({
+        url: page.url(),
+        title: await page.title(),
+      })),
+    ]);
+    if (result) {
+      send(response, 200, result);
+      return;
+    }
+
+    expired = true;
+    // A stalled renderer can still be busy after the deadline. Retire this session after reporting 504.
+    if (response.destroyed) {
+      void shutdown(0);
+      return;
+    }
+    response.once('close', () => void shutdown(0));
+    response.setHeader('Connection', 'close');
+    send(response, 504, { error: 'navigation_timeout' });
   } finally {
-    navigating = false;
+    timer.abort();
+    if (!expired) navigating = false;
   }
 }
 
