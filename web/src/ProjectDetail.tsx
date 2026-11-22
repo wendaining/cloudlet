@@ -8,7 +8,10 @@ export function ProjectDetail() {
   const { projectID } = useParams<{ projectID: string }>();
   const query = useQuery({
     queryKey: ['project', projectID],
-    queryFn: () => project(projectID as string),
+    queryFn: () => {
+      if (!projectID) throw new Error('项目标识缺失');
+      return project(projectID);
+    },
     enabled: Boolean(projectID),
   });
 

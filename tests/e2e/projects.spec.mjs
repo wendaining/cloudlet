@@ -13,7 +13,7 @@ test('登录后创建项目、显示列表、读取详情并刷新', async ({ pa
   await page.getByLabel('密码', { exact: true }).fill(config.env.CLOUDLET_DEV_PASSWORD);
   await page.getByRole('button', { name: '登录', exact: true }).click();
   await expect(page.getByRole('heading', { name: '环境概览' })).toBeVisible();
-  await page.getByRole('link', { name: '进入项目控制台' }).click();
+  await page.getByRole('button', { name: '进入项目控制台' }).click();
   await expect(page.getByRole('heading', { name: '项目' })).toBeVisible();
   await expect(page.getByRole('textbox', { name: '项目名称' })).toBeVisible();
 
