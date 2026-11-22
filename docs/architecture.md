@@ -45,7 +45,7 @@ Cloudlet 在一台 Linux 服务器上管理计算资源。本地开发在成员�
 
 PostgreSQL 当前保存账号、登录会话、项目与操作记录。Workers 模块已提供独立的运行配置，资源元数据和生命周期的开发目标见 [开发任务](roadmap.md)。Durable Objects 的存储能力随 workerd 集成验证。
 
-项目拥有稳定的 project_id。创建项目在事务内写入项目和创建者的 owner 成员记录。项目列表和单项目读取同时校验当前会话账号的项目成员关系。成员邀请与角色变更由独立任务提供。
+项目拥有稳定的 project_id。创建项目在事务内写入项目和创建者的 owner 成员记录。项目列表和单项目读取同时校验当前会话账号的项目成员关系。项目成员列表对所有成员开放；所有者可以按邮箱把已有账号添加为 developer 或 viewer，或更新已有成员的角色，创建者的 owner 身份保持不变。非成员访问返回 404，成员越权修改返回 403。
 
 ## 当前接口
 
@@ -60,6 +60,7 @@ PostgreSQL 当前保存账号、登录会话、项目与操作记录。Workers �
 | /api/v1/environment | GET | 返回当前实例与数据库版本，需要登录 |
 | /api/v1/projects | GET、POST | 列出当前用户可见项目，创建项目并授予创建者 owner 角色 |
 | /api/v1/projects/{projectID} | GET | 读取当前用户可访问的项目 |
+| /api/v1/projects/{projectID}/members | GET、POST | 列出项目成员；所有者添加已有账号或更新 developer/viewer 角色 |
 
 两组监听端口完成初始化后才开始接受请求。管理环境启动前验证数据库连接和迁移版本，就绪接口同时检查数据库连接，数据库不可用时返回 503。
 
