@@ -8,7 +8,7 @@
 | npm run lint:config | JSON、YAML、Issue 表单与 Actions 约定 |
 | npm run lint:tooling | 脚本语法、ShellCheck、配置文件与真实端口检查 |
 | make test | Go race 测试、真实 HTTP、Gateway 转发与服务停止 |
-| make test-integration | Docker 中的 PostgreSQL 迁移、账号、会话、就绪检查和 workerd 执行 |
+| make test-integration | Docker 中的 PostgreSQL 迁移、账号、会话、项目与成员角色、操作记录、就绪检查、workerd 执行和容器创建、启动、观测、停止与删除 |
 | make web-check | TypeScript、ESLint、Prettier、Vite 构建与接口生成一致性 |
 | make dev-check | 真实本机进程、数据库、热重载、完整停止、多实例与失败清理 |
 | make test-e2e | 真实 Chromium 在桌面和手机尺寸下完成登录、刷新和退出 |
@@ -41,6 +41,33 @@ go test -race -count=1 -tags=integration -v ./internal/workers
 ```
 
 在 Docker Engine 29.5.2 的 `linux/arm64` 环境中，workerd `1.20261012.1` 执行 `POST /echo`，返回 HTTP 200、`X-Worker: workerd` 和响应正文 `POST /echo cloudlet`。无效兼容日期 `2099-01-01` 使进程以状态码 1 退出，并报告运行时支持的最晚日期 `2026-10-19`。入口用例验证了缺失文件、目录和越界路径的诊断。镜像内的 `linux/arm64` 二进制文件与 Cloudflare 发布文件解压后的 SHA256 一致。
+
+同一入口中的 `TestWorkerdPersistsDurableObjectSQLite` 通过 HTTP 调用名为 `alpha` 和 `beta` 的两个对象。两个对象使用相同的 SQL 表和键保存各自的值。测试停止第一个容器，用原数据卷启动新容器，然后确认两个对象的标识和各自的值都保持不变。
+
+## Browser Run 验证
+
+在 Node.js 24 和本机 Linux Docker Engine 下执行：
+
+```sh
+npm --prefix runtimes/browser ci --ignore-scripts
+npm --prefix runtimes/browser run check
+docker build -t cloudlet-browser:check runtimes/browser
+npm --prefix runtimes/browser run test:integration
+```
+
+集成测试自行构建镜像，启动非 root Chromium 容器，并使用测试进程提供的真实 HTTP 页面验证导航地址和标题。测试解码截图并检查 1280 × 720 的尺寸与页面像素，也覆盖无效凭据、没有可截图页面和超出 2 MiB 上限的结果。测试让 Chromium 等待未响应的页面或字体，分别验证导航和截图返回 504 并退出，并检查收到 SIGTERM 后正常退出。容器通过 `host-gateway` 访问测试页面，内部接口只发布至主机回环地址。Docker 主机需支持 Chromium sandbox 使用的用户命名空间。
+
+## 容器执行适配器验收
+
+使用真实 Docker 启动 configs/images.json 中的固定镜像，读取适配器观测到的回环端口并请求预期响应。名称或归属标签不匹配的容器不会被启动、观测、停止或删除。停止和删除后容器与端口释放。
+
+```sh
+make test-integration
+# 只运行容器适配器
+go test -race -count=1 -tags=integration ./internal/containers
+```
+
+镜像缺失时由 Docker Engine 拉取。测试结束清理所属容器。
 
 ## 执行模块的业务验收
 

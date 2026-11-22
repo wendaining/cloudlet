@@ -2,6 +2,7 @@ import createClient from 'openapi-fetch';
 import type { paths, components } from './api.gen';
 
 export type User = components['schemas']['User'];
+export type Session = components['schemas']['Session'];
 export type LoginRequest = components['schemas']['LoginRequest'];
 export type Project = components['schemas']['Project'];
 export type CreateProjectRequest =
@@ -18,12 +19,11 @@ export async function session() {
 }
 
 export async function login(body: LoginRequest) {
-  const { data, error, response } = await client.POST('/api/v1/auth/login', {
+  const { data, error } = await client.POST('/api/v1/auth/login', {
     body,
   });
-  const status = response.status;
   if (error) throw new Error(error.message);
-  if (!data) throw new Error(`登录失败，状态码 ${status}`);
+  if (!data) throw new Error('登录成功但缺少数据');
   return data;
 }
 

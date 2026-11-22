@@ -118,6 +118,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{projectID}/members": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        /** @description 返回项目成员及其角色，项目成员可以读取。 */
+        get: operations["listProjectMembers"];
+        put?: never;
+        /** @description 添加已有账号为项目成员，或更新其 developer/viewer 角色；仅项目所有者可以调用。 */
+        post: operations["upsertProjectMember"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -148,6 +168,24 @@ export interface components {
             id: string;
             name: string;
         };
+        /** @enum {string} */
+        ProjectRole: "owner" | "developer" | "viewer";
+        /** @enum {string} */
+        ProjectMemberRole: "developer" | "viewer";
+        ProjectMember: {
+            user_id: string;
+            email: string;
+            role: components["schemas"]["ProjectRole"];
+        };
+        UpsertProjectMemberRequest: {
+            /** @description 已有账号的邮箱；服务端去除首尾空白并转为小写后查找。 */
+            email: string;
+            role: components["schemas"]["ProjectMemberRole"];
+        };
+        Session: {
+            user: components["schemas"]["User"];
+            projects: components["schemas"]["Project"][];
+        };
         Error: {
             message: string;
         };
@@ -162,6 +200,15 @@ export interface components {
                 "application/json": components["schemas"]["Project"];
             };
         };
+        /** @description 项目成员 */
+        ProjectMember: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ProjectMember"];
+            };
+        };
         /** @description 当前账号 */
         User: {
             headers: {
@@ -169,6 +216,15 @@ export interface components {
             };
             content: {
                 "application/json": components["schemas"]["User"];
+            };
+        };
+        /** @description 当前账号与可见项目 */
+        Session: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["Session"];
             };
         };
         /** @description 请求失败 */
@@ -222,7 +278,7 @@ export interface operations {
             };
         };
         responses: {
-            200: components["responses"]["User"];
+            200: components["responses"]["Session"];
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             default: components["responses"]["Error"];
@@ -256,7 +312,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            200: components["responses"]["User"];
+            200: components["responses"]["Session"];
             401: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
@@ -338,6 +394,55 @@ export interface operations {
             200: components["responses"]["Project"];
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listProjectMembers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 项目成员及其角色 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectMember"][];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    upsertProjectMember: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpsertProjectMemberRequest"];
+            };
+        };
+        responses: {
+            200: components["responses"]["ProjectMember"];
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };

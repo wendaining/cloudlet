@@ -1,6 +1,7 @@
 package config
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,13 +9,16 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 type Route struct {
-	Host   string `json:"host"`
-	Target string `json:"target"`
+	Host       string `json:"host"`
+	PathPrefix string `json:"path_prefix,omitempty"`
+	Target     string `json:"target"`
 }
 
 type Config struct {
@@ -75,17 +79,22 @@ func (cfg Config) Validate() error {
 	return ValidateRoutes(cfg.Routes)
 }
 
-// ValidateRoutes checks the host and upstream rules shared by static and dynamic routes.
+// ValidateRoutes checks the host, path prefix and upstream rules shared by static and dynamic routes.
 func ValidateRoutes(routes []Route) error {
-	seen := make(map[string]bool)
+	type routeKey struct{ host, prefix string }
+	seen := make(map[routeKey]bool)
 	for _, route := range routes {
 		host, err := url.Parse("http://" + route.Host)
 		if err != nil || route.Host == "" || host.Host != route.Host || host.Hostname() != route.Host || host.User != nil || host.Path != "" || host.RawQuery != "" || host.Fragment != "" {
 			return fmt.Errorf("route host must be a hostname without port: %q", route.Host)
 		}
-		key := strings.ToLower(strings.TrimSuffix(route.Host, "."))
+		prefix := cmp.Or(route.PathPrefix, "/")
+		if !strings.HasPrefix(prefix, "/") || path.Clean(prefix) != prefix || strings.ContainsAny(prefix, "%?#\\") || strings.ContainsFunc(prefix, unicode.IsControl) {
+			return fmt.Errorf("route path prefix must be a clean absolute path: %q", route.PathPrefix)
+		}
+		key := routeKey{strings.ToLower(strings.TrimSuffix(route.Host, ".")), prefix}
 		if seen[key] {
-			return fmt.Errorf("duplicate route host: %q", route.Host)
+			return fmt.Errorf("duplicate route for host %q and path prefix %q", route.Host, prefix)
 		}
 		seen[key] = true
 		target, err := url.Parse(route.Target)

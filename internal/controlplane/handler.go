@@ -101,7 +101,16 @@ func (h *handler) Login(c *gin.Context) {
 		return
 	}
 	h.sessions.Put(c.Request.Context(), "user_id", user.ID)
-	c.JSON(http.StatusOK, apigen.User{Id: user.ID, Email: user.Email})
+	projects, err := h.store.Projects(c.Request.Context(), user.ID)
+	if err != nil {
+		h.failure(c, err)
+		return
+	}
+	response := make([]apigen.Project, 0, len(projects))
+	for _, project := range projects {
+		response = append(response, apigen.Project{Id: uuid.MustParse(project.ID), Name: project.Name})
+	}
+	c.JSON(http.StatusOK, apigen.Session{User: apigen.User{Id: user.ID, Email: user.Email}, Projects: response})
 }
 
 func (h *handler) Logout(c *gin.Context) {
@@ -118,7 +127,16 @@ func (h *handler) Logout(c *gin.Context) {
 func (h *handler) GetSession(c *gin.Context) {
 	user, ok := h.currentUser(c)
 	if ok {
-		c.JSON(http.StatusOK, apigen.User{Id: user.ID, Email: user.Email})
+		projects, err := h.store.Projects(c.Request.Context(), user.ID)
+		if err != nil {
+			h.failure(c, err)
+			return
+		}
+		response := make([]apigen.Project, 0, len(projects))
+		for _, project := range projects {
+			response = append(response, apigen.Project{Id: uuid.MustParse(project.ID), Name: project.Name})
+		}
+		c.JSON(http.StatusOK, apigen.Session{User: apigen.User{Id: user.ID, Email: user.Email}, Projects: response})
 	}
 }
 
@@ -192,6 +210,113 @@ func (h *handler) GetProject(c *gin.Context, projectID string) {
 		return
 	}
 	c.JSON(http.StatusOK, projectResponse(project))
+}
+
+func (h *handler) ListProjectMembers(c *gin.Context, projectID string) {
+	_, normalizedID, _, ok := h.projectAccess(c, projectID)
+	if !ok {
+		return
+	}
+	members, err := h.store.ProjectMembers(c.Request.Context(), normalizedID)
+	if err != nil {
+		h.failure(c, err)
+		return
+	}
+	response := make([]apigen.ProjectMember, 0, len(members))
+	for _, member := range members {
+		response = append(response, apigen.ProjectMember{
+			UserId: member.UserID,
+			Email:  member.Email,
+			Role:   apigen.ProjectRole(member.Role),
+		})
+	}
+	c.JSON(http.StatusOK, response)
+}
+
+func (h *handler) UpsertProjectMember(c *gin.Context, projectID string) {
+	user, normalizedID, membership, ok := h.projectAccess(c, projectID)
+	if !ok {
+		return
+	}
+	if membership.Role != "owner" {
+		c.JSON(http.StatusForbidden, apigen.Error{Message: "只有项目所有者可以管理成员"})
+		return
+	}
+	var body apigen.UpsertProjectMemberRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(c.Writer, c.Request.Body, 4096))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil {
+		c.JSON(http.StatusBadRequest, apigen.Error{Message: "成员请求格式无效"})
+		return
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		c.JSON(http.StatusBadRequest, apigen.Error{Message: "成员请求格式无效"})
+		return
+	}
+	email, err := database.NormalizeEmail(body.Email)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, apigen.Error{Message: "成员邮箱格式无效"})
+		return
+	}
+	role := string(body.Role)
+	if role != "developer" && role != "viewer" {
+		c.JSON(http.StatusBadRequest, apigen.Error{Message: "成员角色必须是 developer 或 viewer"})
+		return
+	}
+	target, err := h.store.UserByEmail(c.Request.Context(), email)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		c.JSON(http.StatusNotFound, apigen.Error{Message: "账号不存在"})
+		return
+	}
+	if err != nil {
+		h.failure(c, err)
+		return
+	}
+	if target.ID == user.ID {
+		c.JSON(http.StatusConflict, apigen.Error{Message: "不能修改项目所有者"})
+		return
+	}
+	existing, err := h.store.ProjectMember(c.Request.Context(), normalizedID, target.ID)
+	if err == nil && existing.Role == "owner" {
+		c.JSON(http.StatusConflict, apigen.Error{Message: "不能修改项目所有者"})
+		return
+	}
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		h.failure(c, err)
+		return
+	}
+	if err := h.store.UpsertProjectMember(c.Request.Context(), normalizedID, target.ID, role); err != nil {
+		h.failure(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, apigen.ProjectMember{
+		UserId: target.ID,
+		Email:  target.Email,
+		Role:   apigen.ProjectRole(role),
+	})
+}
+
+func (h *handler) projectAccess(c *gin.Context, projectID string) (database.User, string, database.ProjectMember, bool) {
+	user, ok := h.currentUser(c)
+	if !ok {
+		return database.User{}, "", database.ProjectMember{}, false
+	}
+	parsedID, err := uuid.Parse(projectID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, apigen.Error{Message: "项目不存在或没有访问权限"})
+		return database.User{}, "", database.ProjectMember{}, false
+	}
+	member, err := h.store.ProjectMember(c.Request.Context(), parsedID.String(), user.ID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		c.JSON(http.StatusNotFound, apigen.Error{Message: "项目不存在或没有访问权限"})
+		return database.User{}, "", database.ProjectMember{}, false
+	}
+	if err != nil {
+		h.failure(c, err)
+		return database.User{}, "", database.ProjectMember{}, false
+	}
+	return user, parsedID.String(), member, true
 }
 
 func projectResponse(project database.Project) apigen.Project {

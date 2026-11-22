@@ -2,10 +2,11 @@ import { Alert, Button, Card, Descriptions, Space, Typography } from 'antd';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router';
 import { environment, logout, version } from './client';
-import type { User } from './client';
+import type { Session } from './client';
 import styles from './app.module.css';
 
-export function Overview({ user }: { user: User }) {
+export function Overview({ session }: { session: Session }) {
+  const { user } = session;
   const navigate = useNavigate();
   const cache = useQueryClient();
   const currentEnvironment = useQuery({

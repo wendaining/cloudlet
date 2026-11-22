@@ -91,14 +91,16 @@ Go 源码变化后由 Air 重新编译并启动后端。编译失败时停止旧
 
 Ctrl+C、SIGTERM 和 make dev-stop 停止本实例的应用进程、执行容器与数据库。停止保留数据库、数据卷与本地配置。reset 需要 CONFIRM 与实例名称完全一致，保留配置、日志和镜像缓存。
 
-执行模块创建容器、网络和数据卷时使用以下标签。管理数据库使用 component=database，执行资源使用 component=runtime。
+执行模块创建容器、网络和数据卷时使用以下标签。管理数据库使用 component=database，执行资源使用 component=runtime。容器适配器按环境、项目、资源和执行序号写入归属标签与确定性名称，并在启动、观测、停止和删除前核对。
 
 | 标签 | 值 |
 | --- | --- |
 | io.cloudlet.managed | true |
 | io.cloudlet.instance | 当前实例名称 |
 | io.cloudlet.component | runtime |
+| io.cloudlet.project | 项目标识 |
 | io.cloudlet.resource | 资源标识，由对应模块设置 |
+| io.cloudlet.generation | 执行序号 |
 
 后端进程退出时，执行容器继续运行。完整停止由独立开发控制器根据标签执行。Worker、DO 与浏览器的元数据恢复和会话重新接管随各自模块完成，验收要求见实施清单。
 

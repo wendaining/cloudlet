@@ -28,7 +28,7 @@ paths:
         default:
           $ref: '#/components/responses/Error'
         '200':
-          $ref: '#/components/responses/User'
+          $ref: '#/components/responses/Session'
         '400':
           $ref: '#/components/responses/Error'
         '401':
@@ -50,7 +50,7 @@ paths:
         default:
           $ref: '#/components/responses/Error'
         '200':
-          $ref: '#/components/responses/User'
+          $ref: '#/components/responses/Session'
         '401':
           $ref: '#/components/responses/Error'
   /api/v1/environment:
@@ -126,6 +126,59 @@ paths:
           $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/members:
+    parameters:
+      - name: projectID
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: listProjectMembers
+      description: 返回项目成员及其角色，项目成员可以读取。
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 项目成员及其角色
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProjectMember'
+        '401':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+    post:
+      operationId: upsertProjectMember
+      description: 添加已有账号为项目成员，或更新其 developer/viewer 角色；仅项目所有者可以调用。
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpsertProjectMemberRequest'
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          $ref: '#/components/responses/ProjectMember'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
 components:
   securitySchemes:
     SessionCookie:
@@ -188,6 +241,44 @@ components:
           format: uuid
         name:
           type: string
+    ProjectRole:
+      type: string
+      enum: [owner, developer, viewer]
+    ProjectMemberRole:
+      type: string
+      enum: [developer, viewer]
+    ProjectMember:
+      type: object
+      required: [user_id, email, role]
+      properties:
+        user_id:
+          type: string
+        email:
+          type: string
+        role:
+          $ref: '#/components/schemas/ProjectRole'
+    UpsertProjectMemberRequest:
+      type: object
+      additionalProperties: false
+      required: [email, role]
+      properties:
+        email:
+          type: string
+          description: 已有账号的邮箱；服务端去除首尾空白并转为小写后查找。
+          minLength: 1
+          maxLength: 254
+        role:
+          $ref: '#/components/schemas/ProjectMemberRole'
+    Session:
+      type: object
+      required: [user, projects]
+      properties:
+        user:
+          $ref: "#/components/schemas/User"
+        projects:
+          type: array
+          items:
+            $ref: "#/components/schemas/Project"
     Error:
       type: object
       required: [message]
@@ -201,12 +292,24 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Project'
+    ProjectMember:
+      description: 项目成员
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ProjectMember'
     User:
       description: 当前账号
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/User'
+    Session:
+      description: 当前账号与可见项目
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Session"
     Error:
       description: 请求失败
       content:
