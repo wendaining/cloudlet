@@ -42,6 +42,19 @@ go test -race -count=1 -tags=integration -v ./internal/workers
 
 在 Docker Engine 29.5.2 的 `linux/arm64` 环境中，workerd `1.20261012.1` 执行 `POST /echo`，返回 HTTP 200、`X-Worker: workerd` 和响应正文 `POST /echo cloudlet`。无效兼容日期 `2099-01-01` 使进程以状态码 1 退出，并报告运行时支持的最晚日期 `2026-10-19`。入口用例验证了缺失文件、目录和越界路径的诊断。镜像内的 `linux/arm64` 二进制文件与 Cloudflare 发布文件解压后的 SHA256 一致。
 
+## Browser Run 验证
+
+在 Node.js 24 和本机 Linux Docker Engine 下执行：
+
+```sh
+npm --prefix runtimes/browser ci --ignore-scripts
+npm --prefix runtimes/browser run check
+docker build -t cloudlet-browser:check runtimes/browser
+npm --prefix runtimes/browser run test:integration
+```
+
+集成测试自行构建镜像，启动非 root Chromium 容器，并使用测试进程提供的真实 HTTP 页面验证导航地址和标题。测试也检查无效凭据、非法导航协议、导航超时以及发送 SIGTERM 后的正常退出。容器通过 `host-gateway` 访问测试页面，内部接口只发布至主机回环地址。Docker 主机需支持 Chromium sandbox 使用的用户命名空间。
+
 ## 执行模块的业务验收
 
 以下为目标验收条件，随对应模块接入真实运行时完成。资源和状态依据 [平台设计](platform-design.md) 与 [执行环境设计](runtime-design.md)。

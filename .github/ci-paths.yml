@@ -67,6 +67,12 @@ workers:
   - '.github/ci-paths.yml'
   - '!**/*.md'
 
+browser:
+  - 'runtimes/browser/**'
+  - '.github/workflows/ci.yml'
+  - '.github/ci-paths.yml'
+  - '!**/*.md'
+
 web:
   - 'web/**'
   - 'api/**'
@@ -165,6 +171,7 @@ unclassified:
   - '!migrations/**'
   - '!api/**'
   - '!web/**'
+  - '!runtimes/browser/**'
   - '!tests/development.test.mjs'
   - '!tests/development/**'
   - '!tests/web.test.mjs'

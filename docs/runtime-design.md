@@ -70,6 +70,10 @@ Container 保存镜像 digest、启动参数、端口、资源要求、数据卷
 
 会话容器包含固定版本的 Node.js、Playwright 与匹配 Chromium。每个会话拥有独立的配置目录、下载目录和协议端点，容器使用非 root 用户并保留 Chromium sandbox。缺少所需宿主能力时拒绝创建。
 
+`runtimes/browser` 提供独立容器入口。Chromium 和会话页面启动后，内部 `GET /readyz` 才返回就绪。每个容器配置独立的 `CLOUDLET_BROWSER_TOKEN`，内部 `POST /navigate` 以 `Authorization: Bearer <token>` 认证，读取 JSON 中的 `url` 和可选的 `timeout_ms`，返回跳转后的 `url` 和 `title`。导航仅接受 HTTP(S)，默认超时十秒，最长三十秒。同一会话同一时间执行一次导航。凭据无效返回 401，导航超时返回 504。执行接口仅供控制器的内部网络使用。
+
+会话镜像以 `pwuser` 运行并要求 Chromium sandbox。`runtimes/browser/seccomp.json` 源于 [Playwright 1.65.1 的 Apache-2.0 seccomp 配置](https://github.com/microsoft/playwright/blob/v1.65.1/utils/docker/seccomp_profile.json)，增加了对 Chromium 在嵌套用户命名空间内调用 `chroot` 的支持，仍由内核校验权限。容器使用独立共享内存、移除 Linux capabilities，并启用 `no-new-privileges`。关闭服务时等待 Chromium 退出。构建与验证命令见 [Browser Run 验证](testing.md#browser-run-验证)。
+
 会话记录包括项目、session_id、Execution、绝对过期时间和最近状态。Go 重启后，只有身份、执行序号与期限均有效的原执行能够重新连接。连接断开与会话关闭分别处理。
 
 浏览器执行服务独立执行会话期限，到期后结束 Chromium 并退出。会话容器启用退出后自动删除，关闭自动重启，由 Docker Engine 完成容器回收。控制器确认原执行结束后，在元数据事务中关闭会话并释放容量。Go 不可用期间容量继续保留，恢复接管时完成状态核对。
