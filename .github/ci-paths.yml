@@ -43,6 +43,7 @@ tooling:
 
 database:
   - 'internal/database/**'
+  - 'internal/operations/**'
   - 'internal/controlplane/**'
   - 'internal/config/**'
   - 'internal/server/**'
@@ -64,6 +65,12 @@ workers:
   - 'internal/durableobjects/**'
   - 'go.mod'
   - 'go.sum'
+  - '.github/workflows/ci.yml'
+  - '.github/ci-paths.yml'
+  - '!**/*.md'
+
+browser:
+  - 'runtimes/browser/**'
   - '.github/workflows/ci.yml'
   - '.github/ci-paths.yml'
   - '!**/*.md'
@@ -166,6 +173,7 @@ unclassified:
   - '!migrations/**'
   - '!api/**'
   - '!web/**'
+  - '!runtimes/browser/**'
   - '!tests/development.test.mjs'
   - '!tests/development/**'
   - '!tests/web.test.mjs'

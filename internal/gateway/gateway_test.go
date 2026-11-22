@@ -119,6 +119,87 @@ func TestGatewayForwardsFileAndRangeRequests(t *testing.T) {
 	}
 }
 
+func TestGatewayMatchesLongestPathPrefix(t *testing.T) {
+	upstream := func(name string) *httptest.Server {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprintf(w, "%s %s", name, r.URL.RequestURI())
+		}))
+		t.Cleanup(server.Close)
+		return server
+	}
+	site, api, admin := upstream("site"), upstream("api"), upstream("admin")
+	handler, err := gateway.NewHandler(config.Config{
+		APIAddress: "127.0.0.1:0", GatewayAddress: "127.0.0.1:0",
+		Routes: []config.Route{
+			{Host: "static.localhost", Target: site.URL},
+			{Host: "static.localhost", PathPrefix: "/api", Target: api.URL},
+		},
+	}, slog.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
+	front := httptest.NewServer(handler)
+	defer front.Close()
+	routes := []config.Route{
+		{Host: "app.localhost", Target: site.URL},
+		{Host: "APP.localhost.", PathPrefix: "/api", Target: api.URL},
+		{Host: "app.localhost", PathPrefix: "/api/admin", Target: admin.URL},
+		{Host: "api.localhost", PathPrefix: "/api", Target: api.URL},
+	}
+	if err := handler.ReplaceRoutes(routes); err != nil {
+		t.Fatal(err)
+	}
+	assertRequest := func(host, path, want string, status int) {
+		t.Helper()
+		request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, front.URL+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Host = host
+		response, err := front.Client().Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		body, err := io.ReadAll(response.Body)
+		if err != nil || response.StatusCode != status || string(body) != want {
+			t.Fatalf("%s%s: status=%d body=%q error=%v", host, path, response.StatusCode, body, err)
+		}
+	}
+	for path, want := range map[string]string{
+		"/":                        "site /",
+		"/api":                     "api /api",
+		"/api/items?tag=a%2Fb&n=1": "api /api/items?tag=a%2Fb&n=1",
+		"/api/admin/":              "admin /api/admin/",
+		"/api/adminx":              "api /api/adminx",
+		"/apix":                    "site /apix",
+		"/API":                     "site /API",
+		"/api%2Fadmin":             "site /api%2Fadmin",
+		"/%61pi":                   "api /%61pi",
+	} {
+		assertRequest("APP.localhost.:8081", path, want, http.StatusOK)
+	}
+	assertRequest("api.localhost", "/apix", "404 page not found\n", http.StatusNotFound)
+	for _, path := range []string{"/api/../admin", "/api/%2e%2e/admin", "/./api"} {
+		assertRequest("app.localhost", path, "invalid request path\n", http.StatusBadRequest)
+	}
+	invalid := []config.Route{
+		{Host: "app.localhost", PathPrefix: "/api", Target: site.URL},
+		{Host: "APP.localhost.", PathPrefix: "/api", Target: admin.URL},
+	}
+	if err := handler.ReplaceRoutes(invalid); err == nil {
+		t.Fatal("duplicate route was accepted")
+	}
+	assertRequest("app.localhost", "/api", "api /api", http.StatusOK)
+	assertRequest("app.localhost", "/", "site /", http.StatusOK)
+	assertRequest("static.localhost", "/api", "api /api", http.StatusOK)
+	if err := handler.ReplaceRoutes([]config.Route{{Host: "STATIC.localhost.", PathPrefix: "/other", Target: admin.URL}}); err == nil {
+		t.Error("dynamic route was accepted for a statically configured host")
+	}
+	assertRequest("static.localhost", "/other", "site /other", http.StatusOK)
+	assertRequest("app.localhost", "/api", "api /api", http.StatusOK)
+}
+
 func TestGatewayReplacesDynamicRoutesWhileStreaming(t *testing.T) {
 	const dynamicHost = "worker.localhost"
 	const staticHost = "static.localhost"
