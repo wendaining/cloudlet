@@ -166,6 +166,10 @@ export interface components {
             id: string;
             name: string;
         };
+        Session: {
+            user: components["schemas"]["User"];
+            projects: components["schemas"]["Project"][];
+        };
         Operation: {
             /** Format: uuid */
             id: string;
@@ -176,10 +180,6 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
-        };
-        Session: {
-            user: components["schemas"]["User"];
-            projects: components["schemas"]["Project"][]
         };
         Error: {
             message: string;
