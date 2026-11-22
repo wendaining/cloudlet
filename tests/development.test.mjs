@@ -75,7 +75,7 @@ test('真实本机环境支持热重载、完整停止、多实例和失败清�
   controller = await start(first);
   const restored = await api.get('/api/v1/auth/session');
   assert.equal(restored.status(), 200);
-  assert.equal((await restored.json()).id, user.id);
+  assert.equal((await restored.json()).user.id, user.user.id);
   controller.child.kill('SIGINT');
   assert.equal((await controller.result).code, 0);
   await assertPortsFree(first.ports);
