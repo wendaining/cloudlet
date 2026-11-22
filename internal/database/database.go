@@ -145,6 +145,12 @@ func (s *Store) User(ctx context.Context, id string) (User, error) {
 	return user, err
 }
 
+func (s *Store) UserByEmail(ctx context.Context, email string) (User, error) {
+	var user User
+	err := s.DB.WithContext(ctx).Where("email = ?", strings.ToLower(strings.TrimSpace(email))).First(&user).Error
+	return user, err
+}
+
 type Project struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
@@ -157,6 +163,12 @@ type ProjectMember struct {
 	UserID    string `json:"user_id"`
 	Role      string `json:"role"`
 	CreatedAt time.Time
+}
+
+type ProjectMemberDetail struct {
+	UserID string `json:"user_id"`
+	Email  string `json:"email"`
+	Role   string `json:"role"`
 }
 
 func (s *Store) CreateProject(ctx context.Context, ownerID, name string) (Project, error) {
@@ -202,4 +214,35 @@ func (s *Store) ProjectMember(ctx context.Context, projectID, userID string) (Pr
 	var member ProjectMember
 	err := s.DB.WithContext(ctx).Where("project_id = ? AND user_id = ?", projectID, userID).First(&member).Error
 	return member, err
+}
+
+func (s *Store) ProjectMembers(ctx context.Context, projectID string) ([]ProjectMemberDetail, error) {
+	var members []ProjectMemberDetail
+	err := s.DB.WithContext(ctx).
+		Table("project_members").
+		Select("project_members.user_id AS user_id, users.email AS email, project_members.role AS role").
+		Joins("JOIN users ON users.id = project_members.user_id").
+		Where("project_members.project_id = ?", projectID).
+		Order("CASE project_members.role WHEN 'owner' THEN 0 WHEN 'developer' THEN 1 ELSE 2 END, users.email").
+		Scan(&members).Error
+	return members, err
+}
+
+func (s *Store) UpsertProjectMember(ctx context.Context, projectID, userID, role string) error {
+	if role != "developer" && role != "viewer" {
+		return fmt.Errorf("项目成员角色 %q 无效", role)
+	}
+	var existing ProjectMember
+	err := s.DB.WithContext(ctx).Where("project_id = ? AND user_id = ?", projectID, userID).First(&existing).Error
+	if err == nil && existing.Role == "owner" {
+		return fmt.Errorf("不能修改项目所有者")
+	}
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	member := ProjectMember{ProjectID: projectID, UserID: userID, Role: role}
+	return s.DB.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "project_id"}, {Name: "user_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"role"}),
+	}).Create(&member).Error
 }
