@@ -2,6 +2,7 @@ import createClient from 'openapi-fetch';
 import type { paths, components } from './api.gen';
 
 export type User = components['schemas']['User'];
+export type Session = components['schemas']['Session'];
 export type LoginRequest = components['schemas']['LoginRequest'];
 const client = createClient<paths>();
 
