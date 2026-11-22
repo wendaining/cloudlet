@@ -101,7 +101,16 @@ func (h *handler) Login(c *gin.Context) {
 		return
 	}
 	h.sessions.Put(c.Request.Context(), "user_id", user.ID)
-	c.JSON(http.StatusOK, apigen.User{Id: user.ID, Email: user.Email})
+	projects, err := h.store.Projects(c.Request.Context(), user.ID)
+	if err != nil {
+		h.failure(c, err)
+		return
+	}
+	response := make([]apigen.Project, 0, len(projects))
+	for _, project := range projects {
+		response = append(response, apigen.Project{Id: uuid.MustParse(project.ID), Name: project.Name})
+	}
+	c.JSON(http.StatusOK, apigen.Session{User: apigen.User{Id: user.ID, Email: user.Email}, Projects: response})
 }
 
 func (h *handler) Logout(c *gin.Context) {
