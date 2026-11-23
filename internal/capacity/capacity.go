@@ -152,6 +152,15 @@ func NewStore(db *gorm.DB) (*Store, error) {
 	return &Store{db: db}, nil
 }
 
+// writeTransaction uses READ COMMITTED because capacity checks read usage
+// after acquiring host and project row locks. Under REPEATABLE READ the
+// transaction snapshot is established by an earlier query, before the lock
+// wait, so a transaction that acquires the lock after another commit would
+// still miss that reservation and could overcommit.
+func (s *Store) writeTransaction(ctx context.Context, fn func(*gorm.DB) error) error {
+	return s.db.WithContext(ctx).Transaction(fn, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+}
+
 type hostCapacityRow struct {
 	ID          string    `gorm:"column:id;primaryKey"`
 	CPUMillis   int64     `gorm:"column:cpu_millis"`
@@ -230,7 +239,7 @@ func (s *Store) SetHostCapacity(ctx context.Context, hostID string, capacity Res
 		return HostCapacity{}, err
 	}
 	var result HostCapacity
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := s.writeTransaction(ctx, func(tx *gorm.DB) error {
 		now := currentTime()
 		row := hostCapacityRow{
 			ID:          hostID,
@@ -284,7 +293,7 @@ func (s *Store) SetProjectQuota(ctx context.Context, projectID uuid.UUID, capaci
 		return ProjectQuota{}, err
 	}
 	var result ProjectQuota
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := s.writeTransaction(ctx, func(tx *gorm.DB) error {
 		var projectCount int64
 		if err := tx.Raw("SELECT COUNT(*) FROM projects WHERE id = ?", projectID).Scan(&projectCount).Error; err != nil {
 			return fmt.Errorf("检查项目 %s: %w", projectID, err)
@@ -345,7 +354,7 @@ func (s *Store) Reserve(ctx context.Context, request Request) (Reservation, bool
 	}
 	var result Reservation
 	var created bool
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := s.writeTransaction(ctx, func(tx *gorm.DB) error {
 		// Resolve an existing execution before checking the requested host so
 		// idempotency and conflict results do not depend on current budget
 		// configuration. The lock also serializes with a concurrent release.
@@ -463,7 +472,7 @@ func (s *Store) Release(ctx context.Context, projectID, executionID uuid.UUID) (
 		return Reservation{}, fmt.Errorf("释放容量需要项目和执行标识: %w", fs.ErrInvalid)
 	}
 	var result Reservation
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err := s.writeTransaction(ctx, func(tx *gorm.DB) error {
 		var current reservationRow
 		if err := tx.Where("execution_id = ?", executionID).Take(&current).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {

@@ -243,6 +243,39 @@ func TestCapacityReservation(t *testing.T) {
 	t.Run("unconfigured budgets", func(t *testing.T) {
 		testUnconfiguredBudgets(t, ctx, store, databaseStore, owner.ID)
 	})
+	t.Run("repeatable read connection default", func(t *testing.T) {
+		testRepeatableReadDefault(t, ctx, connection, databaseStore, owner.ID)
+	})
+}
+
+func testRepeatableReadDefault(t *testing.T, ctx context.Context, connection string, databaseStore *database.Store, ownerID string) {
+	t.Helper()
+	if err := databaseStore.DB.Exec("ALTER DATABASE cloudlet SET default_transaction_isolation = 'repeatable read'").Error; err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := databaseStore.DB.Exec("ALTER DATABASE cloudlet RESET default_transaction_isolation").Error; err != nil {
+			t.Error(err)
+		}
+	})
+
+	repeatableStore, err := database.Open(ctx, connection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repeatableStore.SQL.Close()
+	var isolation string
+	if err := repeatableStore.DB.Raw("SHOW default_transaction_isolation").Scan(&isolation).Error; err != nil {
+		t.Fatal(err)
+	}
+	if isolation != "repeatable read" {
+		t.Fatalf("连接默认隔离级别为 %q，预期 repeatable read", isolation)
+	}
+	capacityStore, err := capacity.NewStore(repeatableStore.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	testConcurrentLastCapacity(t, ctx, capacityStore, repeatableStore, ownerID)
 }
 
 func testProjectQuotaAcrossHosts(t *testing.T, ctx context.Context, store *capacity.Store, databaseStore *database.Store, ownerID string) {
