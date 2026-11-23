@@ -20,14 +20,25 @@ import (
 // New returns a handler for the provided site filesystem. The caller keeps
 // the filesystem readable for the lifetime of the handler.
 func New(site fs.FS) (http.Handler, error) {
+	return NewWithOptions(site, Options{})
+}
+
+// Options configures the behavior of an individual static site.
+type Options struct {
+	SPAFallback bool
+}
+
+// NewWithOptions returns a handler with the given site options.
+func NewWithOptions(site fs.FS, options Options) (http.Handler, error) {
 	if site == nil {
 		return nil, fmt.Errorf("configure static site handler: filesystem is required: %w", fs.ErrInvalid)
 	}
-	return handler{site: site}, nil
+	return handler{site: site, spaFallback: options.SPAFallback}, nil
 }
 
 type handler struct {
-	site fs.FS
+	site        fs.FS
+	spaFallback bool
 }
 
 func (h handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -51,6 +62,13 @@ func (h handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	info, err := fs.Stat(h.site, name)
+	if h.spaFallback && errors.Is(err, fs.ErrNotExist) && path.Ext(name) == "" {
+		w.Header().Add("Vary", "Accept, Sec-Fetch-Mode, Sec-Fetch-Dest")
+		if isHTMLNavigation(r.Header) {
+			h.serveFile(w, r, "index.html")
+			return
+		}
+	}
 	if err != nil {
 		serveFileError(w, r, name, err)
 		return
@@ -78,7 +96,23 @@ func (h handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	h.writeFile(w, r, name, info)
+}
 
+func (h handler) serveFile(w http.ResponseWriter, r *http.Request, name string) {
+	info, err := fs.Stat(h.site, name)
+	if err != nil {
+		serveFileError(w, r, name, err)
+		return
+	}
+	if !info.Mode().IsRegular() {
+		http.NotFound(w, r)
+		return
+	}
+	h.writeFile(w, r, name, info)
+}
+
+func (h handler) writeFile(w http.ResponseWriter, r *http.Request, name string, info fs.FileInfo) {
 	file, err := h.site.Open(name)
 	if err != nil {
 		serveFileError(w, r, name, err)
