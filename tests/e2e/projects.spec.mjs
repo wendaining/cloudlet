@@ -41,9 +41,15 @@ test(
   });
   await page.getByRole('textbox', { name: '成员邮箱' }).fill(memberEmail);
   await page.getByRole('button', { name: '保存成员' }).click();
+  await expect(page.getByRole('status')).toContainText('的角色已保存');
   await expect(
     page.getByRole('row', { name: new RegExp(memberEmail) }),
   ).toContainText('开发者');
+  const unregisteredEmail = `missing-${process.pid}-${Date.now()}@cloudlet.local`;
+  await page.getByRole('textbox', { name: '成员邮箱' }).fill(unregisteredEmail);
+  await page.getByRole('button', { name: '保存成员' }).click();
+  await expect(page.getByRole('alert')).toBeVisible();
+  await expect(page.getByRole('status')).toHaveCount(0);
   await page.reload();
   await expect(
     page.getByRole('row', { name: new RegExp(memberEmail) }),
@@ -85,6 +91,26 @@ test(
   ).toHaveCount(0);
   await memberContext.close();
 
+  await page.getByRole('link', { name: '返回项目列表' }).click();
+  await expect(page.getByRole('link', { name: projectName })).toBeVisible();
+  await page.goBack();
+  await page.goBack();
+  await page.goBack();
+  await expect(page.getByRole('heading', { name: '环境概览' })).toBeVisible();
+  await page.getByRole('button', { name: '退出登录' }).click();
+  await expect(page.getByRole('button', { name: '登录' })).toBeVisible();
+  await page.getByRole('textbox', { name: '邮箱' }).fill(memberEmail);
+  await page.getByLabel('密码', { exact: true }).fill(memberPassword);
+  await page.getByRole('button', { name: '登录', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '环境概览' })).toBeVisible();
+  await page.getByRole('button', { name: '进入项目控制台' }).click();
+  await page.getByRole('link', { name: projectName }).click();
+  await expect(
+    page.getByRole('row', { name: new RegExp(memberEmail) }),
+  ).toContainText('观察者');
+  await expect(
+    page.getByRole('button', { name: '保存成员' }),
+  ).toHaveCount(0);
   await page.getByRole('link', { name: '返回项目列表' }).click();
   await expect(page.getByRole('link', { name: projectName })).toBeVisible();
   await page.screenshot({ path: info.outputPath('projects.png'), fullPage: true });

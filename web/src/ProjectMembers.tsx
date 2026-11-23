@@ -1,6 +1,5 @@
 import { Alert, Button, Card, Form, Input, Select, Table, Tag } from 'antd';
 import type { TableProps } from 'antd';
-import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   projectMembers,
@@ -15,6 +14,11 @@ type MemberFormValues = {
   role: ProjectMemberRole;
 };
 
+type SaveVariables = {
+  accountID: string;
+  values: MemberFormValues;
+};
+
 const roleLabels: Record<ProjectMember['role'], string> = {
   owner: '所有者',
   developer: '开发者',
@@ -23,27 +27,34 @@ const roleLabels: Record<ProjectMember['role'], string> = {
 
 export function ProjectMembers({
   projectID,
-  canManage,
+  accountID,
 }: {
   projectID: string;
-  canManage: boolean;
+  accountID?: string;
 }) {
   const cache = useQueryClient();
-  const [saved, setSaved] = useState<string>();
   const members = useQuery({
-    queryKey: ['project-members', projectID],
+    queryKey: ['project-members', accountID, projectID],
     queryFn: () => projectMembers(projectID),
+    enabled: Boolean(accountID),
   });
   const save = useMutation({
-    mutationFn: (values: MemberFormValues) =>
+    mutationKey: ['project-member-save', accountID, projectID],
+    mutationFn: ({ values }: SaveVariables) =>
       upsertProjectMember(projectID, values),
-    onSuccess: async (member) => {
-      setSaved(`${member.email} 的角色已保存`);
+    onSuccess: async (_member, { accountID: savedBy }) => {
       await cache.invalidateQueries({
-        queryKey: ['project-members', projectID],
+        queryKey: ['project-members', savedBy, projectID],
       });
     },
   });
+  const canManage = Boolean(
+    accountID &&
+    members.data?.some(
+      (member) => member.user_id === accountID && member.role === 'owner',
+    ),
+  );
+  const saveBelongsToAccount = save.variables?.accountID === accountID;
 
   const columns: TableProps<ProjectMember>['columns'] = [
     { title: '邮箱', dataIndex: 'email', key: 'email' },
@@ -95,7 +106,9 @@ export function ProjectMembers({
           className={styles.memberForm}
           layout="inline"
           initialValues={{ role: 'developer' }}
-          onFinish={(values) => save.mutate(values)}
+          onFinish={(values) => {
+            if (accountID) save.mutate({ accountID, values });
+          }}
         >
           <Form.Item
             name="email"
@@ -118,25 +131,25 @@ export function ProjectMembers({
           <Form.Item>
             <Button
               aria-label="保存成员"
-              aria-busy={save.isPending}
+              aria-busy={saveBelongsToAccount && save.isPending}
               type="primary"
               htmlType="submit"
-              loading={save.isPending}
+              loading={saveBelongsToAccount && save.isPending}
             >
               保存成员
             </Button>
           </Form.Item>
         </Form>
       ) : null}
-      {saved ? (
+      {saveBelongsToAccount && save.isSuccess ? (
         <Alert
           type="success"
-          title={saved}
+          title={`${save.data.email} 的角色已保存`}
           role="status"
           className={styles.notice}
         />
       ) : null}
-      {save.error ? (
+      {saveBelongsToAccount && save.isError ? (
         <Alert
           type="error"
           title={save.error.message}
