@@ -90,7 +90,6 @@ func TestStopValidation(t *testing.T) {
 		{"missing project", func(r *StopRequest) { r.ProjectID = uuid.Nil }},
 		{"invalid ownership", func(r *StopRequest) { r.Ownership.Generation = 0 }},
 		{"project mismatch", func(r *StopRequest) { r.Ownership.Project = "other-project" }},
-		{"missing container", func(r *StopRequest) { r.ContainerID = "" }},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -100,6 +99,14 @@ func TestStopValidation(t *testing.T) {
 				t.Fatalf("无效停止请求返回 %v，要求 fs.ErrInvalid", err)
 			}
 		})
+	}
+}
+
+func TestStopValidationAllowsMissingContainerID(t *testing.T) {
+	request := validStopRequest()
+	request.ContainerID = ""
+	if err := request.validate(); err != nil {
+		t.Fatalf("未记录容器标识的停止请求返回错误: %v", err)
 	}
 }
 

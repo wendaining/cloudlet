@@ -228,8 +228,9 @@ func (s *Service) adoptExisting(ctx context.Context, request StartRequest, reser
 }
 
 // StopRequest asks to stop and remove one execution. ContainerID is the
-// identifier returned by Start and must match the persisted reservation
-// binding. Stop releases capacity only after the bound container is confirmed
+// identifier returned by Start. It may be empty only when the reservation has
+// no recorded container identifier; when one is recorded, the request must
+// match it. Stop releases capacity only after the bound container is confirmed
 // removed, and a repeated Stop is idempotent.
 type StopRequest struct {
 	ExecutionID uuid.UUID
@@ -250,9 +251,6 @@ func (r StopRequest) validate() error {
 	}
 	if r.Ownership.Project != r.ProjectID.String() {
 		return fmt.Errorf("容器归属项目 %q 与预留项目 %s 不一致: %w", r.Ownership.Project, r.ProjectID, fs.ErrInvalid)
-	}
-	if r.ContainerID == "" {
-		return fmt.Errorf("停止执行需要启动返回的容器标识: %w", fs.ErrInvalid)
 	}
 	return nil
 }
@@ -305,11 +303,9 @@ func (s *Service) Stop(ctx context.Context, request StopRequest) error {
 		if err := checkBoundContainer(reservation, observation); err != nil {
 			return err
 		}
-		updated, err := s.reservations.SetContainerID(ctx, request.ProjectID, request.ExecutionID, observation.ID)
-		if err != nil {
-			return fmt.Errorf("记录执行 %s 的容器标识: %w", request.ExecutionID, err)
-		}
-		reservation = updated
+		// Keep the original binding identifier. If release fails later, the
+		// caller can retry the same Stop request without matching a newly
+		// recorded identifier.
 		containerID = observation.ID
 	}
 
@@ -330,11 +326,6 @@ func (s *Service) Stop(ctx context.Context, request StopRequest) error {
 		if err := checkBoundContainer(reservation, observation); err != nil {
 			return err
 		}
-		updated, err := s.reservations.SetContainerID(ctx, request.ProjectID, request.ExecutionID, observation.ID)
-		if err != nil {
-			return fmt.Errorf("记录执行 %s 的容器标识: %w", request.ExecutionID, err)
-		}
-		reservation = updated
 		if err := s.containers.Stop(ctx, request.Ownership, observation.ID); err != nil && !errors.Is(err, containers.ErrNotFound) {
 			return fmt.Errorf("停止执行 %s 的容器 %s: %w", request.ExecutionID, observation.ID, err)
 		}

@@ -473,6 +473,126 @@ func TestContainerAdmission(t *testing.T) {
 		}
 	})
 
+	t.Run("stop releases a bound reservation without a container identifier", func(t *testing.T) {
+		executionID := uuid.New()
+		remember(projectB, executionID)
+		spec := httpSpec(instance, projectB, "binding-no-container", image)
+		binding := capacity.Binding{
+			Environment: spec.Ownership.Environment,
+			Project:     spec.Ownership.Project,
+			Resource:    spec.Ownership.Resource,
+			Generation:  spec.Ownership.Generation,
+			Image:       spec.Image,
+		}
+		if _, created, err := capacityStore.Reserve(ctx, capacity.Request{
+			ExecutionID: executionID,
+			HostID:      hostID,
+			ProjectID:   projectB,
+			Resources:   capacity.Resources{CPUMillis: 1000, MemoryBytes: 1 << 30, Instances: 1},
+			Binding:     binding,
+		}); err != nil || !created {
+			t.Fatalf("建立无容器预留返回 %t, %v", created, err)
+		}
+		if err := service.Stop(ctx, executions.StopRequest{
+			ExecutionID: executionID, ProjectID: projectB,
+			Ownership: spec.Ownership,
+		}); err != nil {
+			t.Fatalf("无容器标识停止返回 %v", err)
+		}
+		assertUsage(t, ctx, capacityStore, hostID, projectB, capacity.Usage{
+			HostID: hostID, HostLimit: budget,
+			HostUsed: capacity.Resources{}, ProjectID: projectB,
+			ProjectLimit: budget, ProjectUsed: capacity.Resources{},
+		})
+		if observation, found, err := adapter.Find(ctx, spec.Ownership); err != nil || found {
+			t.Fatalf("无容器预留停止后存在容器: %+v, %t, %v", observation, found, err)
+		}
+	})
+
+	t.Run("stop retries with the original identifier after release failure", func(t *testing.T) {
+		executionID := uuid.New()
+		remember(projectB, executionID)
+		spec := httpSpec(instance, projectB, "binding-release-retry", image)
+		execution, err := service.Start(ctx, executions.StartRequest{ExecutionID: executionID, ProjectID: projectB, Spec: spec})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := docker.ContainerRemove(ctx, execution.Container.ID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true}); err != nil {
+			t.Fatal(err)
+		}
+		replacement, err := adapter.Create(ctx, spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
+			defer cleanupCancel()
+			_, _ = docker.ContainerRemove(cleanupCtx, replacement.ID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true})
+		})
+
+		if err := databaseStore.DB.Exec("CREATE SEQUENCE fail_release_once_seq").Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := databaseStore.DB.Exec(`CREATE OR REPLACE FUNCTION fail_release_once_fn() RETURNS trigger AS $$
+			BEGIN
+				IF nextval('fail_release_once_seq') = 1 THEN
+					RAISE EXCEPTION 'forced release failure';
+				END IF;
+				RETURN NEW;
+			END;
+			$$ LANGUAGE plpgsql`).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := databaseStore.DB.Exec(`CREATE TRIGGER fail_release_once_trigger
+			BEFORE UPDATE ON capacity_reservations
+			FOR EACH ROW WHEN (OLD.state = 'active' AND NEW.state = 'released')
+			EXECUTE FUNCTION fail_release_once_fn()`).Error; err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
+			defer cleanupCancel()
+			_ = databaseStore.DB.WithContext(cleanupCtx).Exec("DROP TRIGGER IF EXISTS fail_release_once_trigger ON capacity_reservations").Error
+			_ = databaseStore.DB.WithContext(cleanupCtx).Exec("DROP FUNCTION IF EXISTS fail_release_once_fn()").Error
+			_ = databaseStore.DB.WithContext(cleanupCtx).Exec("DROP SEQUENCE IF EXISTS fail_release_once_seq").Error
+		})
+
+		if err := service.Stop(ctx, executions.StopRequest{
+			ExecutionID: executionID, ProjectID: projectB,
+			Ownership: spec.Ownership, ContainerID: execution.Container.ID,
+		}); err == nil {
+			t.Fatal("第一次释放未返回错误")
+		}
+		reservation, err := capacityStore.GetReservation(ctx, projectB, executionID)
+		if err != nil || reservation.State != capacity.Active || reservation.ContainerID != execution.Container.ID {
+			t.Fatalf("释放失败后预留为 %+v, %v，要求 active 且保留原容器标识", reservation, err)
+		}
+		assertUsage(t, ctx, capacityStore, hostID, projectB, capacity.Usage{
+			HostID: hostID, HostLimit: budget,
+			HostUsed:  capacity.Resources{CPUMillis: 1000, MemoryBytes: 1 << 30, Instances: 1},
+			ProjectID: projectB, ProjectLimit: budget,
+			ProjectUsed: capacity.Resources{CPUMillis: 1000, MemoryBytes: 1 << 30, Instances: 1},
+		})
+		if observation, found, err := adapter.Find(ctx, spec.Ownership); err != nil || found {
+			t.Fatalf("释放失败后替换容器仍存在: %+v, %t, %v", observation, found, err)
+		}
+
+		if err := databaseStore.DB.Exec("DROP TRIGGER IF EXISTS fail_release_once_trigger ON capacity_reservations").Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := service.Stop(ctx, executions.StopRequest{
+			ExecutionID: executionID, ProjectID: projectB,
+			Ownership: spec.Ownership, ContainerID: execution.Container.ID,
+		}); err != nil {
+			t.Fatalf("原标识重试停止返回 %v", err)
+		}
+		assertUsage(t, ctx, capacityStore, hostID, projectB, capacity.Usage{
+			HostID: hostID, HostLimit: budget,
+			HostUsed: capacity.Resources{}, ProjectID: projectB,
+			ProjectLimit: budget, ProjectUsed: capacity.Resources{},
+		})
+	})
+
 	t.Run("repeated stop does not touch a new execution with the same ownership", func(t *testing.T) {
 		firstID, secondID := uuid.New(), uuid.New()
 		remember(projectB, firstID)
