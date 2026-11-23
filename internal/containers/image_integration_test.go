@@ -7,6 +7,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -19,6 +21,7 @@ import (
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/network"
+	"github.com/moby/moby/api/types/registry"
 	"github.com/moby/moby/client"
 	"github.com/wendaining/cloudlet/internal/containers"
 )
@@ -252,7 +255,15 @@ func importTestImage(ctx context.Context, t *testing.T, docker *client.Client, r
 
 func pushTestImage(ctx context.Context, t *testing.T, docker *client.Client, tag string) {
 	t.Helper()
-	response, err := docker.ImagePush(ctx, tag, client.ImagePushOptions{})
+	// Some daemons reject an empty X-Registry-Auth header even for an
+	// unauthenticated local registry. Send an encoded empty AuthConfig.
+	auth, err := json.Marshal(registry.AuthConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := docker.ImagePush(ctx, tag, client.ImagePushOptions{
+		RegistryAuth: base64.URLEncoding.EncodeToString(auth),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
