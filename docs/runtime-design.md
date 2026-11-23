@@ -76,7 +76,9 @@ Container 保存镜像 digest、启动参数、端口、资源要求、数据卷
 
 `runtimes/browser` 提供独立容器入口。Chromium 和会话页面启动后，内部 `GET /readyz` 才返回就绪。每个容器配置独立的 `CLOUDLET_BROWSER_TOKEN`，内部命令以 `Authorization: Bearer <token>` 认证，凭据无效返回 401。`POST /navigate` 读取 JSON 中的 `url`，返回跳转后的 `url` 和 `title`。导航仅接受 HTTP(S)，打开页面和读取标题共用同一个截止时间。
 
-`POST /screenshot` 截取最近一次成功导航后仍打开的 HTTP(S) 页面。成功时返回 1280 × 720 的视口截图，响应类型为 `image/png`，大小上限为 2 MiB。没有可截图页面返回 409，超限返回 422。请求体可以为空，也可像导航命令一样在 JSON 中传入 `timeout_ms`。两种命令均默认十秒，最长三十秒，并且在同一会话中串行执行。超时后返回 504 并关闭会话，避免复用可能无响应的 Chromium。执行接口仅供控制器的内部网络使用。
+`POST /screenshot` 截取最近一次成功导航后仍打开的 HTTP(S) 页面。成功时返回当前视口的设备像素 PNG，默认 1280 × 720，大小上限为 2 MiB。没有可截图页面返回 409，超限返回 422。请求体可以为空，也可像导航命令一样在 JSON 中传入 `timeout_ms`。两种命令均默认十秒，最长三十秒。命令在同一会话中串行执行。超时后返回 504 并关闭会话，避免复用可能无响应的 Chromium。执行接口仅供控制器的内部网络使用。
+
+启动时可设置 `CLOUDLET_BROWSER_VIEWPORT_WIDTH`（320–1920 CSS 像素）、`CLOUDLET_BROWSER_VIEWPORT_HEIGHT`（240–1080 CSS 像素）和 `CLOUDLET_BROWSER_DEVICE_SCALE_FACTOR`（1–2）。默认值为 1280、720 和 1。宽高分别乘像素比向上取整后的总面积不得超过 4,194,304 设备像素。无效配置阻止启动。经过同一会话凭据认证的 `GET /viewport` 从 Playwright 的视口状态和会话配置返回 `width`、`height` 和 `device_scale_factor`。
 
 会话镜像以 `pwuser` 运行并要求 Chromium sandbox。`runtimes/browser/seccomp.json` 源于 [Playwright 1.65.1 的 Apache-2.0 seccomp 配置](https://github.com/microsoft/playwright/blob/v1.65.1/utils/docker/seccomp_profile.json)，增加了对 Chromium 在嵌套用户命名空间内调用 `chroot` 的支持，仍由内核校验权限。容器使用独立共享内存、移除 Linux capabilities，并启用 `no-new-privileges`。关闭服务时等待 Chromium 退出。构建与验证命令见 [Browser Run 验证](testing.md#browser-run-验证)。
 
