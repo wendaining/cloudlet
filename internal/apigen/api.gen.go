@@ -125,6 +125,12 @@ type ProjectMemberRole string
 // ProjectRole defines model for ProjectRole.
 type ProjectRole string
 
+// RenameProjectRequest defines model for RenameProjectRequest.
+type RenameProjectRequest struct {
+	// Name 服务端去除首尾空白后必须包含 1 至 100 个 Unicode 字符；原始字符串可以包含首尾空白。
+	Name string `json:"name"`
+}
+
 // Session defines model for Session.
 type Session struct {
 	Projects []Project `json:"projects"`
@@ -175,6 +181,9 @@ type LoginJSONRequestBody = LoginRequest
 
 // CreateProjectJSONRequestBody defines body for CreateProject for application/json ContentType.
 type CreateProjectJSONRequestBody = CreateProjectRequest
+
+// RenameProjectJSONRequestBody defines body for RenameProject for application/json ContentType.
+type RenameProjectJSONRequestBody = RenameProjectRequest
 
 // UpsertProjectMemberJSONRequestBody defines body for UpsertProjectMember for application/json ContentType.
 type UpsertProjectMemberJSONRequestBody = UpsertProjectMemberRequest
@@ -284,6 +293,18 @@ type ClientInterface interface {
 	// GetProject performs a GET /api/v1/projects/{projectID} (the `GetProject` operationId) request.
 	GetProject(ctx context.Context, projectID string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// RenameProjectWithBody performs a PATCH /api/v1/projects/{projectID} (the `RenameProject` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// 更新项目显示名称；仅项目所有者可以调用，项目 ID 与成员关系保持不变。.
+	RenameProjectWithBody(ctx context.Context, projectID string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RenameProject performs a PATCH /api/v1/projects/{projectID} (the `RenameProject` operationId) request.
+	// Takes a body of the `application/json` content type.
+	//
+	// 更新项目显示名称；仅项目所有者可以调用，项目 ID 与成员关系保持不变。.
+	RenameProject(ctx context.Context, projectID string, body RenameProjectJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListProjectMembers performs a GET /api/v1/projects/{projectID}/members (the `ListProjectMembers` operationId) request.
 	//
 	// 返回项目成员及其角色，项目成员可以读取。.
@@ -300,6 +321,11 @@ type ClientInterface interface {
 	//
 	// 添加已有账号为项目成员，或更新其 developer/viewer 角色；仅项目所有者可以调用。.
 	UpsertProjectMember(ctx context.Context, projectID string, body UpsertProjectMemberJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RemoveProjectMember performs a DELETE /api/v1/projects/{projectID}/members/{userID} (the `RemoveProjectMember` operationId) request.
+	//
+	// 移除项目成员；仅项目所有者可以调用，项目所有者不可移除。.
+	RemoveProjectMember(ctx context.Context, projectID string, userID string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListProjectOperations performs a GET /api/v1/projects/{projectID}/operations (the `ListProjectOperations` operationId) request.
 	ListProjectOperations(ctx context.Context, projectID string, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -440,6 +466,38 @@ func (c *Client) GetProject(ctx context.Context, projectID string, reqEditors ..
 	return c.Client.Do(req)
 }
 
+// RenameProjectWithBody performs a PATCH /api/v1/projects/{projectID} (the `RenameProject` operationId) request,
+// with any type of body and a specified content type.
+//
+// 更新项目显示名称；仅项目所有者可以调用，项目 ID 与成员关系保持不变。.
+func (c *Client) RenameProjectWithBody(ctx context.Context, projectID string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRenameProjectRequestWithBody(c.Server, projectID, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RenameProject performs a PATCH /api/v1/projects/{projectID} (the `RenameProject` operationId) request.
+// Takes a body of the `application/json` content type.
+//
+// 更新项目显示名称；仅项目所有者可以调用，项目 ID 与成员关系保持不变。.
+func (c *Client) RenameProject(ctx context.Context, projectID string, body RenameProjectJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRenameProjectRequest(c.Server, projectID, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // ListProjectMembers performs a GET /api/v1/projects/{projectID}/members (the `ListProjectMembers` operationId) request.
 //
 // 返回项目成员及其角色，项目成员可以读取。.
@@ -477,6 +535,21 @@ func (c *Client) UpsertProjectMemberWithBody(ctx context.Context, projectID stri
 // 添加已有账号为项目成员，或更新其 developer/viewer 角色；仅项目所有者可以调用。.
 func (c *Client) UpsertProjectMember(ctx context.Context, projectID string, body UpsertProjectMemberJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewUpsertProjectMemberRequest(c.Server, projectID, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RemoveProjectMember performs a DELETE /api/v1/projects/{projectID}/members/{userID} (the `RemoveProjectMember` operationId) request.
+//
+// 移除项目成员；仅项目所有者可以调用，项目所有者不可移除。.
+func (c *Client) RemoveProjectMember(ctx context.Context, projectID string, userID string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRemoveProjectMemberRequest(c.Server, projectID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -766,6 +839,53 @@ func NewGetProjectRequest(server string, projectID string) (*http.Request, error
 	return req, nil
 }
 
+// NewRenameProjectRequest calls the generic RenameProject builder with application/json body
+func NewRenameProjectRequest(server string, projectID string, body RenameProjectJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewRenameProjectRequestWithBody(server, projectID, "application/json", bodyReader)
+}
+
+// NewRenameProjectRequestWithBody constructs an http.Request for the RenameProject method, with any body, and a specified content type
+func NewRenameProjectRequestWithBody(server string, projectID string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPatch, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewListProjectMembersRequest constructs an http.Request for the ListProjectMembers method
 func NewListProjectMembersRequest(server string, projectID string) (*http.Request, error) {
 	var err error
@@ -843,6 +963,47 @@ func NewUpsertProjectMemberRequestWithBody(server string, projectID string, cont
 	}
 
 	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewRemoveProjectMemberRequest constructs an http.Request for the RemoveProjectMember method
+func NewRemoveProjectMemberRequest(server string, projectID string, userID string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "userID", userID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/members/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
 
 	return req, nil
 }
@@ -1088,6 +1249,20 @@ type ClientWithResponsesInterface interface {
 	// Returns a wrapper object for the known response body format(s).
 	GetProjectWithResponse(ctx context.Context, projectID string, reqEditors ...RequestEditorFn) (*GetProjectResponse, error)
 
+	// RenameProjectWithBodyWithResponse performs a PATCH /api/v1/projects/{projectID} (the `RenameProject` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// 更新项目显示名称；仅项目所有者可以调用，项目 ID 与成员关系保持不变。.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	RenameProjectWithBodyWithResponse(ctx context.Context, projectID string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RenameProjectResponse, error)
+
+	// RenameProjectWithResponse performs a PATCH /api/v1/projects/{projectID} (the `RenameProject` operationId) request.
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// 更新项目显示名称；仅项目所有者可以调用，项目 ID 与成员关系保持不变。.
+	RenameProjectWithResponse(ctx context.Context, projectID string, body RenameProjectJSONRequestBody, reqEditors ...RequestEditorFn) (*RenameProjectResponse, error)
+
 	// ListProjectMembersWithResponse performs a GET /api/v1/projects/{projectID}/members (the `ListProjectMembers` operationId) request.
 	//
 	// 返回项目成员及其角色，项目成员可以读取。.
@@ -1108,6 +1283,13 @@ type ClientWithResponsesInterface interface {
 	//
 	// 添加已有账号为项目成员，或更新其 developer/viewer 角色；仅项目所有者可以调用。.
 	UpsertProjectMemberWithResponse(ctx context.Context, projectID string, body UpsertProjectMemberJSONRequestBody, reqEditors ...RequestEditorFn) (*UpsertProjectMemberResponse, error)
+
+	// RemoveProjectMemberWithResponse performs a DELETE /api/v1/projects/{projectID}/members/{userID} (the `RemoveProjectMember` operationId) request.
+	//
+	// 移除项目成员；仅项目所有者可以调用，项目所有者不可移除。.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	RemoveProjectMemberWithResponse(ctx context.Context, projectID string, userID string, reqEditors ...RequestEditorFn) (*RemoveProjectMemberResponse, error)
 
 	// ListProjectOperationsWithResponse performs a GET /api/v1/projects/{projectID}/operations (the `ListProjectOperations` operationId) request.
 	//
@@ -1527,6 +1709,82 @@ func (r GetProjectResponse) ContentType() string {
 	return ""
 }
 
+type RenameProjectResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *Project
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *Error
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Error
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Error
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *Error
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r RenameProjectResponse) GetJSON200() *Project {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r RenameProjectResponse) GetJSON400() *Error {
+	return r.JSON400
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r RenameProjectResponse) GetJSON401() *Error {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r RenameProjectResponse) GetJSON403() *Error {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r RenameProjectResponse) GetJSON404() *Error {
+	return r.JSON404
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r RenameProjectResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r RenameProjectResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r RenameProjectResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RenameProjectResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r RenameProjectResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type ListProjectMembersResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -1666,6 +1924,75 @@ func (r UpsertProjectMemberResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r UpsertProjectMemberResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type RemoveProjectMemberResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Error
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Error
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *Error
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r RemoveProjectMemberResponse) GetJSON401() *Error {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r RemoveProjectMemberResponse) GetJSON403() *Error {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r RemoveProjectMemberResponse) GetJSON404() *Error {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r RemoveProjectMemberResponse) GetJSON409() *Error {
+	return r.JSON409
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r RemoveProjectMemberResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r RemoveProjectMemberResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r RemoveProjectMemberResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RemoveProjectMemberResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r RemoveProjectMemberResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -2040,6 +2367,32 @@ func (c *ClientWithResponses) GetProjectWithResponse(ctx context.Context, projec
 	return ParseGetProjectResponse(rsp)
 }
 
+// RenameProjectWithBodyWithResponse performs a PATCH /api/v1/projects/{projectID} (the `RenameProject` operationId) request,
+// with any type of body and a specified content type.
+//
+// 更新项目显示名称；仅项目所有者可以调用，项目 ID 与成员关系保持不变。.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) RenameProjectWithBodyWithResponse(ctx context.Context, projectID string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*RenameProjectResponse, error) {
+	rsp, err := c.RenameProjectWithBody(ctx, projectID, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRenameProjectResponse(rsp)
+}
+
+// RenameProjectWithResponse performs a PATCH /api/v1/projects/{projectID} (the `RenameProject` operationId) request.
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// 更新项目显示名称；仅项目所有者可以调用，项目 ID 与成员关系保持不变。.
+func (c *ClientWithResponses) RenameProjectWithResponse(ctx context.Context, projectID string, body RenameProjectJSONRequestBody, reqEditors ...RequestEditorFn) (*RenameProjectResponse, error) {
+	rsp, err := c.RenameProject(ctx, projectID, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRenameProjectResponse(rsp)
+}
+
 // ListProjectMembersWithResponse performs a GET /api/v1/projects/{projectID}/members (the `ListProjectMembers` operationId) request.
 //
 // 返回项目成员及其角色，项目成员可以读取。.
@@ -2077,6 +2430,19 @@ func (c *ClientWithResponses) UpsertProjectMemberWithResponse(ctx context.Contex
 		return nil, err
 	}
 	return ParseUpsertProjectMemberResponse(rsp)
+}
+
+// RemoveProjectMemberWithResponse performs a DELETE /api/v1/projects/{projectID}/members/{userID} (the `RemoveProjectMember` operationId) request.
+//
+// 移除项目成员；仅项目所有者可以调用，项目所有者不可移除。.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) RemoveProjectMemberWithResponse(ctx context.Context, projectID string, userID string, reqEditors ...RequestEditorFn) (*RemoveProjectMemberResponse, error) {
+	rsp, err := c.RemoveProjectMember(ctx, projectID, userID, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRemoveProjectMemberResponse(rsp)
 }
 
 // ListProjectOperationsWithResponse performs a GET /api/v1/projects/{projectID}/operations (the `ListProjectOperations` operationId) request.
@@ -2418,6 +2784,67 @@ func ParseGetProjectResponse(rsp *http.Response) (*GetProjectResponse, error) {
 	return response, nil
 }
 
+// ParseRenameProjectResponse parses an HTTP response from a RenameProjectWithResponse call
+func ParseRenameProjectResponse(rsp *http.Response) (*RenameProjectResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RenameProjectResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest Project
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseListProjectMembersResponse parses an HTTP response from a ListProjectMembersWithResponse call
 func ParseListProjectMembersResponse(rsp *http.Response) (*ListProjectMembersResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -2492,6 +2919,63 @@ func ParseUpsertProjectMemberResponse(rsp *http.Response) (*UpsertProjectMemberR
 			return nil, err
 		}
 		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRemoveProjectMemberResponse parses an HTTP response from a RemoveProjectMemberWithResponse call
+func ParseRemoveProjectMemberResponse(rsp *http.Response) (*RemoveProjectMemberResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RemoveProjectMemberResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case rsp.StatusCode == 204:
+		break // No content-type
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
 		var dest Error
@@ -2772,11 +3256,17 @@ type ServerInterface interface {
 	// (GET /api/v1/projects/{projectID})
 	GetProject(c *gin.Context, projectID string)
 
+	// (PATCH /api/v1/projects/{projectID})
+	RenameProject(c *gin.Context, projectID string)
+
 	// (GET /api/v1/projects/{projectID}/members)
 	ListProjectMembers(c *gin.Context, projectID string)
 
 	// (POST /api/v1/projects/{projectID}/members)
 	UpsertProjectMember(c *gin.Context, projectID string)
+
+	// (DELETE /api/v1/projects/{projectID}/members/{userID})
+	RemoveProjectMember(c *gin.Context, projectID string, userID string)
 
 	// (GET /api/v1/projects/{projectID}/operations)
 	ListProjectOperations(c *gin.Context, projectID string)
@@ -2903,6 +3393,31 @@ func (siw *ServerInterfaceWrapper) GetProject(c *gin.Context) {
 	siw.Handler.GetProject(c, projectID)
 }
 
+// RenameProject operation middleware
+func (siw *ServerInterfaceWrapper) RenameProject(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.RenameProject(c, projectID)
+}
+
 // ListProjectMembers operation middleware
 func (siw *ServerInterfaceWrapper) ListProjectMembers(c *gin.Context) {
 
@@ -2951,6 +3466,40 @@ func (siw *ServerInterfaceWrapper) UpsertProjectMember(c *gin.Context) {
 	}
 
 	siw.Handler.UpsertProjectMember(c, projectID)
+}
+
+// RemoveProjectMember operation middleware
+func (siw *ServerInterfaceWrapper) RemoveProjectMember(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "userID" -------------
+	var userID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "userID", c.Param("userID"), &userID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter userID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.RemoveProjectMember(c, projectID, userID)
 }
 
 // ListProjectOperations operation middleware
@@ -3104,8 +3653,10 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/api/v1/projects", wrapper.CreateProject)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/operations", wrapper.ListProjectOperations)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID", wrapper.GetProject)
+	router.PATCH(options.BaseURL+"/api/v1/projects/:projectID", wrapper.RenameProject)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/members", wrapper.ListProjectMembers)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/members", wrapper.UpsertProjectMember)
+	router.DELETE(options.BaseURL+"/api/v1/projects/:projectID/members/:userID", wrapper.RemoveProjectMember)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/sites/:siteName/versions", wrapper.UploadStaticSiteVersion)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/sites/:siteName/versions/:versionID", wrapper.GetStaticSiteVersion)
 }

@@ -34,6 +34,7 @@ type User struct {
 }
 
 var ErrCredentials = errors.New("邮箱或密码错误")
+var ErrProjectNotOwner = errors.New("只有项目所有者可以重命名项目")
 
 func Open(ctx context.Context, connection string) (*Store, error) {
 	if connection == "" {
@@ -187,6 +188,19 @@ func (s *Store) CreateProject(ctx context.Context, ownerID, name string) (Projec
 		return Project{}, err
 	}
 	return project, nil
+}
+
+func (s *Store) RenameProject(ctx context.Context, projectID, ownerID, name string) error {
+	result := s.DB.WithContext(ctx).Model(&Project{}).
+		Where("id = ? AND EXISTS (SELECT 1 FROM project_members WHERE project_members.project_id = projects.id AND project_members.user_id = ? AND project_members.role = 'owner')", projectID, ownerID).
+		Update("name", name)
+	if result.Error != nil {
+		return fmt.Errorf("重命名项目 %s: %w", projectID, result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return ErrProjectNotOwner
+	}
+	return nil
 }
 
 func (s *Store) Projects(ctx context.Context, userID string) ([]Project, error) {

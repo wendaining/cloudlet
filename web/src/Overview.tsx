@@ -17,7 +17,9 @@ export function Overview({ session }: { session: Session }) {
   const signOut = useMutation({
     mutationFn: logout,
     onSuccess: () => {
-      cache.removeQueries({ queryKey: ['environment'] });
+      cache.removeQueries({
+        predicate: (query) => query.queryKey[0] !== 'session',
+      });
       cache.setQueryData(['session'], null);
     },
   });

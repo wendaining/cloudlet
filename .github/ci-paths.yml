@@ -88,6 +88,20 @@ containers:
   - '.github/ci-paths.yml'
   - '!**/*.md'
 
+executions:
+  - 'internal/executions/**'
+  - 'internal/capacity/**'
+  - 'internal/containers/**'
+  - 'internal/database/**'
+  - 'migrations/**'
+  - 'configs/images.json'
+  - 'go.mod'
+  - 'go.sum'
+  - 'Makefile'
+  - '.github/workflows/ci.yml'
+  - '.github/ci-paths.yml'
+  - '!**/*.md'
+
 web:
   - 'web/**'
   - 'api/**'
