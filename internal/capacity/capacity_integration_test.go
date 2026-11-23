@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -255,9 +256,191 @@ func TestCapacityReservation(t *testing.T) {
 	t.Run("unconfigured budgets", func(t *testing.T) {
 		testUnconfiguredBudgets(t, ctx, store, databaseStore, owner.ID)
 	})
+	t.Run("container binding", func(t *testing.T) {
+		testContainerBinding(t, ctx, store, databaseStore, owner.ID)
+	})
+	t.Run("concurrent ownership", func(t *testing.T) {
+		testConcurrentOwnership(t, ctx, store, databaseStore, owner.ID)
+	})
 	t.Run("repeatable read connection default", func(t *testing.T) {
 		testRepeatableReadDefault(t, ctx, connection, databaseStore, owner.ID)
 	})
+}
+
+func testContainerBinding(t *testing.T, ctx context.Context, store *capacity.Store, databaseStore *database.Store, ownerID string) {
+	t.Helper()
+	projectID := createProject(t, ctx, databaseStore, ownerID, "容器绑定项目")
+	hostID := "binding-" + uuid.NewString()
+	limits := capacity.Resources{CPUMillis: 4000, MemoryBytes: 4 << 30, Instances: 4}
+	setHost(t, ctx, store, hostID, limits)
+	setProjectQuota(t, ctx, store, projectID, limits)
+
+	binding := capacity.Binding{
+		Environment: "integration",
+		Project:     projectID.String(),
+		Resource:    "resource-1",
+		Generation:  1,
+		Image:       "nginx:1.29.3-alpine",
+	}
+	executionID := uuid.New()
+	request := capacity.Request{
+		ExecutionID: executionID,
+		HostID:      hostID,
+		ProjectID:   projectID,
+		Resources:   capacity.Resources{CPUMillis: 1000, MemoryBytes: 1 << 30, Instances: 1},
+		Binding:     binding,
+	}
+	reservation, created, err := store.Reserve(ctx, request)
+	if err != nil || !created || reservation.Binding != binding || reservation.ContainerID != "" {
+		t.Fatalf("首次绑定预留返回 %+v, %t, %v", reservation, created, err)
+	}
+	repeated, created, err := store.Reserve(ctx, request)
+	if err != nil || created || !sameReservation(repeated, reservation) {
+		t.Fatalf("重复绑定预留返回 %+v, %t, %v", repeated, created, err)
+	}
+
+	differentBinding := request
+	differentBinding.Binding.Resource = "resource-2"
+	if _, _, err := store.Reserve(ctx, differentBinding); !errors.Is(err, capacity.ErrIdempotencyConflict) {
+		t.Fatalf("同一执行更换归属返回 %v，要求 ErrIdempotencyConflict", err)
+	}
+	otherExecution := request
+	otherExecution.ExecutionID = uuid.New()
+	if _, _, err := store.Reserve(ctx, otherExecution); !errors.Is(err, capacity.ErrOwnershipConflict) {
+		t.Fatalf("不同执行复用归属返回 %v，要求 ErrOwnershipConflict", err)
+	}
+
+	const containerID = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	updated, err := store.SetContainerID(ctx, projectID, executionID, containerID)
+	if err != nil || updated.ContainerID != containerID || updated.Binding != binding {
+		t.Fatalf("记录容器标识返回 %+v, %v", updated, err)
+	}
+	if again, err := store.SetContainerID(ctx, projectID, executionID, containerID); err != nil || !sameReservation(again, updated) {
+		t.Fatalf("重复记录容器标识返回 %+v, %v", again, err)
+	}
+	if _, err := store.SetContainerID(ctx, projectID, uuid.New(), containerID); !errors.Is(err, capacity.ErrReservationNotFound) {
+		t.Fatalf("未知执行记录容器标识返回 %v，要求 ErrReservationNotFound", err)
+	}
+	if _, err := store.SetContainerID(ctx, uuid.New(), executionID, containerID); !errors.Is(err, capacity.ErrReservationNotFound) {
+		t.Fatalf("错误项目记录容器标识返回 %v，要求 ErrReservationNotFound", err)
+	}
+	if _, err := store.SetContainerID(ctx, projectID, executionID, ""); !errors.Is(err, fs.ErrInvalid) {
+		t.Fatalf("空容器标识返回 %v，要求 fs.ErrInvalid", err)
+	}
+
+	// A reservation created without a binding can be bound on a later retry.
+	legacyID := uuid.New()
+	legacyRequest := capacity.Request{
+		ExecutionID: legacyID,
+		HostID:      hostID,
+		ProjectID:   projectID,
+		Resources:   capacity.Resources{CPUMillis: 1000, MemoryBytes: 1 << 30, Instances: 1},
+	}
+	if _, created, err := store.Reserve(ctx, legacyRequest); err != nil || !created {
+		t.Fatalf("无绑定预留返回 %t, %v", created, err)
+	}
+	if _, err := store.SetContainerID(ctx, projectID, legacyID, containerID); !errors.Is(err, capacity.ErrBindingNotFound) {
+		t.Fatalf("无绑定预留记录容器返回 %v，要求 ErrBindingNotFound", err)
+	}
+	legacyRequest.Binding = capacity.Binding{
+		Environment: "integration",
+		Project:     projectID.String(),
+		Resource:    "resource-2",
+		Generation:  2,
+		Image:       "nginx:1.29.3-alpine",
+	}
+	if bound, created, err := store.Reserve(ctx, legacyRequest); err != nil || created || bound.Binding != legacyRequest.Binding {
+		t.Fatalf("补充绑定返回 %+v, %t, %v", bound, created, err)
+	}
+
+	if _, err := store.Release(ctx, projectID, executionID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SetContainerID(ctx, projectID, executionID, containerID); !errors.Is(err, capacity.ErrExecutionReleased) {
+		t.Fatalf("已释放预留记录容器返回 %v，要求 ErrExecutionReleased", err)
+	}
+	if released, err := store.GetReservation(ctx, projectID, executionID); err != nil ||
+		released.State != capacity.Released || released.Binding != binding || released.ContainerID != containerID {
+		t.Fatalf("释放后保留绑定返回 %+v, %v", released, err)
+	}
+	reused := request
+	reused.ExecutionID = uuid.New()
+	if _, created, err := store.Reserve(ctx, reused); err != nil || !created {
+		t.Fatalf("释放后复用归属返回 %t, %v", created, err)
+	}
+	if _, err := store.Release(ctx, projectID, legacyID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Release(ctx, projectID, reused.ExecutionID); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func testConcurrentOwnership(t *testing.T, ctx context.Context, store *capacity.Store, databaseStore *database.Store, ownerID string) {
+	t.Helper()
+	projectID := createProject(t, ctx, databaseStore, ownerID, "并发归属项目")
+	hostID := "ownership-" + uuid.NewString()
+	limits := capacity.Resources{CPUMillis: 4000, MemoryBytes: 4 << 30, Instances: 4}
+	setHost(t, ctx, store, hostID, limits)
+	setProjectQuota(t, ctx, store, projectID, limits)
+	binding := capacity.Binding{
+		Environment: "integration",
+		Project:     projectID.String(),
+		Resource:    "concurrent-resource",
+		Generation:  1,
+		Image:       "nginx:1.29.3-alpine",
+	}
+
+	const attempts = 8
+	type result struct {
+		reservation capacity.Reservation
+		created     bool
+		err         error
+	}
+	results := make([]result, attempts)
+	start := make(chan struct{})
+	var pending sync.WaitGroup
+	for index := range results {
+		pending.Go(func() {
+			<-start
+			results[index].reservation, results[index].created, results[index].err = store.Reserve(ctx, capacity.Request{
+				ExecutionID: uuid.New(),
+				HostID:      hostID,
+				ProjectID:   projectID,
+				Resources:   capacity.Resources{CPUMillis: 1000, MemoryBytes: 1 << 30, Instances: 1},
+				Binding:     binding,
+			})
+		})
+	}
+	close(start)
+	pending.Wait()
+
+	winner := -1
+	for index, result := range results {
+		if result.err == nil {
+			if !result.created || winner >= 0 {
+				t.Fatalf("并发归属申请产生多个成功结果: 索引 %d 与 %d", winner, index)
+			}
+			winner = index
+			continue
+		}
+		if !errors.Is(result.err, capacity.ErrOwnershipConflict) {
+			t.Fatalf("并发归属申请 %d 返回 %v，要求 ErrOwnershipConflict", index, result.err)
+		}
+	}
+	if winner < 0 {
+		t.Fatal("并发归属申请没有成功结果")
+	}
+	usage, err := store.Usage(ctx, hostID, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.HostUsed != (capacity.Resources{CPUMillis: 1000, MemoryBytes: 1 << 30, Instances: 1}) {
+		t.Fatalf("并发归属申请后主机占用错误: %+v", usage.HostUsed)
+	}
+	if _, err := store.Release(ctx, projectID, results[winner].reservation.ExecutionID); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func testRepeatableReadDefault(t *testing.T, ctx context.Context, connection string, databaseStore *database.Store, ownerID string) {
@@ -477,6 +660,7 @@ func testConcurrentDuplicate(t *testing.T, ctx context.Context, store *capacity.
 func sameReservation(left, right capacity.Reservation) bool {
 	if left.ExecutionID != right.ExecutionID || left.HostID != right.HostID ||
 		left.ProjectID != right.ProjectID || left.Resources != right.Resources ||
+		left.Binding != right.Binding || left.ContainerID != right.ContainerID ||
 		left.State != right.State || !left.CreatedAt.Equal(right.CreatedAt) {
 		return false
 	}

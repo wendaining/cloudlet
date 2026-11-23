@@ -37,6 +37,13 @@ func TestRequestValidate(t *testing.T) {
 		HostID:      "host-1",
 		ProjectID:   uuid.New(),
 		Resources:   Resources{CPUMillis: 1000, MemoryBytes: 1 << 30, Instances: 1},
+		Binding: Binding{
+			Environment: "integration",
+			Project:     "project-1",
+			Resource:    "resource-1",
+			Generation:  1,
+			Image:       "nginx:1.29.3-alpine",
+		},
 	}
 	if err := valid.validate(); err != nil {
 		t.Fatalf("有效预留请求返回错误: %v", err)
@@ -50,11 +57,14 @@ func TestRequestValidate(t *testing.T) {
 	badHost.HostID = ""
 	badResources := valid
 	badResources.Resources.Instances = 0
+	badBinding := valid
+	badBinding.Binding.Resource = ""
 	for name, request := range map[string]Request{
 		"missing execution": missingExecution,
 		"missing project":   missingProject,
 		"missing host":      badHost,
 		"invalid resources": badResources,
+		"invalid binding":   badBinding,
 	} {
 		t.Run(name, func(t *testing.T) {
 			if err := request.validate(); !errors.Is(err, fs.ErrInvalid) {
@@ -99,14 +109,22 @@ func TestCheckAvailable(t *testing.T) {
 	}
 }
 
-func TestResolveExisting(t *testing.T) {
+func TestValidateExisting(t *testing.T) {
 	executionID := uuid.New()
 	projectID := uuid.New()
+	binding := Binding{
+		Environment: "integration",
+		Project:     projectID.String(),
+		Resource:    "resource-1",
+		Generation:  1,
+		Image:       "nginx:1.29.3-alpine",
+	}
 	request := Request{
 		ExecutionID: executionID,
 		HostID:      "host-1",
 		ProjectID:   projectID,
 		Resources:   Resources{CPUMillis: 1000, MemoryBytes: 1 << 30, Instances: 1},
+		Binding:     binding,
 	}
 	active := reservationRow{
 		ExecutionID: executionID,
@@ -117,20 +135,19 @@ func TestResolveExisting(t *testing.T) {
 		Instances:   request.Resources.Instances,
 		State:       stateActive,
 	}
-	reservation, created, err := resolveExisting(active, request)
-	if err != nil || created || reservation.ExecutionID != executionID || reservation.State != Active {
-		t.Fatalf("重复预留返回 %+v, %t, %v", reservation, created, err)
+	applyBinding(&active, binding)
+	if err := validateExisting(&active, request); err != nil {
+		t.Fatalf("匹配的已有预留返回错误: %v", err)
 	}
 
-	released := active
-	released.State = stateReleased
-	if _, _, err := resolveExisting(released, request); !errors.Is(err, ErrExecutionReleased) {
-		t.Fatalf("已释放执行重复预留返回 %v，要求 ErrExecutionReleased", err)
-	}
-	releasedDifferent := released
-	releasedDifferent.CPUMillis = request.Resources.CPUMillis + 1
-	if _, _, err := resolveExisting(releasedDifferent, request); !errors.Is(err, ErrIdempotencyConflict) {
-		t.Fatalf("已释放执行以不同请求预留返回 %v，要求 ErrIdempotencyConflict", err)
+	unbound := active
+	unbound.ContainerEnvironment = nil
+	unbound.ContainerProject = nil
+	unbound.ContainerResource = nil
+	unbound.ContainerGeneration = nil
+	unbound.ContainerImage = nil
+	if err := validateExisting(&unbound, request); err != nil {
+		t.Fatalf("未绑定归属的活动预留返回错误: %v", err)
 	}
 
 	for name, existing := range map[string]reservationRow{
@@ -139,16 +156,79 @@ func TestResolveExisting(t *testing.T) {
 		"resources": {ExecutionID: executionID, HostID: "host-1", ProjectID: projectID, CPUMillis: 1001, MemoryBytes: 1 << 30, Instances: 1, State: stateActive},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, _, err := resolveExisting(existing, request); !errors.Is(err, ErrIdempotencyConflict) {
+			if err := validateExisting(&existing, request); !errors.Is(err, ErrIdempotencyConflict) {
 				t.Fatalf("不同请求复用执行标识返回 %v，要求 ErrIdempotencyConflict", err)
 			}
 		})
 	}
 
-	invalid := active
-	invalid.State = "unknown"
-	if _, _, err := resolveExisting(invalid, request); err == nil {
-		t.Fatal("未知预留状态未返回错误")
+	different := request
+	different.Binding.Resource = "resource-2"
+	if err := validateExisting(&active, different); !errors.Is(err, ErrIdempotencyConflict) {
+		t.Fatalf("不同容器归属复用执行标识返回 %v，要求 ErrIdempotencyConflict", err)
+	}
+
+	releasedUnbound := unbound
+	releasedUnbound.State = stateReleased
+	if err := validateExisting(&releasedUnbound, request); !errors.Is(err, ErrExecutionReleased) {
+		t.Fatalf("已释放且未绑定归属的预留返回 %v，要求 ErrExecutionReleased", err)
+	}
+	releasedBound := active
+	releasedBound.State = stateReleased
+	if err := validateExisting(&releasedBound, request); err != nil {
+		t.Fatalf("已释放但归属匹配的预留返回错误: %v", err)
+	}
+	if err := validateExisting(&releasedBound, different); !errors.Is(err, ErrIdempotencyConflict) {
+		t.Fatalf("已释放且归属不同返回 %v，要求 ErrIdempotencyConflict", err)
+	}
+}
+
+func TestBindingValidate(t *testing.T) {
+	valid := Binding{
+		Environment: "integration",
+		Project:     uuid.NewString(),
+		Resource:    "resource-1",
+		Generation:  1,
+		Image:       "nginx:1.29.3-alpine",
+	}
+	if err := valid.validate(); err != nil {
+		t.Fatalf("有效容器归属返回错误: %v", err)
+	}
+	if err := (Binding{}).validate(); err != nil {
+		t.Fatalf("空容器归属应允许: %v", err)
+	}
+	longImage := "registry.example.com/" + strings.Repeat("a", 200) + ":" + strings.Repeat("t", 30) + "@sha256:" + strings.Repeat("f", 64)
+	if len(longImage) <= 255 || len(longImage) > maxImageLength {
+		t.Fatalf("边界镜像长度 %d 不在 256 至 %d 之间", len(longImage), maxImageLength)
+	}
+	longBinding := valid
+	longBinding.Image = longImage
+	if err := longBinding.validate(); err != nil {
+		t.Fatalf("长摘要镜像返回错误: %v", err)
+	}
+	tests := []struct {
+		name   string
+		change func(*Binding)
+	}{
+		{"missing environment", func(b *Binding) { b.Environment = "" }},
+		{"padded environment", func(b *Binding) { b.Environment = " integration" }},
+		{"missing project", func(b *Binding) { b.Project = "" }},
+		{"missing resource", func(b *Binding) { b.Resource = "" }},
+		{"control character", func(b *Binding) { b.Resource = "resource\n" }},
+		{"zero generation", func(b *Binding) { b.Generation = 0 }},
+		{"missing image", func(b *Binding) { b.Image = "" }},
+		{"image with whitespace", func(b *Binding) { b.Image = "nginx alpine" }},
+		{"image with NUL", func(b *Binding) { b.Image = "nginx\x00" }},
+		{"image too long", func(b *Binding) { b.Image = strings.Repeat("a", maxImageLength+1) }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			binding := valid
+			test.change(&binding)
+			if err := binding.validate(); err == nil || !errors.Is(err, fs.ErrInvalid) {
+				t.Fatalf("无效容器归属返回 %v，要求 fs.ErrInvalid", err)
+			}
+		})
 	}
 }
 

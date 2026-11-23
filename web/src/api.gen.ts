@@ -133,7 +133,8 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /** @description 更新项目显示名称；仅项目所有者可以调用，项目 ID 与成员关系保持不变。 */
+        patch: operations["renameProject"];
         trace?: never;
     };
     "/api/v1/projects/{projectID}/capacity": {
@@ -175,6 +176,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{projectID}/members/{userID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+                userID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** @description 移除项目成员；仅项目所有者可以调用，项目所有者不可移除。 */
+        delete: operations["removeProjectMember"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -197,6 +218,10 @@ export interface components {
             database_version: number;
         };
         CreateProjectRequest: {
+            /** @description 服务端去除首尾空白后必须包含 1 至 100 个 Unicode 字符；原始字符串可以包含首尾空白。 */
+            name: string;
+        };
+        RenameProjectRequest: {
             /** @description 服务端去除首尾空白后必须包含 1 至 100 个 Unicode 字符；原始字符串可以包含首尾空白。 */
             name: string;
         };
@@ -494,6 +519,29 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    renameProject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RenameProjectRequest"];
+            };
+        };
+        responses: {
+            200: components["responses"]["Project"];
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     getProjectCapacity: {
         parameters: {
             query?: never;
@@ -561,6 +609,32 @@ export interface operations {
         responses: {
             200: components["responses"]["ProjectMember"];
             400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    removeProjectMember: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+                userID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 成员已移除 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
