@@ -220,6 +220,9 @@ func TestPostgresMigrationAccountsSessionsAndProjects(t *testing.T) {
 	t.Run("operations", func(t *testing.T) {
 		testOperations(t, ctx, store, connection, project.Id, user.ID)
 	})
+	t.Run("operation CLI", func(t *testing.T) {
+		testOperationCLI(t, ctx, api, store, project.Id, otherUser.ID, client)
+	})
 	request("POST", api.URL+"/api/v1/auth/logout", "", http.StatusNoContent)
 	request("GET", api.URL+"/api/v1/auth/session", "", http.StatusUnauthorized)
 	req, err := http.NewRequest("POST", api.URL+"/api/v1/auth/login", strings.NewReader(`{}`))
