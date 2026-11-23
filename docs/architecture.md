@@ -41,7 +41,7 @@ Cloudlet 在一台 Linux 服务器上管理计算资源。本地开发在成员�
 | internal/version | 构建版本和提交标识 |
 | internal/workers | ES Module 与 Durable Objects 的 workerd 配置、启动参数和镜像引用 |
 | internal/durableobjects | SQLite 命名空间、类绑定和存储挂载路径 |
-| internal/containers | Docker Engine 容器生命周期与回环端口观测 |
+| internal/containers | Docker Engine 镜像摘要准备、容器生命周期与回环端口观测 |
 | internal/browser | 复用容器管理的 Playwright 会话 |
 | pkg/client | CLI 与其他客户端共享的 API 客户端 |
 
@@ -75,6 +75,8 @@ Gateway 使用配置中的 `host` 匹配请求域名，匹配时忽略大小写�
 
 `internal/sitehttp` 可通过 HTTP 提供已验证的只读站点文件系统，支持 GET、HEAD 和目录首页。缺少首页的目录返回 404。处理器可以独立使用，域名绑定和版本切换由发布流程接入。
 
+创建单个站点处理器时可通过 `Options.SPAFallback` 启用导航回退，默认关闭。启用后，接受 `text/html` 的页面导航访问不存在且末段无扩展名的路径时，返回站点根目录的 `index.html`。静态文件请求和已有但缺少首页的目录仍返回 404。回退候选路径通过 `Vary` 声明导航相关请求头。
+
 静态站点以项目和名称确定身份。所有者使用 `Content-Type: application/zip` 上传，服务保存原始 ZIP，再展开并登记版本。上传体上限为 64 MiB，展开上限为 256 MiB 和 10,000 个 ZIP 成员。成功响应返回版本标识、SHA-256 摘要、`ready` 状态和用于查询的 `Location`。`ready` 表示文件已准备就绪，等待后续激活。
 
 管理环境通过 PostgreSQL 保存账号与会话，使用 bcrypt 校验密码，使用 SCS 管理 HttpOnly 会话 Cookie。Cookie 名称包含实例名称，写入请求执行来源检查。开发账号经显式初始化流程创建，重复初始化保留已有密码。
@@ -93,6 +95,6 @@ API 与 Gateway 使用 HTTP 头读取超时和空闲连接超时。收到 SIGTER
 
 ## 执行环境
 
-Workers 集成 workerd，支持原生 Durable Object SQLite 绑定。真实运行时测试验证对象隔离和重启后的持久化。容器管理使用 Docker Engine API。internal/containers 提供创建、启动、观测、停止和删除受管理容器的适配器，按环境、项目、资源和执行序号写入归属标签与确定性名称，在启动、观测、停止和删除前核对名称和标签，启动后读取实际发布的回环端口。管理 API、Gateway 注册与配额由上层任务接入。Browser Run 复用容器生命周期，并通过 Playwright 实现浏览器操作。
+Workers 集成 workerd，支持原生 Durable Object SQLite 绑定。真实运行时测试验证对象隔离和重启后的持久化。容器管理使用 Docker Engine API。internal/containers 按不可变摘要准备镜像，核对本地镜像报告的摘要后才用于创建容器，已缓存且摘要一致的镜像直接复用。适配器提供创建、启动、观测、停止和删除受管理容器的操作，按环境、项目、资源和执行序号写入归属标签与确定性名称，在启动、观测、停止和删除前核对名称和标签，启动后读取实际发布的回环端口。管理 API、Gateway 注册与配额由上层任务接入。Browser Run 复用容器生命周期，并通过 Playwright 实现浏览器操作。
 
 执行单元、配额、隔离、状态恢复与独占交接遵循执行环境设计。对应模块完成时，同步提供 [真实业务验收](testing.md)。
