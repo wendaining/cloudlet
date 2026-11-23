@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 
@@ -43,7 +44,14 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		return fmt.Errorf("listen gateway: %w", err)
 	}
 	defer gatewayListener.Close()
-	management, closeSessions := controlplane.NewHandler(store, cfg, logger)
+	endpoint, err := managementAPIEndpoint(apiListener.Addr())
+	if err != nil {
+		return fmt.Errorf("resolve management API endpoint: %w", err)
+	}
+	management, closeSessions, err := controlplane.NewHandlerWithMCP(store, cfg, logger, endpoint)
+	if err != nil {
+		return fmt.Errorf("configure management API: %w", err)
+	}
 	defer closeSessions()
 	api := newServer(management)
 	front := newServer(proxy)
@@ -84,4 +92,17 @@ func newServer(handler http.Handler) *http.Server {
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    1 << 20,
 	}
+}
+
+func managementAPIEndpoint(address net.Addr) (string, error) {
+	host, port, err := net.SplitHostPort(address.String())
+	if err != nil {
+		return "", fmt.Errorf("parse listener address %q: %w", address, err)
+	}
+	if host == "" || host == "0.0.0.0" {
+		host = "127.0.0.1"
+	} else if host == "::" {
+		host = "::1"
+	}
+	return (&url.URL{Scheme: "http", Host: net.JoinHostPort(host, port)}).String(), nil
 }
