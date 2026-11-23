@@ -6,10 +6,13 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -100,7 +103,8 @@ func TestServeNonSeekableZIPFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := sitehttp.New(archive)
+	site := &countedSite{FS: archive}
+	handler, err := sitehttp.NewWithOptions(site, sitehttp.Options{Immutable: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,11 +114,12 @@ func TestServeNonSeekableZIPFile(t *testing.T) {
 	if response.StatusCode != 200 || body != content || response.Header.Get("ETag") != fmt.Sprintf(`"%x"`, sha256.Sum256([]byte(content))) {
 		t.Fatalf("archive file response = %d %v %q", response.StatusCode, response.Header, body)
 	}
+	site.read.Store(0)
 	response, body = cacheRequest(t, server, http.MethodGet, "/style.css", http.Header{
 		"Range": {"bytes=3-6"}, "If-Range": {response.Header.Get("ETag")},
 	})
-	if response.StatusCode != http.StatusPartialContent || body != content[3:7] {
-		t.Fatalf("archive file range = %d %q", response.StatusCode, body)
+	if response.StatusCode != http.StatusPartialContent || body != content[3:7] || site.read.Load() != 7 {
+		t.Fatalf("archive file range = %d %q, %d bytes read", response.StatusCode, body, site.read.Load())
 	}
 	response, body = cacheRequest(t, server, http.MethodGet, "/style.css", http.Header{
 		"Range": {"bytes=3-6"}, "If-Range": {`"previous-version"`},
@@ -151,8 +156,9 @@ func TestStaticFileHTTPPreconditions(t *testing.T) {
 			if response.StatusCode != test.status {
 				t.Fatalf("status = %d with body %q, want %d", response.StatusCode, body, test.status)
 			}
-			if test.status == http.StatusPreconditionFailed && body != "" {
-				t.Fatalf("failed precondition sent a body: %q", body)
+			if test.status == http.StatusPreconditionFailed && (body != "" || response.Header.Get("Cache-Control") != "no-store" ||
+				response.Header.Get("ETag") != "" || response.Header.Get("Last-Modified") != "" || response.Header.Get("Content-Type") != "") {
+				t.Fatalf("failed precondition = %v %q", response.Header, body)
 			}
 		})
 	}
@@ -175,4 +181,78 @@ func cacheRequest(t *testing.T, server *httptest.Server, method, path string, he
 		t.Fatal(err)
 	}
 	return response, string(body)
+}
+
+func TestCachedFileValidatorsAvoidReadingFile(t *testing.T) {
+	directory := t.TempDir()
+	const size = 1 << 20
+	if err := os.WriteFile(filepath.Join(directory, "asset.css"), bytes.Repeat([]byte("x"), size), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	site := &countedSite{FS: os.DirFS(directory)}
+	options := sitehttp.Options{Immutable: runtime.GOOS != "linux" && runtime.GOOS != "darwin"}
+	handler, err := sitehttp.NewWithOptions(site, options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	first, _ := request(t, server, http.MethodHead, "/asset.css")
+	if first.StatusCode != http.StatusOK || site.read.Load() != size || first.Header.Get("ETag") == "" {
+		t.Fatalf("initial HEAD = %d, %d bytes read, %v", first.StatusCode, site.read.Load(), first.Header)
+	}
+	for _, test := range []struct {
+		method  string
+		headers http.Header
+		status  int
+		read    int64
+	}{
+		{http.MethodHead, nil, http.StatusOK, 0},
+		{http.MethodGet, http.Header{"If-None-Match": {first.Header.Get("ETag")}}, http.StatusNotModified, 0},
+		{http.MethodGet, http.Header{"Range": {"bytes=0-0"}}, http.StatusPartialContent, 1},
+	} {
+		site.read.Store(0)
+		response, _ := cacheRequest(t, server, test.method, "/asset.css", test.headers)
+		if got := site.read.Load(); response.StatusCode != test.status || got != test.read {
+			t.Errorf("%s %v = %d, %d bytes read; want %d, %d bytes", test.method, test.headers, response.StatusCode, got, test.status, test.read)
+		}
+	}
+}
+
+type countedSite struct {
+	fs.FS
+	read atomic.Int64
+}
+
+func (s *countedSite) Open(name string) (fs.File, error) {
+	file, err := s.FS.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	counted := countedFile{File: file, read: &s.read}
+	if seeker, ok := file.(io.Seeker); ok {
+		return countedSeekableFile{countedFile: counted, seeker: seeker}, nil
+	}
+	return counted, nil
+}
+
+type countedFile struct {
+	fs.File
+	read *atomic.Int64
+}
+
+func (f countedFile) Read(data []byte) (int, error) {
+	n, err := f.File.Read(data)
+	f.read.Add(int64(n))
+	return n, err
+}
+
+type countedSeekableFile struct {
+	countedFile
+	seeker io.Seeker
+}
+
+func (f countedSeekableFile) Seek(offset int64, whence int) (int64, error) {
+	return f.seeker.Seek(offset, whence)
 }

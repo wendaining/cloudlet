@@ -26,3 +26,18 @@ func combineETagHeaders(request *http.Request) *http.Request {
 	}
 	return request
 }
+
+// ServeContent writes a bare 412 for condition failures. Its normal error
+// helper clears the representation headers for other errors.
+type fileResponse struct{ http.ResponseWriter }
+
+func (w fileResponse) WriteHeader(status int) {
+	if status == http.StatusPreconditionFailed {
+		headers := w.Header()
+		headers.Del("ETag")
+		headers.Del("Last-Modified")
+		headers.Del("Content-Type")
+		headers.Set("Cache-Control", "no-store")
+	}
+	w.ResponseWriter.WriteHeader(status)
+}

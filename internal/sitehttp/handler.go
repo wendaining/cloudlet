@@ -2,17 +2,15 @@
 package sitehttp
 
 import (
-	"bufio"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
-	"mime"
 	"net/http"
 	"path"
 	"strings"
+	"sync"
 )
 
 // New returns a handler for the provided site filesystem. The caller keeps
@@ -24,6 +22,9 @@ func New(site fs.FS) (http.Handler, error) {
 // Options configures the behavior of an individual static site.
 type Options struct {
 	SPAFallback bool
+	// Immutable permits reusing file digests for filesystems without file
+	// change metadata. The caller must keep the files unchanged.
+	Immutable bool
 }
 
 // NewWithOptions returns a handler with the given site options.
@@ -31,15 +32,17 @@ func NewWithOptions(site fs.FS, options Options) (http.Handler, error) {
 	if site == nil {
 		return nil, fmt.Errorf("configure static site handler: filesystem is required: %w", fs.ErrInvalid)
 	}
-	return handler{site: site, spaFallback: options.SPAFallback}, nil
+	return &handler{site: site, spaFallback: options.SPAFallback, immutable: options.Immutable}, nil
 }
 
 type handler struct {
 	site        fs.FS
 	spaFallback bool
+	immutable   bool
+	metadata    sync.Map
 }
 
-func (h handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -94,10 +97,10 @@ func (h handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	h.writeFile(w, r, name, info)
+	h.writeFile(w, r, name)
 }
 
-func (h handler) serveFile(w http.ResponseWriter, r *http.Request, name string) {
+func (h *handler) serveFile(w http.ResponseWriter, r *http.Request, name string) {
 	info, err := fs.Stat(h.site, name)
 	if err != nil {
 		serveFileError(w, r, name, err)
@@ -107,45 +110,36 @@ func (h handler) serveFile(w http.ResponseWriter, r *http.Request, name string) 
 		http.NotFound(w, r)
 		return
 	}
-	h.writeFile(w, r, name, info)
+	h.writeFile(w, r, name)
 }
 
-func (h handler) writeFile(w http.ResponseWriter, r *http.Request, name string, info fs.FileInfo) {
+func (h *handler) writeFile(w http.ResponseWriter, r *http.Request, name string) {
 	file, err := h.site.Open(name)
 	if err != nil {
 		serveFileError(w, r, name, err)
 		return
 	}
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		defer closeFile(r, name, file)
+		if err == nil {
+			err = fs.ErrNotExist
+		}
+		serveFileError(w, r, name, err)
+		return
+	}
 	content := asReadSeekCloser(h.site, name, file, info.Size())
 	defer closeFile(r, name, content)
-	body := bufio.NewReader(content)
-	contentType := mime.TypeByExtension(path.Ext(name))
-	if contentType == "" {
-		sample, err := body.Peek(512)
-		if err != nil && !errors.Is(err, io.EOF) {
-			serveFileError(w, r, name, err)
-			return
-		}
-		contentType = http.DetectContentType(sample)
-	}
-	hash := sha256.New()
-	length, err := io.Copy(hash, body)
-	if err == nil && length != info.Size() {
-		err = fmt.Errorf("read %d of %d bytes: %w", length, info.Size(), io.ErrUnexpectedEOF)
-	}
+	metadata, err := h.fileMetadata(name, file, info, content)
 	if err != nil {
 		serveFileError(w, r, name, err)
 		return
 	}
-	if _, err := content.Seek(0, io.SeekStart); err != nil {
-		serveFileError(w, r, name, err)
-		return
-	}
 	headers := w.Header()
-	headers.Set("Content-Type", contentType)
-	headers.Set("ETag", fmt.Sprintf(`"%x"`, hash.Sum(nil)))
-	headers.Set("Cache-Control", cachePolicy(contentType))
-	http.ServeContent(w, combineETagHeaders(r), name, info.ModTime(), content)
+	headers.Set("Content-Type", metadata.contentType)
+	headers.Set("ETag", metadata.etag)
+	headers.Set("Cache-Control", cachePolicy(metadata.contentType))
+	http.ServeContent(fileResponse{w}, combineETagHeaders(r), name, info.ModTime(), content)
 }
 
 func closeFile(r *http.Request, name string, file io.Closer) {
