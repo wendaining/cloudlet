@@ -75,6 +75,10 @@ func TestHandlerRequiresFilesystem(t *testing.T) {
 }
 
 func newSite(t *testing.T) *httptest.Server {
+	return newSiteWithOptions(t, sitehttp.Options{})
+}
+
+func newSiteWithOptions(t *testing.T, options sitehttp.Options) *httptest.Server {
 	t.Helper()
 	directory := t.TempDir()
 	for name, content := range map[string]string{
@@ -92,7 +96,7 @@ func newSite(t *testing.T) *httptest.Server {
 			t.Fatal(err)
 		}
 	}
-	handler, err := sitehttp.New(os.DirFS(directory))
+	handler, err := sitehttp.NewWithOptions(os.DirFS(directory), options)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,11 +107,16 @@ func newSite(t *testing.T) *httptest.Server {
 }
 
 func request(t *testing.T, server *httptest.Server, method, path string) (*http.Response, string) {
+	return requestWithHeaders(t, server, method, path, nil)
+}
+
+func requestWithHeaders(t *testing.T, server *httptest.Server, method, path string, headers http.Header) (*http.Response, string) {
 	t.Helper()
 	request, err := http.NewRequestWithContext(t.Context(), method, server.URL+path, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	request.Header = headers.Clone()
 	response, err := server.Client().Do(request)
 	if err != nil {
 		t.Fatal(err)

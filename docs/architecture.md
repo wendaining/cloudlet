@@ -32,7 +32,8 @@ Cloudlet 在一台 Linux 服务器上管理计算资源。本地开发在成员�
 | internal/controlplane | 管理 HTTP 接口 |
 | internal/database | PostgreSQL 连接、迁移版本、账号与项目数据 |
 | internal/operations | 操作记录的幂等登记、按项目查询与阶段推进 |
-| internal/capacity | 主机与项目容量的事务预留、确认释放与占用查询 |
+| internal/capacity | 主机与项目容量的事务预留、容器绑定、确认释放与占用查询 |
+| internal/executions | 容量准入后的容器启动、绑定校验、失败清理与确认释放 |
 | internal/apigen | OpenAPI 生成的类型、Gin 接口和客户端 |
 | migrations | 内嵌 SQL 迁移文件与当前版本 |
 | internal/gateway | 按域名选择上游并转发 HTTP 请求 |
@@ -40,7 +41,7 @@ Cloudlet 在一台 Linux 服务器上管理计算资源。本地开发在成员�
 | internal/version | 构建版本和提交标识 |
 | internal/workers | ES Module 与 Durable Objects 的 workerd 配置、启动参数和镜像引用 |
 | internal/durableobjects | SQLite 命名空间、类绑定和存储挂载路径 |
-| internal/containers | Docker Engine 容器生命周期与回环端口观测 |
+| internal/containers | Docker Engine 镜像摘要准备、容器生命周期与回环端口观测 |
 | internal/browser | 复用容器管理的 Playwright 会话 |
 | pkg/client | CLI 与其他客户端共享的 API 客户端 |
 
@@ -72,6 +73,8 @@ Gateway 使用配置中的 `host` 匹配请求域名，匹配时忽略大小写�
 
 `internal/sitehttp` 可通过 HTTP 提供已验证的只读站点文件系统，支持 GET、HEAD 和目录首页。缺少首页的目录返回 404。处理器可以独立使用，域名绑定和版本切换由发布流程接入。
 
+创建单个站点处理器时可通过 `Options.SPAFallback` 启用导航回退，默认关闭。启用后，接受 `text/html` 的页面导航访问不存在且末段无扩展名的路径时，返回站点根目录的 `index.html`。静态文件请求和已有但缺少首页的目录仍返回 404。回退候选路径通过 `Vary` 声明导航相关请求头。
+
 管理环境通过 PostgreSQL 保存账号与会话，使用 bcrypt 校验密码，使用 SCS 管理 HttpOnly 会话 Cookie。Cookie 名称包含实例名称，写入请求执行来源检查。开发账号经显式初始化流程创建，重复初始化保留已有密码。
 
 默认 JSON 配置可独立运行静态 Gateway、健康检查和版本接口。完整管理环境通过 environment、instance、public_origin 和 CLOUDLET_DATABASE_URL 配置，缺少数据库或迁移版本不匹配时终止启动。账号接口需要已配置的管理数据库。
@@ -82,12 +85,18 @@ Gateway 使用配置中的 `host` 匹配请求域名，匹配时忽略大小写�
 
 API 与 Gateway 使用 HTTP 头读取超时和空闲连接超时。收到 SIGTERM 或 SIGINT 后停止接收连接，在十秒内等待已有请求完成。进程输出 JSON 日志。
 
+## 静态文件验证与缓存
+
+静态文件通过内容的 SHA-256 摘要生成强 `ETag`，文件修改时间可用时提供 `Last-Modified`。GET 和 HEAD 由 Go 标准库按 HTTP 顺序检查前置条件。`If-Match` 或 `If-Unmodified-Since` 的条件不满足时返回 412。通过这些前置条件后，`If-None-Match` 或 `If-Modified-Since` 命中时返回 304。412 响应声明 `Cache-Control: no-store`。HTML 每次使用前重新验证，其他静态文件可公开缓存 300 秒。处理器在文件元数据可识别变更时复用内容摘要，文件替换或内容写入会触发重新计算。提供不可变文件系统的调用方也可通过 `Options.Immutable` 启用摘要复用。
+
 ## 容量预留
 
-`internal/capacity` 在 PostgreSQL 事务中同时检查主机预算和项目配额。`Reserve` 以执行标识为全局幂等键，登记 CPU 毫核、内存字节与实例数；主机容量行和项目配额行按固定顺序加锁，因此多个项目共享同一主机预算时不会超额。`Release` 在调用方确认执行与副作用清理完成后释放，重复调用保持幂等，已释放的执行标识不能再次预留。`Usage` 汇总活动预留，执行结果不明时预留继续占用容量。写事务显式使用 READ COMMITTED，确保获得行锁后读取已提交的最新占用；`Usage` 使用 REPEATABLE READ 读取一致快照。降低主机容量或项目配额低于当前占用时返回冲突。Docker 准入由 #52 接入。
+`internal/capacity` 在 PostgreSQL 事务中同时检查主机预算和项目配额。`Reserve` 以执行标识为全局幂等键，登记 CPU 毫核、内存字节、实例数以及容器归属（环境、项目、资源、执行序号和镜像）；主机容量行和项目配额行按固定顺序加锁，因此多个项目共享同一主机预算时不会超额。活动预留的容器归属唯一，同一执行标识只能使用原归属重试，其他执行不能占用同一归属。`SetContainerID` 在容器创建后记录 Docker 容器标识。`Release` 在调用方确认执行与副作用清理完成后释放，重复调用保持幂等，已释放的执行标识不能再次预留；释放后的归属可以由新执行重新使用。`Usage` 汇总活动预留，执行结果不明时预留继续占用容量。写事务显式使用 READ COMMITTED，确保获得行锁后读取已提交的最新占用；`Usage` 使用 REPEATABLE READ 读取一致快照。降低主机容量或项目配额低于当前占用时返回冲突。
+
+`internal/executions` 把容量预留接入 Docker 启动流程。`Start` 先按容器 CPU、内存与单个实例申请主机和项目容量，并在同一预留中持久化容器归属，预留成功后才创建并启动容器；容量不足时不会执行任何 Docker 操作。同一执行标识重试只能恢复原归属；更换归属、镜像或资源上限返回冲突，不会为同一预留创建第二个容器。创建失败时按确定性名称核对容器，没有容器才释放预留；存在本执行的容器时核对镜像与资源上限后恢复或复用。启动失败时先停止并删除已创建的容器，确认删除后才释放。清理或释放失败时保留预留并返回具体错误，避免平台超额分配。`Stop` 校验预留记录的主机、项目、容器归属和容器标识；记录标识存在而调用方标识不匹配时不会操作 Docker，也不会释放容量。尚未记录容器标识的预留按绑定归属查找，确认没有容器后释放。记录标识的容器已经不存在时同样按归属确认；找到其他标识时按归属清理但保留原绑定标识，使同一个 Stop 请求可以在释放失败后重试。重复停止保持幂等；已释放预留的重复停止直接返回，不按归属清理可能属于新执行的容器。确定性名称被归属标签不匹配的容器占用时，`Start` 和 `Stop` 返回归属错误并保留预留；运维需要先确认并移除该容器，再重试 `Stop` 释放容量。同一执行标识的并发启动和停止在进程内串行，执行结果不明时由调用方重试停止完成清理。主机预算由部署配置或上层管理接口扣除操作系统与固定服务后提供，容器按声明的上限申请剩余容量。
 
 ## 执行环境
 
-Workers 集成 workerd，支持原生 Durable Object SQLite 绑定。真实运行时测试验证对象隔离和重启后的持久化。容器管理使用 Docker Engine API。internal/containers 提供创建、启动、观测、停止和删除受管理容器的适配器，按环境、项目、资源和执行序号写入归属标签与确定性名称，在启动、观测、停止和删除前核对名称和标签，启动后读取实际发布的回环端口。管理 API、Gateway 注册与配额由上层任务接入。Browser Run 复用容器生命周期，并通过 Playwright 实现浏览器操作。
+Workers 集成 workerd，支持原生 Durable Object SQLite 绑定。真实运行时测试验证对象隔离和重启后的持久化。容器管理使用 Docker Engine API。internal/containers 按不可变摘要准备镜像，核对本地镜像报告的摘要后才用于创建容器，已缓存且摘要一致的镜像直接复用。适配器提供创建、启动、观测、停止和删除受管理容器的操作，按环境、项目、资源和执行序号写入归属标签与确定性名称，在启动、观测、停止和删除前核对名称和标签，启动后读取实际发布的回环端口，并可按确定性名称查找已有容器。internal/executions 在该适配器之上完成容量准入、失败清理与确认释放。管理 API 与 Gateway 注册由上层任务接入。Browser Run 复用容器生命周期，并通过 Playwright 实现浏览器操作。
 
 执行单元、配额、隔离、状态恢复与独占交接遵循执行环境设计。对应模块完成时，同步提供 [真实业务验收](testing.md)。

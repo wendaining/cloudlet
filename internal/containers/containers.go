@@ -33,8 +33,10 @@ const (
 	loopbackHost        = "127.0.0.1"
 	maxIdentifierLength = 48
 	maxContainerName    = 200
-	maxImageLength      = 255
-	stopTimeout         = 10 * time.Second
+	// A repository name may use 255 bytes and a digest adds the algorithm and
+	// encoded value, so the limit covers a fully qualified reference.
+	maxImageLength = 512
+	stopTimeout    = 10 * time.Second
 )
 
 var (
@@ -46,6 +48,13 @@ var (
 	// ErrConflict reports that a container with the requested name already
 	// exists.
 	ErrConflict = errors.New("container already exists")
+	// ErrImagePull reports that Docker Engine could not pull the requested
+	// image. The underlying registry or transport error remains available
+	// through errors.Is and errors.As.
+	ErrImagePull = errors.New("image pull failed")
+	// ErrImageDigestMismatch reports that the local image does not report the
+	// requested immutable digest.
+	ErrImageDigestMismatch = errors.New("image digest mismatch")
 )
 
 // Ownership is the platform scope that owns a managed container. Environment
@@ -67,10 +76,11 @@ type Limits struct {
 	OpenFiles   int64
 }
 
-// Spec describes the container to create. Image is the image reference, User
-// is the non-root user, Port is the container TCP port published on loopback,
-// Env holds process variables in KEY=value form, Command overrides the image
-// command, and Limits are the required resource limits.
+// Spec describes the container to create. Image is the image reference,
+// normally the Reference returned by PrepareImage so the container uses an
+// immutable digest, User is the non-root user, Port is the container TCP port
+// published on loopback, Env holds process variables in KEY=value form, Command
+// overrides the image command, and Limits are the required resource limits.
 type Spec struct {
 	Ownership Ownership
 	Image     string
@@ -101,15 +111,25 @@ func (p PublishedPort) HostAddress() string {
 }
 
 // Observation is the inspected state of a managed container. Ports contains
-// only loopback bindings reported by Docker.
+// only loopback bindings reported by Docker. CPUMillis, MemoryBytes, PIDs and
+// OpenFiles are the enforced limits reported by Docker.
 type Observation struct {
-	ID       string
-	Name     string
-	Image    string
-	Status   string
-	Running  bool
-	ExitCode int
-	Ports    []PublishedPort
+	ID          string
+	Name        string
+	Image       string
+	Status      string
+	Running     bool
+	ExitCode    int
+	CPUMillis   int64
+	MemoryBytes int64
+	PIDs        int64
+	OpenFiles   int64
+	Ports       []PublishedPort
+}
+
+// Validate reports whether the ownership can identify a managed container.
+func (o Ownership) Validate() error {
+	return o.validate()
 }
 
 func (o Ownership) validate() error {
@@ -202,6 +222,11 @@ func (o Ownership) verifyLabels(labels map[string]string) error {
 		}
 	}
 	return nil
+}
+
+// Validate reports whether the spec can be passed to Create.
+func (s Spec) Validate() error {
+	return s.validate()
 }
 
 func (s Spec) validate() error {
@@ -342,6 +367,18 @@ func observe(info container.InspectResponse) (Observation, error) {
 	}
 	if observation.Image == "" {
 		observation.Image = info.Image
+	}
+	if info.HostConfig != nil {
+		observation.CPUMillis = info.HostConfig.NanoCPUs / 1_000_000
+		observation.MemoryBytes = info.HostConfig.Memory
+		if info.HostConfig.PidsLimit != nil {
+			observation.PIDs = *info.HostConfig.PidsLimit
+		}
+		for _, limit := range info.HostConfig.Ulimits {
+			if limit.Name == "nofile" {
+				observation.OpenFiles = limit.Soft
+			}
+		}
 	}
 	ports, err := publishedPorts(info.NetworkSettings)
 	if err != nil {

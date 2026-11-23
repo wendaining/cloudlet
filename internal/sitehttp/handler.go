@@ -2,33 +2,47 @@
 package sitehttp
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"log/slog"
-	"mime"
 	"net/http"
 	"path"
-	"strconv"
 	"strings"
+	"sync"
 )
 
 // New returns a handler for the provided site filesystem. The caller keeps
 // the filesystem readable for the lifetime of the handler.
 func New(site fs.FS) (http.Handler, error) {
+	return NewWithOptions(site, Options{})
+}
+
+// Options configures the behavior of an individual static site.
+type Options struct {
+	SPAFallback bool
+	// Immutable permits reusing file digests for filesystems without file
+	// change metadata. The caller must keep the files unchanged.
+	Immutable bool
+}
+
+// NewWithOptions returns a handler with the given site options.
+func NewWithOptions(site fs.FS, options Options) (http.Handler, error) {
 	if site == nil {
 		return nil, fmt.Errorf("configure static site handler: filesystem is required: %w", fs.ErrInvalid)
 	}
-	return handler{site: site}, nil
+	return &handler{site: site, spaFallback: options.SPAFallback, immutable: options.Immutable}, nil
 }
 
 type handler struct {
-	site fs.FS
+	site        fs.FS
+	spaFallback bool
+	immutable   bool
+	metadata    sync.Map
 }
 
-func (h handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -49,6 +63,13 @@ func (h handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	info, err := fs.Stat(h.site, name)
+	if h.spaFallback && errors.Is(err, fs.ErrNotExist) && path.Ext(name) == "" {
+		w.Header().Add("Vary", "Accept, Sec-Fetch-Mode, Sec-Fetch-Dest")
+		if isHTMLNavigation(r.Header) {
+			h.serveFile(w, r, "index.html")
+			return
+		}
+	}
 	if err != nil {
 		serveFileError(w, r, name, err)
 		return
@@ -76,39 +97,54 @@ func (h handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	h.writeFile(w, r, name)
+}
 
+func (h *handler) serveFile(w http.ResponseWriter, r *http.Request, name string) {
+	info, err := fs.Stat(h.site, name)
+	if err != nil {
+		serveFileError(w, r, name, err)
+		return
+	}
+	if !info.Mode().IsRegular() {
+		http.NotFound(w, r)
+		return
+	}
+	h.writeFile(w, r, name)
+}
+
+func (h *handler) writeFile(w http.ResponseWriter, r *http.Request, name string) {
 	file, err := h.site.Open(name)
 	if err != nil {
 		serveFileError(w, r, name, err)
 		return
 	}
-	defer func() {
-		if err := file.Close(); err != nil {
-			slog.ErrorContext(r.Context(), "close static site file", "path", name, "error", err)
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		defer closeFile(r, name, file)
+		if err == nil {
+			err = fs.ErrNotExist
 		}
-	}()
-	body := bufio.NewReader(file)
-	contentType := mime.TypeByExtension(path.Ext(name))
-	if contentType == "" {
-		sample, err := body.Peek(512)
-		if err != nil && !errors.Is(err, io.EOF) {
-			serveFileError(w, r, name, err)
-			return
-		}
-		contentType = http.DetectContentType(sample)
-	}
-	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
-	if r.Method == http.MethodHead {
+		serveFileError(w, r, name, err)
 		return
 	}
-	written, err := io.Copy(w, body)
-	if err == nil && written != info.Size() {
-		err = fmt.Errorf("sent %d of %d bytes: %w", written, info.Size(), io.ErrUnexpectedEOF)
-	}
+	content := asReadSeekCloser(h.site, name, file, info.Size())
+	defer closeFile(r, name, content)
+	metadata, err := h.fileMetadata(name, file, info, content)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "send static site file", "path", name, "error", err)
-		panic(http.ErrAbortHandler)
+		serveFileError(w, r, name, err)
+		return
+	}
+	headers := w.Header()
+	headers.Set("Content-Type", metadata.contentType)
+	headers.Set("ETag", metadata.etag)
+	headers.Set("Cache-Control", cachePolicy(metadata.contentType))
+	http.ServeContent(fileResponse{w}, combineETagHeaders(r), name, info.ModTime(), content)
+}
+
+func closeFile(r *http.Request, name string, file io.Closer) {
+	if err := file.Close(); err != nil {
+		slog.ErrorContext(r.Context(), "close static site file", "path", name, "error", err)
 	}
 }
 

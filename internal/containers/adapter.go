@@ -15,11 +15,11 @@ import (
 	"github.com/moby/moby/client"
 )
 
-// Adapter manages containers on one Docker Engine. It is safe for concurrent
-// use. The caller owns the Docker client and must close it after the adapter is
-// no longer used. Every operation other than Create inspects the container
-// first and returns ErrNotOwned when its canonical name or ownership labels do
-// not match.
+// Adapter manages containers and images on one Docker Engine. It is safe for
+// concurrent use. The caller owns the Docker client and must close it after the
+// adapter is no longer used. Every container operation other than Create
+// inspects the container first and returns ErrNotOwned when its canonical name
+// or ownership labels do not match.
 type Adapter struct {
 	docker *client.Client
 }
@@ -59,6 +59,31 @@ func (a *Adapter) Create(ctx context.Context, spec Spec) (Container, error) {
 		return Container{}, fmt.Errorf("create container %s: %w", options.Name, err)
 	}
 	return Container{ID: result.ID, Name: options.Name}, nil
+}
+
+// Find returns the managed container for the ownership's deterministic name.
+// A missing container returns found=false without an error. A container with
+// the same name but different ownership labels returns ErrNotOwned.
+func (a *Adapter) Find(ctx context.Context, ownership Ownership) (Observation, bool, error) {
+	if err := ownership.validate(); err != nil {
+		return Observation{}, false, err
+	}
+	name := ownership.containerName()
+	result, err := a.docker.ContainerInspect(ctx, name, client.ContainerInspectOptions{})
+	if err != nil {
+		if cerrdefs.IsNotFound(err) {
+			return Observation{}, false, nil
+		}
+		return Observation{}, false, fmt.Errorf("find container %s: %w", name, err)
+	}
+	if err := ownership.verify(result.Container); err != nil {
+		return Observation{}, false, fmt.Errorf("find container %s: %w", name, err)
+	}
+	observation, err := observe(result.Container)
+	if err != nil {
+		return Observation{}, false, err
+	}
+	return observation, true, nil
 }
 
 // Start starts a container that belongs to the requested ownership. Starting a

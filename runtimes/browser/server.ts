@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { setTimeout as delay } from 'node:timers/promises';
 import { chromium, type Page } from 'playwright';
 import { readSessionDeadline } from './session-deadline.ts';
+import { readViewport } from './viewport.ts';
 
 const token = process.env.CLOUDLET_BROWSER_TOKEN;
 if (!token || !/^[A-Za-z0-9_-]{32,}$/.test(token)) {
@@ -15,7 +16,7 @@ const maxBodyBytes = 8192;
 const defaultTimeout = 10000;
 const maxTimeout = 30000;
 const maxScreenshotBytes = 2 * 1024 * 1024;
-const viewport = { width: 1280, height: 720 };
+const viewportOptions = readViewport(process.env);
 
 function send(response: ServerResponse, status: number, body: object) {
   response.writeHead(status, {
@@ -79,7 +80,8 @@ const server = createServer({ requestTimeout: 15000, headersTimeout: 5000 }, (re
       response.destroy();
       return;
     }
-    send(response, 502, { error: request.url === '/screenshot' ? 'screenshot_failed' : 'navigation_failed' });
+    const kind = request.url === '/viewport' ? 'viewport' : request.url === '/screenshot' ? 'screenshot' : 'navigation';
+    send(response, 502, { error: `${kind}_failed` });
   });
 });
 
@@ -121,7 +123,7 @@ checkExpiry();
 let page: Page;
 if (!stopping) {
   try {
-    page = await browser.newPage({ viewport, deviceScaleFactor: 1 });
+    page = await browser.newPage(viewportOptions);
   } catch (error) {
     if (!stopping) {
       await shutdown(1);
@@ -145,7 +147,8 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
     return;
   }
   const screenshot = request.url === '/screenshot';
-  if (request.method !== 'POST' || (!screenshot && request.url !== '/navigate')) {
+  const viewport = request.method === 'GET' && request.url === '/viewport';
+  if (!viewport && (request.method !== 'POST' || (!screenshot && request.url !== '/navigate'))) {
     send(response, 404, { error: 'not_found' });
     return;
   }
@@ -156,8 +159,8 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
     send(response, 401, { error: 'unauthorized' });
     return;
   }
-  const command = await readCommand(request, screenshot);
-  if (command.error) {
+  const command = viewport ? undefined : await readCommand(request, screenshot);
+  if (command?.error) {
     if (command.status === 413) {
       response.setHeader('Connection', 'close');
       request.resume();
@@ -167,6 +170,15 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
   }
   if (activeCommand) {
     send(response, 409, { error: `${activeCommand}_in_progress` });
+    return;
+  }
+  if (!command) {
+    const size = page.viewportSize();
+    if (!size || page.isClosed()) {
+      send(response, 502, { error: 'viewport_failed' });
+      return;
+    }
+    send(response, 200, { ...size, device_scale_factor: viewportOptions.deviceScaleFactor });
     return;
   }
   if (screenshot && (!hasPage || page.isClosed() || !isWebURL(page.url()))) {
@@ -205,7 +217,7 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
     }
     response.once('close', () => void shutdown(0));
     response.setHeader('Connection', 'close');
-    send(response, 504, { error: screenshot ? 'screenshot_timeout' : 'navigation_timeout' });
+    send(response, 504, { error: `${activeCommand}_timeout` });
   } finally {
     timer.abort();
     if (!expired) activeCommand = undefined;
