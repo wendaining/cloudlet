@@ -156,6 +156,67 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{projectID}/secrets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        /** @description 返回项目凭据的名称与最新版本元数据，项目成员可以读取。 */
+        get: operations["listProjectSecrets"];
+        put?: never;
+        /** @description 为项目凭据追加一个加密版本，仅项目所有者可以调用。 */
+        post: operations["createProjectSecretVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/secrets/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        /** @description 返回指定项目凭据的版本元数据，不含明文。 */
+        get: operations["listProjectSecretVersions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/secrets/{name}/versions/{version}/value": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+                name: string;
+                version: number;
+            };
+            cookie?: never;
+        };
+        /** @description 返回指定凭据版本的明文，仅项目所有者可以调用。 */
+        get: operations["getProjectSecretValue"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -194,6 +255,41 @@ export interface components {
             user_id: string;
             email: string;
             role: components["schemas"]["ProjectRole"];
+        };
+        ProjectSecret: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            latest_version: number;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        ProjectSecretVersion: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            secret_id: string;
+            name: string;
+            version: number;
+            /** Format: date-time */
+            created_at: string;
+        };
+        ProjectSecretValue: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            secret_id: string;
+            name: string;
+            version: number;
+            /** Format: date-time */
+            created_at: string;
+            value: string;
+        };
+        CreateProjectSecretRequest: {
+            name: string;
+            value: string;
         };
         UpsertProjectMemberRequest: {
             /** @description 已有账号的邮箱；服务端去除首尾空白并转为小写后查找。 */
@@ -236,6 +332,15 @@ export interface components {
             };
             content: {
                 "application/json": components["schemas"]["ProjectMember"];
+            };
+        };
+        /** @description 凭据版本元数据，不含明文 */
+        ProjectSecretVersion: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ProjectSecretVersion"];
             };
         };
         /** @description 当前账号 */
@@ -497,6 +602,108 @@ export interface operations {
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listProjectSecrets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 项目凭据元数据 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectSecret"][];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createProjectSecretVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateProjectSecretRequest"];
+            };
+        };
+        responses: {
+            201: components["responses"]["ProjectSecretVersion"];
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listProjectSecretVersions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 凭据版本元数据，按版本号降序返回 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectSecretVersion"][];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getProjectSecretValue: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+                name: string;
+                version: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 凭据版本明文与元数据 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectSecretValue"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };

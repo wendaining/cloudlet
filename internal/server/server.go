@@ -19,6 +19,9 @@ import (
 func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	var store *database.Store
 	if cfg.DatabaseURL != "" {
+		if len(cfg.SecretKey) != 32 {
+			return errors.New("management environment requires a 32-byte secret key")
+		}
 		var err error
 		store, err = database.Open(ctx, cfg.DatabaseURL)
 		if err != nil {

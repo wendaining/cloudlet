@@ -8,7 +8,7 @@
 | npm run lint:config | JSON、YAML、Issue 表单与 Actions 约定 |
 | npm run lint:tooling | 脚本语法、ShellCheck、配置文件与真实端口检查 |
 | make test | Go race 测试、真实 HTTP、Gateway 转发与服务停止 |
-| make test-integration | Docker 中的 PostgreSQL 迁移、账号、会话、项目与成员角色、操作记录、容量预留、就绪检查、workerd 执行和容器创建、启动、观测、停止与删除 |
+| make test-integration | Docker 中的 PostgreSQL 迁移、账号、会话、项目与成员角色、操作记录、项目凭据、容量预留、就绪检查、workerd 执行和容器创建、启动、观测、停止与删除 |
 | make web-check | TypeScript、ESLint、Prettier、Vite 构建与接口生成一致性 |
 | make dev-check | 真实本机进程、数据库、热重载、完整停止、多实例与失败清理 |
 | make test-e2e | 真实 Chromium 在桌面和手机尺寸下完成登录、刷新和退出 |
@@ -39,6 +39,16 @@ go test -race -count=1 -tags=integration ./internal/capacity
 ```
 
 用例并发申请最后一份容量，确认只有一个请求成功；同一执行标识重复申请只产生一条活动预留；不同项目共享主机预算；释放后其他项目可以重新申请；已释放标识不能再次预留；配额低于当前占用时返回冲突。回归用例将数据库默认隔离级别设为 REPEATABLE READ，验证写事务仍显式按 READ COMMITTED 读取最新占用，并发申请最后一份容量仍只有一个请求成功。
+
+## 项目凭据验收
+
+项目凭据使用真实 PostgreSQL 和 HTTP 管理接口验证。
+
+```sh
+go test -race -count=1 -tags=integration -run TestProjectSecrets ./internal/database
+```
+
+用例保存同一凭据的两个版本，检查元数据接口只返回名称与版本信息，数据库密文不包含明文，日志不包含凭据值。所有者通过值接口读取明文，其他成员收到 403，非成员收到 404。重新连接数据库和重启管理接口后使用同一平台密钥读取版本，错误密钥失败，跨项目版本返回不存在。并发创建同一凭据的版本时，版本号保持唯一且连续。
 
 ## workerd 集成验证
 

@@ -64,6 +64,12 @@ type CreateProjectRequest struct {
 	Name string `json:"name"`
 }
 
+// CreateProjectSecretRequest defines model for CreateProjectSecretRequest.
+type CreateProjectSecretRequest struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
 // Environment defines model for Environment.
 type Environment struct {
 	DatabaseVersion int64  `json:"database_version"`
@@ -110,6 +116,34 @@ type ProjectMemberRole string
 // ProjectRole defines model for ProjectRole.
 type ProjectRole string
 
+// ProjectSecret defines model for ProjectSecret.
+type ProjectSecret struct {
+	CreatedAt     time.Time          `json:"created_at"`
+	Id            openapi_types.UUID `json:"id"`
+	LatestVersion int                `json:"latest_version"`
+	Name          string             `json:"name"`
+	UpdatedAt     time.Time          `json:"updated_at"`
+}
+
+// ProjectSecretValue defines model for ProjectSecretValue.
+type ProjectSecretValue struct {
+	CreatedAt time.Time          `json:"created_at"`
+	Id        openapi_types.UUID `json:"id"`
+	Name      string             `json:"name"`
+	SecretId  openapi_types.UUID `json:"secret_id"`
+	Value     string             `json:"value"`
+	Version   int                `json:"version"`
+}
+
+// ProjectSecretVersion defines model for ProjectSecretVersion.
+type ProjectSecretVersion struct {
+	CreatedAt time.Time          `json:"created_at"`
+	Id        openapi_types.UUID `json:"id"`
+	Name      string             `json:"name"`
+	SecretId  openapi_types.UUID `json:"secret_id"`
+	Version   int                `json:"version"`
+}
+
 // Session defines model for Session.
 type Session struct {
 	Projects []Project `json:"projects"`
@@ -143,6 +177,9 @@ type CreateProjectJSONRequestBody = CreateProjectRequest
 
 // UpsertProjectMemberJSONRequestBody defines body for UpsertProjectMember for application/json ContentType.
 type UpsertProjectMemberJSONRequestBody = UpsertProjectMemberRequest
+
+// CreateProjectSecretVersionJSONRequestBody defines body for CreateProjectSecretVersion for application/json ContentType.
+type CreateProjectSecretVersionJSONRequestBody = CreateProjectSecretRequest
 
 // RequestEditorFn is the function signature for the RequestEditor callback function
 type RequestEditorFn func(ctx context.Context, req *http.Request) error
@@ -268,6 +305,33 @@ type ClientInterface interface {
 
 	// ListProjectOperations performs a GET /api/v1/projects/{projectID}/operations (the `ListProjectOperations` operationId) request.
 	ListProjectOperations(ctx context.Context, projectID string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListProjectSecrets performs a GET /api/v1/projects/{projectID}/secrets (the `ListProjectSecrets` operationId) request.
+	//
+	// 返回项目凭据的名称与最新版本元数据，项目成员可以读取。.
+	ListProjectSecrets(ctx context.Context, projectID string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateProjectSecretVersionWithBody performs a POST /api/v1/projects/{projectID}/secrets (the `CreateProjectSecretVersion` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// 为项目凭据追加一个加密版本，仅项目所有者可以调用。.
+	CreateProjectSecretVersionWithBody(ctx context.Context, projectID string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateProjectSecretVersion performs a POST /api/v1/projects/{projectID}/secrets (the `CreateProjectSecretVersion` operationId) request.
+	// Takes a body of the `application/json` content type.
+	//
+	// 为项目凭据追加一个加密版本，仅项目所有者可以调用。.
+	CreateProjectSecretVersion(ctx context.Context, projectID string, body CreateProjectSecretVersionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListProjectSecretVersions performs a GET /api/v1/projects/{projectID}/secrets/{name} (the `ListProjectSecretVersions` operationId) request.
+	//
+	// 返回指定项目凭据的版本元数据，不含明文。.
+	ListProjectSecretVersions(ctx context.Context, projectID string, name string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetProjectSecretValue performs a GET /api/v1/projects/{projectID}/secrets/{name}/versions/{version}/value (the `GetProjectSecretValue` operationId) request.
+	//
+	// 返回指定凭据版本的明文，仅项目所有者可以调用。.
+	GetProjectSecretValue(ctx context.Context, projectID string, name string, version int, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetVersion performs a GET /api/v1/version (the `GetVersion` operationId) request.
 	GetVersion(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -444,6 +508,83 @@ func (c *Client) UpsertProjectMember(ctx context.Context, projectID string, body
 // ListProjectOperations performs a GET /api/v1/projects/{projectID}/operations (the `ListProjectOperations` operationId) request.
 func (c *Client) ListProjectOperations(ctx context.Context, projectID string, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListProjectOperationsRequest(c.Server, projectID)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListProjectSecrets performs a GET /api/v1/projects/{projectID}/secrets (the `ListProjectSecrets` operationId) request.
+//
+// 返回项目凭据的名称与最新版本元数据，项目成员可以读取。.
+func (c *Client) ListProjectSecrets(ctx context.Context, projectID string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListProjectSecretsRequest(c.Server, projectID)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateProjectSecretVersionWithBody performs a POST /api/v1/projects/{projectID}/secrets (the `CreateProjectSecretVersion` operationId) request,
+// with any type of body and a specified content type.
+//
+// 为项目凭据追加一个加密版本，仅项目所有者可以调用。.
+func (c *Client) CreateProjectSecretVersionWithBody(ctx context.Context, projectID string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateProjectSecretVersionRequestWithBody(c.Server, projectID, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateProjectSecretVersion performs a POST /api/v1/projects/{projectID}/secrets (the `CreateProjectSecretVersion` operationId) request.
+// Takes a body of the `application/json` content type.
+//
+// 为项目凭据追加一个加密版本，仅项目所有者可以调用。.
+func (c *Client) CreateProjectSecretVersion(ctx context.Context, projectID string, body CreateProjectSecretVersionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateProjectSecretVersionRequest(c.Server, projectID, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListProjectSecretVersions performs a GET /api/v1/projects/{projectID}/secrets/{name} (the `ListProjectSecretVersions` operationId) request.
+//
+// 返回指定项目凭据的版本元数据，不含明文。.
+func (c *Client) ListProjectSecretVersions(ctx context.Context, projectID string, name string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListProjectSecretVersionsRequest(c.Server, projectID, name)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetProjectSecretValue performs a GET /api/v1/projects/{projectID}/secrets/{name}/versions/{version}/value (the `GetProjectSecretValue` operationId) request.
+//
+// 返回指定凭据版本的明文，仅项目所有者可以调用。.
+func (c *Client) GetProjectSecretValue(ctx context.Context, projectID string, name string, version int, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetProjectSecretValueRequest(c.Server, projectID, name, version)
 	if err != nil {
 		return nil, err
 	}
@@ -804,6 +945,176 @@ func NewListProjectOperationsRequest(server string, projectID string) (*http.Req
 	return req, nil
 }
 
+// NewListProjectSecretsRequest constructs an http.Request for the ListProjectSecrets method
+func NewListProjectSecretsRequest(server string, projectID string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/secrets", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCreateProjectSecretVersionRequest calls the generic CreateProjectSecretVersion builder with application/json body
+func NewCreateProjectSecretVersionRequest(server string, projectID string, body CreateProjectSecretVersionJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateProjectSecretVersionRequestWithBody(server, projectID, "application/json", bodyReader)
+}
+
+// NewCreateProjectSecretVersionRequestWithBody constructs an http.Request for the CreateProjectSecretVersion method, with any body, and a specified content type
+func NewCreateProjectSecretVersionRequestWithBody(server string, projectID string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/secrets", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewListProjectSecretVersionsRequest constructs an http.Request for the ListProjectSecretVersions method
+func NewListProjectSecretVersionsRequest(server string, projectID string, name string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "name", name, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/secrets/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetProjectSecretValueRequest constructs an http.Request for the GetProjectSecretValue method
+func NewGetProjectSecretValueRequest(server string, projectID string, name string, version int) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "name", name, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "version", version, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "integer", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/secrets/%s/versions/%s/value", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewGetVersionRequest constructs an http.Request for the GetVersion method
 func NewGetVersionRequest(server string) (*http.Request, error) {
 	var err error
@@ -945,6 +1256,41 @@ type ClientWithResponsesInterface interface {
 	//
 	// Returns a wrapper object for the known response body format(s).
 	ListProjectOperationsWithResponse(ctx context.Context, projectID string, reqEditors ...RequestEditorFn) (*ListProjectOperationsResponse, error)
+
+	// ListProjectSecretsWithResponse performs a GET /api/v1/projects/{projectID}/secrets (the `ListProjectSecrets` operationId) request.
+	//
+	// 返回项目凭据的名称与最新版本元数据，项目成员可以读取。.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	ListProjectSecretsWithResponse(ctx context.Context, projectID string, reqEditors ...RequestEditorFn) (*ListProjectSecretsResponse, error)
+
+	// CreateProjectSecretVersionWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/secrets (the `CreateProjectSecretVersion` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// 为项目凭据追加一个加密版本，仅项目所有者可以调用。.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	CreateProjectSecretVersionWithBodyWithResponse(ctx context.Context, projectID string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateProjectSecretVersionResponse, error)
+
+	// CreateProjectSecretVersionWithResponse performs a POST /api/v1/projects/{projectID}/secrets (the `CreateProjectSecretVersion` operationId) request.
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// 为项目凭据追加一个加密版本，仅项目所有者可以调用。.
+	CreateProjectSecretVersionWithResponse(ctx context.Context, projectID string, body CreateProjectSecretVersionJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateProjectSecretVersionResponse, error)
+
+	// ListProjectSecretVersionsWithResponse performs a GET /api/v1/projects/{projectID}/secrets/{name} (the `ListProjectSecretVersions` operationId) request.
+	//
+	// 返回指定项目凭据的版本元数据，不含明文。.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	ListProjectSecretVersionsWithResponse(ctx context.Context, projectID string, name string, reqEditors ...RequestEditorFn) (*ListProjectSecretVersionsResponse, error)
+
+	// GetProjectSecretValueWithResponse performs a GET /api/v1/projects/{projectID}/secrets/{name}/versions/{version}/value (the `GetProjectSecretValue` operationId) request.
+	//
+	// 返回指定凭据版本的明文，仅项目所有者可以调用。.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	GetProjectSecretValueWithResponse(ctx context.Context, projectID string, name string, version int, reqEditors ...RequestEditorFn) (*GetProjectSecretValueResponse, error)
 
 	// GetVersionWithResponse performs a GET /api/v1/version (the `GetVersion` operationId) request.
 	//
@@ -1551,6 +1897,275 @@ func (r ListProjectOperationsResponse) ContentType() string {
 	return ""
 }
 
+type ListProjectSecretsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *[]ProjectSecret
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Error
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *Error
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListProjectSecretsResponse) GetJSON200() *[]ProjectSecret {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r ListProjectSecretsResponse) GetJSON401() *Error {
+	return r.JSON401
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r ListProjectSecretsResponse) GetJSON404() *Error {
+	return r.JSON404
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r ListProjectSecretsResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r ListProjectSecretsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListProjectSecretsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListProjectSecretsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListProjectSecretsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type CreateProjectSecretVersionResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *ProjectSecretVersion
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *Error
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Error
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Error
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *Error
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r CreateProjectSecretVersionResponse) GetJSON201() *ProjectSecretVersion {
+	return r.JSON201
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r CreateProjectSecretVersionResponse) GetJSON400() *Error {
+	return r.JSON400
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r CreateProjectSecretVersionResponse) GetJSON401() *Error {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r CreateProjectSecretVersionResponse) GetJSON403() *Error {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r CreateProjectSecretVersionResponse) GetJSON404() *Error {
+	return r.JSON404
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r CreateProjectSecretVersionResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r CreateProjectSecretVersionResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateProjectSecretVersionResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateProjectSecretVersionResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CreateProjectSecretVersionResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListProjectSecretVersionsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *[]ProjectSecretVersion
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Error
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *Error
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListProjectSecretVersionsResponse) GetJSON200() *[]ProjectSecretVersion {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r ListProjectSecretVersionsResponse) GetJSON401() *Error {
+	return r.JSON401
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r ListProjectSecretVersionsResponse) GetJSON404() *Error {
+	return r.JSON404
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r ListProjectSecretVersionsResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r ListProjectSecretVersionsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListProjectSecretVersionsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListProjectSecretVersionsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListProjectSecretVersionsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetProjectSecretValueResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *ProjectSecretValue
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Error
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Error
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *Error
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetProjectSecretValueResponse) GetJSON200() *ProjectSecretValue {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r GetProjectSecretValueResponse) GetJSON401() *Error {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r GetProjectSecretValueResponse) GetJSON403() *Error {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetProjectSecretValueResponse) GetJSON404() *Error {
+	return r.JSON404
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r GetProjectSecretValueResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r GetProjectSecretValueResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetProjectSecretValueResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetProjectSecretValueResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetProjectSecretValueResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type GetVersionResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -1746,6 +2361,71 @@ func (c *ClientWithResponses) ListProjectOperationsWithResponse(ctx context.Cont
 		return nil, err
 	}
 	return ParseListProjectOperationsResponse(rsp)
+}
+
+// ListProjectSecretsWithResponse performs a GET /api/v1/projects/{projectID}/secrets (the `ListProjectSecrets` operationId) request.
+//
+// 返回项目凭据的名称与最新版本元数据，项目成员可以读取。.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) ListProjectSecretsWithResponse(ctx context.Context, projectID string, reqEditors ...RequestEditorFn) (*ListProjectSecretsResponse, error) {
+	rsp, err := c.ListProjectSecrets(ctx, projectID, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListProjectSecretsResponse(rsp)
+}
+
+// CreateProjectSecretVersionWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/secrets (the `CreateProjectSecretVersion` operationId) request,
+// with any type of body and a specified content type.
+//
+// 为项目凭据追加一个加密版本，仅项目所有者可以调用。.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) CreateProjectSecretVersionWithBodyWithResponse(ctx context.Context, projectID string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateProjectSecretVersionResponse, error) {
+	rsp, err := c.CreateProjectSecretVersionWithBody(ctx, projectID, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateProjectSecretVersionResponse(rsp)
+}
+
+// CreateProjectSecretVersionWithResponse performs a POST /api/v1/projects/{projectID}/secrets (the `CreateProjectSecretVersion` operationId) request.
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// 为项目凭据追加一个加密版本，仅项目所有者可以调用。.
+func (c *ClientWithResponses) CreateProjectSecretVersionWithResponse(ctx context.Context, projectID string, body CreateProjectSecretVersionJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateProjectSecretVersionResponse, error) {
+	rsp, err := c.CreateProjectSecretVersion(ctx, projectID, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateProjectSecretVersionResponse(rsp)
+}
+
+// ListProjectSecretVersionsWithResponse performs a GET /api/v1/projects/{projectID}/secrets/{name} (the `ListProjectSecretVersions` operationId) request.
+//
+// 返回指定项目凭据的版本元数据，不含明文。.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) ListProjectSecretVersionsWithResponse(ctx context.Context, projectID string, name string, reqEditors ...RequestEditorFn) (*ListProjectSecretVersionsResponse, error) {
+	rsp, err := c.ListProjectSecretVersions(ctx, projectID, name, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListProjectSecretVersionsResponse(rsp)
+}
+
+// GetProjectSecretValueWithResponse performs a GET /api/v1/projects/{projectID}/secrets/{name}/versions/{version}/value (the `GetProjectSecretValue` operationId) request.
+//
+// 返回指定凭据版本的明文，仅项目所有者可以调用。.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) GetProjectSecretValueWithResponse(ctx context.Context, projectID string, name string, version int, reqEditors ...RequestEditorFn) (*GetProjectSecretValueResponse, error) {
+	rsp, err := c.GetProjectSecretValue(ctx, projectID, name, version, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetProjectSecretValueResponse(rsp)
 }
 
 // GetVersionWithResponse performs a GET /api/v1/version (the `GetVersion` operationId) request.
@@ -2211,6 +2891,215 @@ func ParseListProjectOperationsResponse(rsp *http.Response) (*ListProjectOperati
 	return response, nil
 }
 
+// ParseListProjectSecretsResponse parses an HTTP response from a ListProjectSecretsWithResponse call
+func ParseListProjectSecretsResponse(rsp *http.Response) (*ListProjectSecretsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListProjectSecretsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest []ProjectSecret
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateProjectSecretVersionResponse parses an HTTP response from a CreateProjectSecretVersionWithResponse call
+func ParseCreateProjectSecretVersionResponse(rsp *http.Response) (*CreateProjectSecretVersionResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateProjectSecretVersionResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest ProjectSecretVersion
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListProjectSecretVersionsResponse parses an HTTP response from a ListProjectSecretVersionsWithResponse call
+func ParseListProjectSecretVersionsResponse(rsp *http.Response) (*ListProjectSecretVersionsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListProjectSecretVersionsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest []ProjectSecretVersion
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetProjectSecretValueResponse parses an HTTP response from a GetProjectSecretValueWithResponse call
+func ParseGetProjectSecretValueResponse(rsp *http.Response) (*GetProjectSecretValueResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetProjectSecretValueResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ProjectSecretValue
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseGetVersionResponse parses an HTTP response from a GetVersionWithResponse call
 func ParseGetVersionResponse(rsp *http.Response) (*GetVersionResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -2276,6 +3165,18 @@ type ServerInterface interface {
 
 	// (GET /api/v1/projects/{projectID}/operations)
 	ListProjectOperations(c *gin.Context, projectID string)
+
+	// (GET /api/v1/projects/{projectID}/secrets)
+	ListProjectSecrets(c *gin.Context, projectID string)
+
+	// (POST /api/v1/projects/{projectID}/secrets)
+	CreateProjectSecretVersion(c *gin.Context, projectID string)
+
+	// (GET /api/v1/projects/{projectID}/secrets/{name})
+	ListProjectSecretVersions(c *gin.Context, projectID string, name string)
+
+	// (GET /api/v1/projects/{projectID}/secrets/{name}/versions/{version}/value)
+	GetProjectSecretValue(c *gin.Context, projectID string, name string, version int)
 
 	// (GET /api/v1/version)
 	GetVersion(c *gin.Context)
@@ -2468,6 +3369,133 @@ func (siw *ServerInterfaceWrapper) ListProjectOperations(c *gin.Context) {
 	siw.Handler.ListProjectOperations(c, projectID)
 }
 
+// ListProjectSecrets operation middleware
+func (siw *ServerInterfaceWrapper) ListProjectSecrets(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ListProjectSecrets(c, projectID)
+}
+
+// CreateProjectSecretVersion operation middleware
+func (siw *ServerInterfaceWrapper) CreateProjectSecretVersion(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.CreateProjectSecretVersion(c, projectID)
+}
+
+// ListProjectSecretVersions operation middleware
+func (siw *ServerInterfaceWrapper) ListProjectSecretVersions(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "name" -------------
+	var name string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", c.Param("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter name: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ListProjectSecretVersions(c, projectID, name)
+}
+
+// GetProjectSecretValue operation middleware
+func (siw *ServerInterfaceWrapper) GetProjectSecretValue(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "name" -------------
+	var name string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", c.Param("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter name: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "version" -------------
+	var version int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "version", c.Param("version"), &version, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter version: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetProjectSecretValue(c, projectID, name, version)
+}
+
 // GetVersion operation middleware
 func (siw *ServerInterfaceWrapper) GetVersion(c *gin.Context) {
 
@@ -2519,4 +3547,8 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID", wrapper.GetProject)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/members", wrapper.ListProjectMembers)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/members", wrapper.UpsertProjectMember)
+	router.GET(options.BaseURL+"/api/v1/projects/:projectID/secrets", wrapper.ListProjectSecrets)
+	router.POST(options.BaseURL+"/api/v1/projects/:projectID/secrets", wrapper.CreateProjectSecretVersion)
+	router.GET(options.BaseURL+"/api/v1/projects/:projectID/secrets/:name", wrapper.ListProjectSecretVersions)
+	router.GET(options.BaseURL+"/api/v1/projects/:projectID/secrets/:name/versions/:version/value", wrapper.GetProjectSecretValue)
 }

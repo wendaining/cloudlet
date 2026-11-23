@@ -71,6 +71,7 @@ make dev 检查配置与端口，使用 compose.yaml 和 compose.dev.yaml 启动
 | CLOUDLET_API_PORT、CLOUDLET_GATEWAY_PORT、CLOUDLET_WEB_PORT | 本机服务端口，默认 8080、8081、5173 |
 | CLOUDLET_DEBUG_PORT | Delve 监听端口，默认 2345 |
 | CLOUDLET_DATABASE_URL | PostgreSQL 地址，包含数据库账号、密码与端口 |
+| CLOUDLET_SECRET_KEY | 64 个十六进制字符的平台密钥，用于加密项目凭据版本 |
 | CLOUDLET_DEV_EMAIL、CLOUDLET_DEV_PASSWORD | 首次准备开发账号时使用的凭据 |
 | DOCKER_HOST、DOCKER_CONTEXT | 可选 Docker 连接配置，两项互斥 |
 
