@@ -7,21 +7,43 @@ import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import { PNG } from 'pngjs';
+import { readViewport } from './viewport.ts';
 
 const execute = promisify(execFile);
 const directory = fileURLToPath(new URL('.', import.meta.url));
 const seccomp = fileURLToPath(new URL('./seccomp.json', import.meta.url));
 const docker = (args, env = process.env) => execute('docker', args, { cwd: directory, env, timeout: 240000 });
 
+test('validates viewport defaults, bounds and scaled pixel budget', () => {
+  assert.deepEqual(readViewport({}), { viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
+  assert.deepEqual(readViewport({
+    CLOUDLET_BROWSER_VIEWPORT_WIDTH: '320', CLOUDLET_BROWSER_VIEWPORT_HEIGHT: '240',
+    CLOUDLET_BROWSER_DEVICE_SCALE_FACTOR: '1.5',
+  }), { viewport: { width: 320, height: 240 }, deviceScaleFactor: 1.5 });
+  for (const [key, value] of [
+    ['CLOUDLET_BROWSER_VIEWPORT_WIDTH', '319'],
+    ['CLOUDLET_BROWSER_VIEWPORT_HEIGHT', '1081'],
+    ['CLOUDLET_BROWSER_VIEWPORT_WIDTH', '640.1'],
+    ['CLOUDLET_BROWSER_DEVICE_SCALE_FACTOR', 'Infinity'],
+    ['CLOUDLET_BROWSER_DEVICE_SCALE_FACTOR', '2.1'],
+  ]) {
+    assert.throws(() => readViewport({ [key]: value }), new RegExp(key));
+  }
+  assert.throws(() => readViewport({
+    CLOUDLET_BROWSER_VIEWPORT_WIDTH: '1920', CLOUDLET_BROWSER_VIEWPORT_HEIGHT: '1080',
+    CLOUDLET_BROWSER_DEVICE_SCALE_FACTOR: '2',
+  }), /device pixels/);
+});
+
 test('non-root Chromium navigates, captures PNG and shuts down', { timeout: 300000 }, async (t) => {
   const token = randomBytes(32).toString('hex');
   const name = `cloudlet-browser-test-${randomBytes(6).toString('hex')}`;
   const image = `${name}:test`;
   await docker(['build', '-t', image, '.']);
-  let created = false;
+  const created = [];
   t.after(async () => {
     try {
-      if (created) await docker(['rm', '-f', name]);
+      if (created.length) await docker(['rm', '-f', ...created]);
     } finally {
       await docker(['image', 'rm', image]);
     }
@@ -39,6 +61,15 @@ test('non-root Chromium navigates, captures PNG and shuts down', { timeout: 3000
     if (request.url === '/pending-font') {
       response.end(`${html}<style>@font-face { font-family: Slow; src: url('/slow.woff2'); }
         body { font-family: Slow, sans-serif; }</style><body>Pending font</body>`);
+    } else if (request.url === '/viewport') {
+      response.end(`${html}<script>document.title = [innerWidth, innerHeight, devicePixelRatio].join('x');</script>`);
+    } else if (request.url === '/custom-window-properties') {
+      response.end(`${html}<script>
+        Object.defineProperties(window, {
+          innerWidth: { value: 400 }, innerHeight: { value: 300 }, devicePixelRatio: { value: 1 },
+        });
+        document.title = [innerWidth, innerHeight, devicePixelRatio].join('x');
+      </script>`);
     } else if (request.url === '/large-image') {
       response.end(`${html}<style>body { margin: 0; }</style><canvas width="1280" height="720"></canvas>
         <script>
@@ -67,17 +98,20 @@ test('non-root Chromium navigates, captures PNG and shuts down', { timeout: 3000
     fixture.closeAllConnections();
   });
 
-  await docker([
-    'create', '--name', name, '--init', '--cap-drop=ALL', '--shm-size=256m',
-    '--security-opt', 'no-new-privileges', '--security-opt', `seccomp=${seccomp}`,
-    '--add-host', 'host.test:host-gateway', '-p', '127.0.0.1::8080',
-    '-e', 'CLOUDLET_BROWSER_TOKEN', image,
-  ], { ...process.env, CLOUDLET_BROWSER_TOKEN: token });
-  created = true;
-  await docker(['start', name]);
+  async function startBrowser(container, settings = []) {
+    await docker([
+      'create', '--name', container, '--init', '--cap-drop=ALL', '--shm-size=256m',
+      '--security-opt', 'no-new-privileges', '--security-opt', `seccomp=${seccomp}`,
+      '--add-host', 'host.test:host-gateway', '-p', '127.0.0.1::8080',
+      '-e', 'CLOUDLET_BROWSER_TOKEN', ...settings, image,
+    ], { ...process.env, CLOUDLET_BROWSER_TOKEN: token });
+    created.push(container);
+    await docker(['start', container]);
+  }
+  await startBrowser(name);
 
-  async function waitReady() {
-    const { stdout: endpoint } = await docker(['port', name, '8080/tcp']);
+  async function waitReady(container = name) {
+    const { stdout: endpoint } = await docker(['port', container, '8080/tcp']);
     const origin = `http://${endpoint.trim()}`;
     for (let i = 0; i < 100; i++) {
       const ready = await fetch(`${origin}/readyz`).catch(() => undefined);
@@ -86,11 +120,11 @@ test('non-root Chromium navigates, captures PNG and shuts down', { timeout: 3000
         return origin;
       }
       await ready?.body?.cancel();
-      const { stdout: running } = await docker(['inspect', '--format', '{{.State.Running}}', name]);
+      const { stdout: running } = await docker(['inspect', '--format', '{{.State.Running}}', container]);
       if (running.trim() !== 'true') break;
       await delay(150);
     }
-    const { stdout, stderr } = await docker(['logs', name]);
+    const { stdout, stderr } = await docker(['logs', container]);
     assert.fail(`Browser Run did not become ready:\n${stdout}${stderr}`);
   }
   async function assertStopped() {
@@ -120,6 +154,7 @@ test('non-root Chromium navigates, captures PNG and shuts down', { timeout: 3000
   const navigate = (input, key) => command('/navigate', input, key);
   const screenshot = (input, key) => command('/screenshot', input, key);
   const invalidToken = randomBytes(32).toString('hex');
+  const queryViewport = (key = token) => fetch(`${origin}/viewport`, { headers: { Authorization: `Bearer ${key}` } });
   let response = await navigate({ url }, invalidToken);
   assert.equal(response.status, 401);
   assert.deepEqual(await response.json(), { error: 'unauthorized' });
@@ -184,4 +219,35 @@ test('non-root Chromium navigates, captures PNG and shuts down', { timeout: 3000
   await waitReady();
   await docker(['stop', '--timeout', '8', name]);
   await assertStopped();
+
+  const custom = `${name}-custom`;
+  await startBrowser(custom, [
+    '-e', 'CLOUDLET_BROWSER_VIEWPORT_WIDTH=640', '-e', 'CLOUDLET_BROWSER_VIEWPORT_HEIGHT=480',
+    '-e', 'CLOUDLET_BROWSER_DEVICE_SCALE_FACTOR=1.5',
+  ]);
+  origin = await waitReady(custom);
+  response = await queryViewport(invalidToken);
+  assert.equal(response.status, 401);
+  await response.json();
+  response = await navigate({ url: `${url}/viewport` });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).title, '640x480x1.5');
+  response = await queryViewport();
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { width: 640, height: 480, device_scale_factor: 1.5 });
+  response = await navigate({ url: `${url}/custom-window-properties` });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).title, '400x300x1');
+  response = await queryViewport();
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { width: 640, height: 480, device_scale_factor: 1.5 });
+  response = await screenshot();
+  assert.equal(response.status, 200);
+  const scaled = PNG.sync.read(Buffer.from(await response.arrayBuffer()));
+  assert.deepEqual([scaled.width, scaled.height], [960, 720]);
+
+  const invalid = `${name}-invalid`;
+  await startBrowser(invalid, ['-e', 'CLOUDLET_BROWSER_VIEWPORT_WIDTH=2000']);
+  assert.equal((await docker(['wait', invalid])).stdout.trim(), '1');
+  assert.match((await docker(['logs', invalid])).stderr, /CLOUDLET_BROWSER_VIEWPORT_WIDTH/);
 });
