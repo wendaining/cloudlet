@@ -20,6 +20,8 @@ import (
 // ErrInvalidArchive identifies ZIP content that cannot be published as a site.
 var ErrInvalidArchive = errors.New("invalid static site archive")
 
+const maxPathComponentBytes = 255
+
 // Limits bounds the number of ZIP entries, including explicit directories,
 // and the total uncompressed bytes across all regular files.
 type Limits struct {
@@ -52,6 +54,9 @@ func Extract(store *artifacts.Store, digest, parent string, limits Limits) (dire
 	info, err := artifact.Stat()
 	if err != nil {
 		return "", fmt.Errorf("inspect site archive %s: %w", digest, err)
+	}
+	if err := checkDirectoryLimit(artifact, info.Size(), limits.MaxEntries); err != nil {
+		return "", fmt.Errorf("inspect site ZIP directory %s: %w", digest, classifyZIPError(err))
 	}
 	archive, err := zip.NewReader(artifact, info.Size())
 	if err != nil {
@@ -94,6 +99,11 @@ func validate(archive *zip.Reader, limits Limits) error {
 		name := entryName(file)
 		if name == "." || !fs.ValidPath(name) || strings.ContainsAny(name, "\x00\\:") {
 			return fmt.Errorf("invalid archive path %q", file.Name)
+		}
+		for component := range strings.SplitSeq(name, "/") {
+			if len(component) > maxPathComponentBytes {
+				return fmt.Errorf("archive path component exceeds %d bytes in %q", maxPathComponentBytes, name)
+			}
 		}
 		if _, exists := entries[name]; exists {
 			return fmt.Errorf("duplicate archive entry %q", name)

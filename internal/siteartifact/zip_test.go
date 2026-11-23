@@ -3,6 +3,7 @@ package siteartifact_test
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"io/fs"
 	"os"
@@ -27,6 +28,7 @@ func TestExtractStaticSiteArtifact(t *testing.T) {
 		{name: "assets/app.js", body: "console.log('ready')", method: zip.Deflate},
 		{name: "assets/", mode: fs.ModeDir | 0o755},
 		{name: "nested/docs/style.css", body: "body { color: navy; }"},
+		{name: strings.Repeat("a", 255), body: "maximum supported component"},
 	}
 	var size int64
 	for _, file := range files {
@@ -67,7 +69,8 @@ func TestExtractRejectsInvalidArchiveWithoutStagingSite(t *testing.T) {
 		{"symlink", []entry{index, {name: "linked", body: "index.html", mode: fs.ModeSymlink}}, siteartifact.Limits{MaxEntries: 10, MaxBytes: 16}, "unsupported archive entry type"},
 		{"named pipe", []entry{index, {name: "pipe", mode: fs.ModeNamedPipe}}, siteartifact.Limits{MaxEntries: 10, MaxBytes: 16}, "unsupported archive entry type"},
 		{"expanded bytes", []entry{index, {name: "style.css", body: "123"}}, siteartifact.Limits{MaxEntries: 10, MaxBytes: 4}, "limit of 4 expanded bytes"},
-		{"entry count", []entry{index, {name: "assets/", mode: fs.ModeDir}}, siteartifact.Limits{MaxEntries: 1, MaxBytes: 16}, "limit of 1 entries"},
+		{"too long UTF-8 component", []entry{index, {name: strings.Repeat("界", 86) + "/a"}}, siteartifact.Limits{MaxEntries: 10, MaxBytes: 16}, "path component"},
+		{"entry count", []entry{index, {name: "assets/", mode: fs.ModeDir}}, siteartifact.Limits{MaxEntries: 1, MaxBytes: 16}, "inspect site ZIP directory"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			store, digest := putArchive(t, makeZIP(t, test.entries))
@@ -169,4 +172,50 @@ func assertFailure(t *testing.T, store *artifacts.Store, digest, directory strin
 		t.Fatalf("expected empty destination, got %v, %v", entries, readErr)
 	}
 	return err
+}
+
+func TestExtractZIPDirectoryPreflight(t *testing.T) {
+	archive := makeZIP(t, []entry{{name: "index.html"}, {name: "app.css"}})
+	// Test archives with a prefix and a ZIP64 footer independently.
+	prefixed := append([]byte("self-extracting archive prefix"), archive...)
+	for _, data := range [][]byte{archive, prefixed, withZIP64Footer(archive)} {
+		store, digest := putArchive(t, data)
+		if _, err := siteartifact.Extract(store, digest, t.TempDir(), siteartifact.Limits{MaxEntries: 2, MaxBytes: 16}); err != nil {
+			t.Fatalf("extract at directory limit: %v", err)
+		}
+		assertFailure(t, store, digest, t.TempDir(), siteartifact.Limits{MaxEntries: 1, MaxBytes: 16}, "limit of 1 entries")
+	}
+}
+
+func TestExtractChecksActualZIPDirectoryHeaders(t *testing.T) {
+	data := makeZIP(t, []entry{{name: "index.html"}, {name: "app.css"}})
+	end := data[len(data)-22:]
+	binary.LittleEndian.PutUint16(end[8:10], 1)
+	binary.LittleEndian.PutUint16(end[10:12], 1)
+	store, digest := putArchive(t, data)
+	assertFailure(t, store, digest, t.TempDir(), siteartifact.Limits{MaxEntries: 1, MaxBytes: 16}, "limit of 1 entries")
+}
+
+func withZIP64Footer(data []byte) []byte {
+	position := len(data) - 22
+	end := bytes.Clone(data[position:])
+	order := binary.LittleEndian
+	record := make([]byte, 56)
+	copy(record, "PK\x06\x06")
+	order.PutUint64(record[4:12], 44)
+	order.PutUint16(record[12:14], 45)
+	order.PutUint16(record[14:16], 45)
+	order.PutUint64(record[24:32], uint64(order.Uint16(end[8:10])))
+	order.PutUint64(record[32:40], uint64(order.Uint16(end[10:12])))
+	order.PutUint64(record[40:48], uint64(order.Uint32(end[12:16])))
+	order.PutUint64(record[48:56], uint64(order.Uint32(end[16:20])))
+	locator := make([]byte, 20)
+	copy(locator, "PK\x06\x07")
+	order.PutUint64(locator[8:16], uint64(position))
+	order.PutUint32(locator[16:20], 1)
+	order.PutUint16(end[8:10], 0xffff)
+	order.PutUint16(end[10:12], 0xffff)
+	order.PutUint32(end[12:16], 0xffffffff)
+	order.PutUint32(end[16:20], 0xffffffff)
+	return bytes.Join([][]byte{data[:position], record, locator, end}, nil)
 }

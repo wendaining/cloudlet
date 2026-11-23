@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -72,6 +73,8 @@ func TestStaticSiteVersionHTTP(t *testing.T) {
 	upload(ownerAPI, owner.ID, siteName, "application/octet-stream", bytes.NewReader(zipBytes), http.StatusUnsupportedMediaType)
 	upload(ownerAPI, owner.ID, "Invalid", "application/zip", bytes.NewReader(zipBytes), http.StatusBadRequest)
 	upload(ownerAPI, owner.ID, siteName, "application/zip", bytes.NewReader([]byte("broken ZIP")), http.StatusBadRequest)
+	tooLong := siteZIP(t, "valid index", strings.Repeat("界", 86)+"/file.txt")
+	upload(ownerAPI, owner.ID, siteName, "application/zip", bytes.NewReader(tooLong), http.StatusBadRequest)
 	assertSiteCount(t, store, 0, 0)
 	assertVersionDirectoryCount(t, dataDirectory, 0)
 
@@ -231,7 +234,7 @@ func assertAPIVersion(t *testing.T, client *apigen.ClientWithResponses, projectI
 	return response.JSON200
 }
 
-func siteZIP(t *testing.T, html string) []byte {
+func siteZIP(t *testing.T, html string, extraPaths ...string) []byte {
 	t.Helper()
 	var buffer bytes.Buffer
 	writer := zip.NewWriter(&buffer)
@@ -241,6 +244,11 @@ func siteZIP(t *testing.T, html string) []byte {
 	}
 	if _, err := io.WriteString(file, html); err != nil {
 		t.Fatal(err)
+	}
+	for _, path := range extraPaths {
+		if _, err := writer.Create(path); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := writer.Close(); err != nil {
 		t.Fatal(err)
