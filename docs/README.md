@@ -17,6 +17,7 @@
 | 文档 | 内容 |
 | --- | --- |
 | [开发环境](development.md) | 本机依赖、数据库连接与服务器部署 |
+| [CLI 操作查询](cli.md) | Operation 查询命令与稳定退出码 |
 | [实施清单](development-deployment-checklist.md) | 本地开发与部署的命令、任务和验收条件 |
 | [测试与验收](testing.md) | 检查范围、真实依赖与业务验收 |
 | [交付与发布](releases.md) | CI、镜像、版本发布及使用方式 |
