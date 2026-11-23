@@ -14,10 +14,12 @@ import (
 	"github.com/wendaining/cloudlet/internal/controlplane"
 	"github.com/wendaining/cloudlet/internal/database"
 	"github.com/wendaining/cloudlet/internal/gateway"
+	"github.com/wendaining/cloudlet/internal/staticdeploy"
 )
 
 func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	var store *database.Store
+	var sites *staticdeploy.Service
 	if cfg.DatabaseURL != "" {
 		var err error
 		store, err = database.Open(ctx, cfg.DatabaseURL)
@@ -28,6 +30,15 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		if err := store.CheckVersion(ctx); err != nil {
 			return err
 		}
+		sites, err = staticdeploy.New(store, cfg.SiteStorageDirectory)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			if err := sites.Close(); err != nil {
+				logger.Error("close static site storage", "error", err)
+			}
+		}()
 	}
 	proxy, err := gateway.NewHandler(cfg, logger)
 	if err != nil {
@@ -43,7 +54,7 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		return fmt.Errorf("listen gateway: %w", err)
 	}
 	defer gatewayListener.Close()
-	management, closeSessions := controlplane.NewHandler(store, cfg, logger)
+	management, closeSessions := controlplane.NewHandler(store, sites, cfg, logger)
 	defer closeSessions()
 	api := newServer(management)
 	front := newServer(proxy)

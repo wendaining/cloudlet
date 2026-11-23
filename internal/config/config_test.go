@@ -86,3 +86,20 @@ func TestValidateRoutesUpstreamPort(t *testing.T) {
 		})
 	}
 }
+
+func TestManagementRequiresAbsoluteSiteStorageDirectory(t *testing.T) {
+	cfg := config.Config{
+		Environment: "development", Instance: "test", DatabaseURL: "postgres://example",
+		PublicOrigin: "http://localhost", APIAddress: "127.0.0.1:8080", GatewayAddress: "127.0.0.1:8081",
+	}
+	for _, directory := range []string{"", "relative/storage"} {
+		cfg.SiteStorageDirectory = directory
+		if err := cfg.Validate(); err == nil {
+			t.Fatalf("accepted storage directory %q", directory)
+		}
+	}
+	cfg.SiteStorageDirectory = t.TempDir()
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -3,6 +3,7 @@ package siteartifact
 
 import (
 	"archive/zip"
+	"compress/flate"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +16,9 @@ import (
 
 	"github.com/wendaining/cloudlet/internal/artifacts"
 )
+
+// ErrInvalidArchive identifies ZIP content that cannot be published as a site.
+var ErrInvalidArchive = errors.New("invalid static site archive")
 
 // Limits bounds the number of ZIP entries, including explicit directories,
 // and the total uncompressed bytes across all regular files.
@@ -51,10 +55,10 @@ func Extract(store *artifacts.Store, digest, parent string, limits Limits) (dire
 	}
 	archive, err := zip.NewReader(artifact, info.Size())
 	if err != nil {
-		return "", fmt.Errorf("read site archive %s: %w", digest, err)
+		return "", fmt.Errorf("read site archive %s: %w", digest, classifyZIPError(err))
 	}
 	if err := validate(archive, limits); err != nil {
-		return "", fmt.Errorf("validate site archive %s: %w", digest, err)
+		return "", fmt.Errorf("validate site archive %s: %w: %w", digest, ErrInvalidArchive, err)
 	}
 
 	staging, err = os.MkdirTemp(parent, ".site-")
@@ -62,12 +66,21 @@ func Extract(store *artifacts.Store, digest, parent string, limits Limits) (dire
 		return "", fmt.Errorf("create site directory under %q: %w", parent, err)
 	}
 	if err := unpack(staging, archive.File); err != nil {
-		return "", fmt.Errorf("expand site archive %s: %w", digest, err)
+		return "", fmt.Errorf("expand site archive %s: %w", digest, classifyZIPError(err))
 	}
 	if err := syncDirectory(parent); err != nil {
 		return "", fmt.Errorf("persist site directory under %q: %w", parent, err)
 	}
 	return staging, nil
+}
+
+func classifyZIPError(err error) error {
+	_, corrupt := errors.AsType[flate.CorruptInputError](err)
+	if errors.Is(err, zip.ErrFormat) || errors.Is(err, zip.ErrInsecurePath) || errors.Is(err, zip.ErrAlgorithm) ||
+		errors.Is(err, zip.ErrChecksum) || errors.Is(err, io.ErrUnexpectedEOF) || corrupt {
+		return fmt.Errorf("%w: %w", ErrInvalidArchive, err)
+	}
+	return err
 }
 
 func validate(archive *zip.Reader, limits Limits) error {

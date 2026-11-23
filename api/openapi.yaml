@@ -205,7 +205,87 @@ paths:
           $ref: '#/components/responses/Error'
         '409':
           $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/sites/{siteName}/versions:
+    parameters:
+      - $ref: '#/components/parameters/SiteProjectID'
+      - $ref: '#/components/parameters/SiteName'
+    post:
+      operationId: uploadStaticSiteVersion
+      description: 项目所有者上传不超过 64 MiB 的 ZIP，站点首次上传时建立项目内的稳定标识。返回已验证的待激活版本。
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/zip:
+            schema:
+              type: string
+              format: binary
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '201':
+          description: 已验证的待激活版本
+          headers:
+            Location:
+              description: 查询新版本的管理 API 路径
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaticSiteVersion'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '413':
+          $ref: '#/components/responses/Error'
+        '415':
+          $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}:
+    parameters:
+      - $ref: '#/components/parameters/SiteProjectID'
+      - $ref: '#/components/parameters/SiteName'
+      - name: versionID
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: getStaticSiteVersion
+      description: 项目成员按标识读取一个静态站点版本。
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          $ref: '#/components/responses/StaticSiteVersion'
+        '401':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
 components:
+  parameters:
+    SiteProjectID:
+      name: projectID
+      in: path
+      required: true
+      schema:
+        type: string
+    SiteName:
+      name: siteName
+      in: path
+      required: true
+      schema:
+        type: string
+        maxLength: 63
+        pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
   securitySchemes:
     SessionCookie:
       type: apiKey
@@ -305,6 +385,26 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Project"
+    StaticSiteVersion:
+      type: object
+      required: [id, site_id, artifact_digest, status, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        site_id:
+          type: string
+          format: uuid
+        artifact_digest:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+        status:
+          type: string
+          enum: [ready]
+          description: 站点文件已通过校验并准备就绪，等待激活。
+        created_at:
+          type: string
+          format: date-time
     Operation:
       type: object
       required: [id, action, phase, outcome, created_at, updated_at]
@@ -331,6 +431,12 @@ components:
         message:
           type: string
   responses:
+    StaticSiteVersion:
+      description: 不可变静态站点版本
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/StaticSiteVersion'
     Project:
       description: 项目身份
       content:

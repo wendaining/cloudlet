@@ -45,6 +45,8 @@ database:
   - 'internal/database/**'
   - 'internal/operations/**'
   - 'internal/capacity/**'
+  - 'internal/staticdeploy/**'
+  - 'internal/siteartifact/**'
   - 'internal/controlplane/**'
   - 'internal/config/**'
   - 'internal/server/**'

@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"unicode"
@@ -22,13 +23,14 @@ type Route struct {
 }
 
 type Config struct {
-	Environment    string  `json:"environment,omitempty"`
-	Instance       string  `json:"instance,omitempty"`
-	PublicOrigin   string  `json:"public_origin,omitempty"`
-	DatabaseURL    string  `json:"-"`
-	APIAddress     string  `json:"api_address"`
-	GatewayAddress string  `json:"gateway_address"`
-	Routes         []Route `json:"routes"`
+	Environment          string  `json:"environment,omitempty"`
+	Instance             string  `json:"instance,omitempty"`
+	PublicOrigin         string  `json:"public_origin,omitempty"`
+	DatabaseURL          string  `json:"-"`
+	SiteStorageDirectory string  `json:"site_storage_directory,omitempty"`
+	APIAddress           string  `json:"api_address"`
+	GatewayAddress       string  `json:"gateway_address"`
+	Routes               []Route `json:"routes"`
 }
 
 func Load(path string) (Config, error) {
@@ -55,6 +57,9 @@ func Load(path string) (Config, error) {
 }
 
 func (cfg Config) Validate() error {
+	if (cfg.DatabaseURL != "" || cfg.SiteStorageDirectory != "") && !filepath.IsAbs(cfg.SiteStorageDirectory) {
+		return errors.New("management site storage requires an absolute site_storage_directory")
+	}
 	if cfg.Environment != "" && cfg.Environment != "development" && cfg.Environment != "production" {
 		return errors.New("invalid environment")
 	}

@@ -76,6 +76,8 @@ make dev 检查配置与端口，使用 compose.yaml 和 compose.dev.yaml 启动
 
 未指定 Docker 连接时使用当前 Docker context。本地开发支持 unix:// 连接，Go SDK 和 Testcontainers 使用同一引擎。数据库镜像版本与 digest 锁定在 configs/images.json。数据库端口和应用监听端口均绑定回环地址。
 
+配置管理数据库时，服务 JSON 需要设置 `site_storage_directory` 为平台独占的可写绝对路径。本地开发入口将其设为 `.local/实例名称/site-storage`。服务器部署需要为该路径提供持久化存储，并与数据库一起保留。目录下的 `archives` 保存原始 ZIP，`versions` 保存已解包文件。
+
 创建另一个实例时执行 make setup ENV_FILE=.env.feature.local，编辑该文件中的实例名称、数据库端口和四个服务端口，再运行：
 
 ```sh

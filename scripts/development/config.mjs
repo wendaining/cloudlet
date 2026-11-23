@@ -98,6 +98,7 @@ export async function writeServerConfig(config) {
     environment: 'development',
     instance: config.instance,
     public_origin: config.web,
+    site_storage_directory: path.join(config.directory, 'site-storage'),
     api_address: `127.0.0.1:${config.env.CLOUDLET_API_PORT}`,
     gateway_address: `127.0.0.1:${config.env.CLOUDLET_GATEWAY_PORT}`,
     routes: [{ host: 'demo.localhost', target: config.api }],
