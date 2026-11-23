@@ -4,7 +4,6 @@ import (
 	"mime"
 	"net/http"
 	"strconv"
-	"strings"
 )
 
 func isHTMLNavigation(headers http.Header) bool {
@@ -17,7 +16,9 @@ func isHTMLNavigation(headers http.Header) bool {
 		return false
 	}
 	for _, header := range headers.Values("Accept") {
-		for item := range strings.SplitSeq(header, ",") {
+		for header != "" {
+			var item string
+			item, header = nextMediaRange(header)
 			mediaType, parameters, err := mime.ParseMediaType(item)
 			if err != nil || mediaType != "text/html" {
 				continue
@@ -33,4 +34,22 @@ func isHTMLNavigation(headers http.Header) bool {
 		}
 	}
 	return false
+}
+
+// Commas inside quoted media parameters do not delimit Accept items.
+func nextMediaRange(header string) (item, rest string) {
+	var quoted, escaped bool
+	for pos, char := range header {
+		switch {
+		case escaped:
+			escaped = false
+		case quoted && char == '\\':
+			escaped = true
+		case char == '"':
+			quoted = !quoted
+		case !quoted && char == ',':
+			return header[:pos], header[pos+1:]
+		}
+	}
+	return header, ""
 }

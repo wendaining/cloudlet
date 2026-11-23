@@ -20,6 +20,8 @@ func TestIsHTMLNavigation(t *testing.T) {
 		{"fetch with HTML accept", "cors", "empty", []string{"text/html"}, false},
 		{"script destination", "", "script", []string{"text/html"}, false},
 		{"no accept", "navigate", "document", nil, false},
+		{"quoted comma is not a separator", "", "", []string{`application/json; note="a,text/html,b"`}, false},
+		{"HTML after quoted comma", "", "", []string{`application/json; note="a,b", text/html`}, true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			headers := http.Header{"Accept": test.accept, "Sec-Fetch-Mode": {test.mode}, "Sec-Fetch-Dest": {test.destination}}
