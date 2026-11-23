@@ -110,6 +110,52 @@ func TestServeNonSeekableZIPFile(t *testing.T) {
 	if response.StatusCode != 200 || body != content || response.Header.Get("ETag") != fmt.Sprintf(`"%x"`, sha256.Sum256([]byte(content))) {
 		t.Fatalf("archive file response = %d %v %q", response.StatusCode, response.Header, body)
 	}
+	response, body = cacheRequest(t, server, http.MethodGet, "/style.css", http.Header{
+		"Range": {"bytes=3-6"}, "If-Range": {response.Header.Get("ETag")},
+	})
+	if response.StatusCode != http.StatusPartialContent || body != content[3:7] {
+		t.Fatalf("archive file range = %d %q", response.StatusCode, body)
+	}
+	response, body = cacheRequest(t, server, http.MethodGet, "/style.css", http.Header{
+		"Range": {"bytes=3-6"}, "If-Range": {`"previous-version"`},
+	})
+	if response.StatusCode != http.StatusOK || body != content {
+		t.Fatalf("archive file with stale If-Range = %d %q", response.StatusCode, body)
+	}
+}
+
+func TestStaticFileHTTPPreconditions(t *testing.T) {
+	server := newSite(t)
+	response, _ := request(t, server, http.MethodGet, "/assets/app.css")
+	tag := response.Header.Get("ETag")
+	modified, err := http.ParseTime(response.Header.Get("Last-Modified"))
+	if err != nil || tag == "" {
+		t.Fatalf("initial response missing validators: %v, %v", response.Header, err)
+	}
+	older := modified.Add(-time.Minute).Format(http.TimeFormat)
+	for _, test := range []struct {
+		name    string
+		method  string
+		headers http.Header
+		status  int
+	}{
+		{"stale If-Match", http.MethodGet, http.Header{"If-Match": {`"previous-version"`}}, http.StatusPreconditionFailed},
+		{"weak If-Match", http.MethodGet, http.Header{"If-Match": {"W/" + tag}}, http.StatusPreconditionFailed},
+		{"stale If-Unmodified-Since", http.MethodHead, http.Header{"If-Unmodified-Since": {older}}, http.StatusPreconditionFailed},
+		{"If-Match takes precedence", http.MethodGet, http.Header{"If-Match": {tag}, "If-Unmodified-Since": {older}}, http.StatusOK},
+		{"failure precedes revalidation", http.MethodGet, http.Header{"If-Unmodified-Since": {older}, "If-None-Match": {tag}}, http.StatusPreconditionFailed},
+		{"multiple entity tag lines", http.MethodGet, http.Header{"If-None-Match": {`"previous-version"`, tag}}, http.StatusNotModified},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			response, body := cacheRequest(t, server, test.method, "/assets/app.css", test.headers)
+			if response.StatusCode != test.status {
+				t.Fatalf("status = %d with body %q, want %d", response.StatusCode, body, test.status)
+			}
+			if test.status == http.StatusPreconditionFailed && body != "" {
+				t.Fatalf("failed precondition sent a body: %q", body)
+			}
+		})
+	}
 }
 
 func cacheRequest(t *testing.T, server *httptest.Server, method, path string, headers http.Header) (*http.Response, string) {

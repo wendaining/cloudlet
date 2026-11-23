@@ -86,7 +86,7 @@ API 与 Gateway 使用 HTTP 头读取超时和空闲连接超时。收到 SIGTER
 
 ## 静态文件验证与缓存
 
-静态文件通过内容的 SHA-256 摘要生成强 `ETag`，文件修改时间可用时提供 `Last-Modified`。GET 和 HEAD 优先按 `If-None-Match` 验证，其次按 `If-Modified-Since` 验证，命中返回 304。HTML 每次使用前重新验证，其他静态文件可公开缓存 300 秒。
+静态文件通过内容的 SHA-256 摘要生成强 `ETag`，文件修改时间可用时提供 `Last-Modified`。GET 和 HEAD 由 Go 标准库按 HTTP 顺序检查前置条件。`If-Match` 或 `If-Unmodified-Since` 的条件不满足时返回 412。通过这些前置条件后，`If-None-Match` 或 `If-Modified-Since` 命中时返回 304。HTML 每次使用前重新验证，其他静态文件可公开缓存 300 秒。
 
 ## 容量预留
 
