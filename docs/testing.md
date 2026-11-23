@@ -81,13 +81,17 @@ npm --prefix runtimes/browser run test:integration
 
 使用真实 Docker 启动 configs/images.json 中的固定镜像，读取适配器观测到的回环端口并请求预期响应。名称或归属标签不匹配的容器不会被启动、观测、停止或删除。停止和删除后容器与端口释放。
 
+镜像准备使用真实 Docker Engine 和本地 registry。测试从空缓存按摘要拉取导入的测试镜像，核对返回的镜像标识与摘要；停止 registry 后再次准备，确认直接复用已核对摘要的本地镜像；再以不存在的摘要请求拉取，确认返回包含具体镜像引用的拉取失败。registry 镜像按 digest 固定，缺失时由 Docker Engine 拉取。
+
 ```sh
 make test-integration
 # 只运行容器适配器
 go test -race -count=1 -tags=integration ./internal/containers
+# 只运行镜像准备
+go test -race -count=1 -tags=integration -run TestAdapterPrepareImage ./internal/containers
 ```
 
-镜像缺失时由 Docker Engine 拉取。测试结束清理所属容器。
+测试结束清理所属容器、本地 registry 与拉取的测试镜像。
 
 ## 执行模块的业务验收
 
