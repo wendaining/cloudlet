@@ -16,7 +16,7 @@ Cloudlet 是一台服务器就能运行的 **Agentic Serverless 平台**。项�
 | 管理界面 | React 登录、退出和环境概览，通过真实 API 访问 PostgreSQL |
 | 本地开发 | 环境检查、数据库初始化、Go 与前端热更新、多实例与完整停止 |
 | Gateway | 静态域名路由、HTTP 转发和上游错误响应 |
-| CLI | 查询客户端版本、检查 API 健康状态 |
+| CLI | 查询客户端版本、检查 API 健康状态、列出和查看可访问项目 |
 | Containers | Docker Engine 镜像摘要准备与容器生命周期适配器，按归属标签创建、启动、观测、停止和删除容器 |
 | 容量预留 | 主机与项目 CPU、内存和实例额度的事务预留、确认释放与占用查询 |
 | Workers、Durable Objects、Browser Run | 已定义模块边界与开发任务 |
