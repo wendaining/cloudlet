@@ -1,7 +1,8 @@
 import { timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { setTimeout as delay } from 'node:timers/promises';
-import { chromium } from 'playwright';
+import { chromium, type Page } from 'playwright';
+import { readSessionDeadline } from './session-deadline.ts';
 
 const token = process.env.CLOUDLET_BROWSER_TOKEN;
 if (!token || !/^[A-Za-z0-9_-]{32,}$/.test(token)) {
@@ -9,6 +10,7 @@ if (!token || !/^[A-Za-z0-9_-]{32,}$/.test(token)) {
 }
 
 const credential = Buffer.from(`Bearer ${token}`);
+const sessionDeadline = readSessionDeadline(process.env.CLOUDLET_BROWSER_DEADLINE);
 const maxBodyBytes = 8192;
 const defaultTimeout = 10000;
 const maxTimeout = 30000;
@@ -59,8 +61,15 @@ function isWebURL(url: string) {
   return url.startsWith('http:') || url.startsWith('https:');
 }
 
-const browser = await chromium.launch({ chromiumSandbox: true, handleSIGTERM: false, handleSIGINT: false });
+const browser = await chromium.launch({
+  chromiumSandbox: true, handleSIGTERM: false, handleSIGINT: false,
+  timeout: sessionDeadline === undefined ? 30000 : Math.min(30000, Math.max(1, sessionDeadline - Date.now())),
+}).catch((error: unknown) => {
+  if (sessionDeadline !== undefined && Date.now() >= sessionDeadline) process.exit(0);
+  throw error;
+});
 let stopping = false;
+let expiryTimer: ReturnType<typeof setTimeout> | undefined;
 let activeCommand: 'navigation' | 'screenshot' | undefined;
 let hasPage = false;
 const server = createServer({ requestTimeout: 15000, headersTimeout: 5000 }, (request, response) => {
@@ -77,6 +86,7 @@ const server = createServer({ requestTimeout: 15000, headersTimeout: 5000 }, (re
 async function shutdown(code: number) {
   if (stopping) return;
   stopping = true;
+  clearTimeout(expiryTimer);
   process.exitCode = code;
   server.close();
   server.closeAllConnections();
@@ -95,10 +105,30 @@ for (const signal of ['SIGTERM', 'SIGINT'] as const) {
 }
 browser.on('disconnected', () => void shutdown(1));
 
-const page = await browser.newPage({ viewport, deviceScaleFactor: 1 }).catch(async (error: unknown) => {
-  await shutdown(1);
-  throw error;
-});
+function checkExpiry() {
+  if (stopping || sessionDeadline === undefined) return;
+  clearTimeout(expiryTimer);
+  const remaining = sessionDeadline - Date.now();
+  if (remaining <= 0) {
+    void shutdown(0);
+    return;
+  }
+  // Recheck wall time so clock adjustments cannot extend the deadline indefinitely.
+  expiryTimer = setTimeout(checkExpiry, Math.min(remaining, 1000)).unref();
+}
+
+checkExpiry();
+let page: Page;
+if (!stopping) {
+  try {
+    page = await browser.newPage({ viewport, deviceScaleFactor: 1 });
+  } catch (error) {
+    if (!stopping) {
+      await shutdown(1);
+      throw error;
+    }
+  }
+}
 
 async function navigate(url: URL) {
   hasPage = false;
@@ -186,4 +216,5 @@ server.on('error', (error) => {
   console.error('Browser Run listener failed:', error);
   void shutdown(1);
 });
+checkExpiry();
 if (!stopping) server.listen(8080, '0.0.0.0');
