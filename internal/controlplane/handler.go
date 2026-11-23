@@ -161,8 +161,8 @@ func (h *handler) CreateProject(c *gin.Context) {
 		return
 	}
 	var trailing any
-	name := strings.TrimSpace(body.Name)
-	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) || name == "" || utf8.RuneCountInString(name) > 100 || strings.ContainsRune(name, '\x00') {
+	name, validName := normalizeProjectName(body.Name)
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) || !validName {
 		c.JSON(http.StatusBadRequest, apigen.Error{Message: "项目名称需要 1 至 100 个非空字符"})
 		return
 	}
@@ -211,6 +211,39 @@ func (h *handler) GetProject(c *gin.Context, projectID string) {
 		return
 	}
 	c.JSON(http.StatusOK, projectResponse(project))
+}
+
+func (h *handler) RenameProject(c *gin.Context, projectID string) {
+	user, normalizedID, membership, ok := h.projectAccess(c, projectID)
+	if !ok {
+		return
+	}
+	if membership.Role != "owner" {
+		c.JSON(http.StatusForbidden, apigen.Error{Message: "只有项目所有者可以重命名项目"})
+		return
+	}
+	var body apigen.RenameProjectRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(c.Writer, c.Request.Body, 4096))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil {
+		c.JSON(http.StatusBadRequest, apigen.Error{Message: "项目名称请求格式无效"})
+		return
+	}
+	var trailing any
+	name, validName := normalizeProjectName(body.Name)
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) || !validName {
+		c.JSON(http.StatusBadRequest, apigen.Error{Message: "项目名称需要 1 至 100 个非空字符"})
+		return
+	}
+	if err := h.store.RenameProject(c.Request.Context(), normalizedID, user.ID, name); err != nil {
+		if errors.Is(err, database.ErrProjectNotOwner) {
+			c.JSON(http.StatusForbidden, apigen.Error{Message: "只有项目所有者可以重命名项目"})
+			return
+		}
+		h.failure(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, projectResponse(database.Project{ID: normalizedID, Name: name}))
 }
 
 func (h *handler) ListProjectMembers(c *gin.Context, projectID string) {
@@ -296,6 +329,36 @@ func (h *handler) UpsertProjectMember(c *gin.Context, projectID string) {
 		Email:  target.Email,
 		Role:   apigen.ProjectRole(role),
 	})
+}
+
+func (h *handler) RemoveProjectMember(c *gin.Context, projectID, userID string) {
+	_, normalizedID, membership, ok := h.projectAccess(c, projectID)
+	if !ok {
+		return
+	}
+	if membership.Role != "owner" {
+		c.JSON(http.StatusForbidden, apigen.Error{Message: "只有项目所有者可以管理成员"})
+		return
+	}
+	targetID, err := uuid.Parse(userID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, apigen.Error{Message: "项目成员不存在"})
+		return
+	}
+	err = h.store.RemoveProjectMember(c.Request.Context(), normalizedID, targetID.String())
+	if errors.Is(err, database.ErrProjectOwner) {
+		c.JSON(http.StatusConflict, apigen.Error{Message: "不能移除项目所有者"})
+		return
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		c.JSON(http.StatusNotFound, apigen.Error{Message: "项目成员不存在"})
+		return
+	}
+	if err != nil {
+		h.failure(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 func (h *handler) CreateProjectSecretVersion(c *gin.Context, projectID string) {
@@ -460,6 +523,11 @@ func (h *handler) projectAccess(c *gin.Context, projectID string) (database.User
 		return database.User{}, "", database.ProjectMember{}, false
 	}
 	return user, parsedID.String(), member, true
+}
+
+func normalizeProjectName(name string) (string, bool) {
+	name = strings.TrimSpace(name)
+	return name, name != "" && utf8.RuneCountInString(name) <= 100 && !strings.ContainsRune(name, '\x00')
 }
 
 func projectResponse(project database.Project) apigen.Project {
