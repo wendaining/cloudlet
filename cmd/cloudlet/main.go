@@ -12,15 +12,14 @@ import (
 )
 
 func main() {
-	root := &cobra.Command{Use: "cloudlet", Short: "Cloudlet command line client", SilenceUsage: true, SilenceErrors: true}
-	root.AddCommand(newOperationCommand())
+	root := &cobra.Command{Use: "cloudlet", Short: "Cloudlet command line client", SilenceUsage: true}
+	var endpoint string
 	root.AddCommand(&cobra.Command{
 		Use: "version", Short: "Print client build information", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return json.NewEncoder(cmd.OutOrStdout()).Encode(version.Current())
 		},
 	})
-	var endpoint string
 	health := &cobra.Command{
 		Use: "health", Short: "Check management API health", Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -35,6 +34,8 @@ func main() {
 			return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]string{"status": status})
 		},
 	}
+	root.SilenceErrors = true
+	root.AddCommand(newOperationCommand())
 	health.Flags().StringVar(&endpoint, "endpoint", "http://127.0.0.1:8080", "management API endpoint")
 	root.AddCommand(health)
 	if err := root.Execute(); err != nil {
