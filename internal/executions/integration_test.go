@@ -329,6 +329,290 @@ func TestContainerAdmission(t *testing.T) {
 		ProjectLimit: budget,
 		ProjectUsed:  capacity.Resources{},
 	})
+
+	t.Run("retry with different ownership is rejected", func(t *testing.T) {
+		executionID := uuid.New()
+		remember(projectB, executionID)
+		original := httpSpec(instance, projectB, "binding-original", image)
+		execution, err := service.Start(ctx, executions.StartRequest{ExecutionID: executionID, ProjectID: projectB, Spec: original})
+		if err != nil {
+			t.Fatal(err)
+		}
+		changed := httpSpec(instance, projectB, "binding-changed", image)
+		if _, err := service.Start(ctx, executions.StartRequest{ExecutionID: executionID, ProjectID: projectB, Spec: changed}); !errors.Is(err, capacity.ErrIdempotencyConflict) {
+			t.Fatalf("同一执行更换归属返回 %v，要求 ErrIdempotencyConflict", err)
+		}
+		if observation, found, err := adapter.Find(ctx, changed.Ownership); err != nil || found {
+			t.Fatalf("更换归属后创建了第二个容器: %+v, %t, %v", observation, found, err)
+		}
+		if items := listManaged(t, ctx, docker, instance, projectB); len(items) != 1 {
+			t.Fatalf("更换归属后受管理容器数量为 %d，预期 1", len(items))
+		}
+		assertUsage(t, ctx, capacityStore, hostID, projectB, capacity.Usage{
+			HostID: hostID, HostLimit: budget,
+			HostUsed:  capacity.Resources{CPUMillis: 1000, MemoryBytes: 1 << 30, Instances: 1},
+			ProjectID: projectB, ProjectLimit: budget,
+			ProjectUsed: capacity.Resources{CPUMillis: 1000, MemoryBytes: 1 << 30, Instances: 1},
+		})
+		if err := service.Stop(ctx, executions.StopRequest{
+			ExecutionID: executionID, ProjectID: projectB,
+			Ownership: original.Ownership, ContainerID: execution.Container.ID,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("ownership is unique across executions", func(t *testing.T) {
+		firstID, secondID := uuid.New(), uuid.New()
+		remember(projectB, firstID)
+		remember(projectB, secondID)
+		spec := httpSpec(instance, projectB, "binding-unique", image)
+		first, err := service.Start(ctx, executions.StartRequest{ExecutionID: firstID, ProjectID: projectB, Spec: spec})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := service.Start(ctx, executions.StartRequest{ExecutionID: secondID, ProjectID: projectB, Spec: spec}); !errors.Is(err, capacity.ErrOwnershipConflict) {
+			t.Fatalf("不同执行复用归属返回 %v，要求 ErrOwnershipConflict", err)
+		}
+		if items := listManaged(t, ctx, docker, instance, projectB); len(items) != 1 {
+			t.Fatalf("复用归属后受管理容器数量为 %d，预期 1", len(items))
+		}
+		if err := service.Stop(ctx, executions.StopRequest{
+			ExecutionID: firstID, ProjectID: projectB,
+			Ownership: spec.Ownership, ContainerID: first.Container.ID,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("stop rejects a different container identifier", func(t *testing.T) {
+		executionID := uuid.New()
+		remember(projectB, executionID)
+		spec := httpSpec(instance, projectB, "binding-wrong-id", image)
+		execution, err := service.Start(ctx, executions.StartRequest{ExecutionID: executionID, ProjectID: projectB, Spec: spec})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := service.Stop(ctx, executions.StopRequest{
+			ExecutionID: executionID, ProjectID: projectB,
+			Ownership: spec.Ownership, ContainerID: "ffffffffffff",
+		}); !errors.Is(err, executions.ErrExecutionConflict) {
+			t.Fatalf("错误容器标识返回 %v，要求 ErrExecutionConflict", err)
+		}
+		assertUsage(t, ctx, capacityStore, hostID, projectB, capacity.Usage{
+			HostID: hostID, HostLimit: budget,
+			HostUsed:  capacity.Resources{CPUMillis: 1000, MemoryBytes: 1 << 30, Instances: 1},
+			ProjectID: projectB, ProjectLimit: budget,
+			ProjectUsed: capacity.Resources{CPUMillis: 1000, MemoryBytes: 1 << 30, Instances: 1},
+		})
+		if observation, found, err := adapter.Find(ctx, spec.Ownership); err != nil || !found || !observation.Running {
+			t.Fatalf("错误标识停止后容器状态异常: %+v, %t, %v", observation, found, err)
+		}
+		if err := service.Stop(ctx, executions.StopRequest{
+			ExecutionID: executionID, ProjectID: projectB,
+			Ownership: spec.Ownership, ContainerID: execution.Container.ID,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("stop rejects a different ownership", func(t *testing.T) {
+		executionID := uuid.New()
+		remember(projectB, executionID)
+		spec := httpSpec(instance, projectB, "binding-stop-original", image)
+		execution, err := service.Start(ctx, executions.StartRequest{ExecutionID: executionID, ProjectID: projectB, Spec: spec})
+		if err != nil {
+			t.Fatal(err)
+		}
+		other := spec
+		other.Ownership.Resource = "binding-stop-other"
+		if err := service.Stop(ctx, executions.StopRequest{
+			ExecutionID: executionID, ProjectID: projectB,
+			Ownership: other.Ownership, ContainerID: execution.Container.ID,
+		}); !errors.Is(err, executions.ErrExecutionConflict) {
+			t.Fatalf("错误归属停止返回 %v，要求 ErrExecutionConflict", err)
+		}
+		assertUsage(t, ctx, capacityStore, hostID, projectB, capacity.Usage{
+			HostID: hostID, HostLimit: budget,
+			HostUsed:  capacity.Resources{CPUMillis: 1000, MemoryBytes: 1 << 30, Instances: 1},
+			ProjectID: projectB, ProjectLimit: budget,
+			ProjectUsed: capacity.Resources{CPUMillis: 1000, MemoryBytes: 1 << 30, Instances: 1},
+		})
+		if err := service.Stop(ctx, executions.StopRequest{
+			ExecutionID: executionID, ProjectID: projectB,
+			Ownership: spec.Ownership, ContainerID: execution.Container.ID,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("stop confirms cleanup by ownership when the container is gone", func(t *testing.T) {
+		executionID := uuid.New()
+		remember(projectB, executionID)
+		spec := httpSpec(instance, projectB, "binding-gone", image)
+		execution, err := service.Start(ctx, executions.StartRequest{ExecutionID: executionID, ProjectID: projectB, Spec: spec})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := docker.ContainerRemove(ctx, execution.Container.ID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true}); err != nil {
+			t.Fatal(err)
+		}
+		if err := service.Stop(ctx, executions.StopRequest{
+			ExecutionID: executionID, ProjectID: projectB,
+			Ownership: spec.Ownership, ContainerID: execution.Container.ID,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		assertUsage(t, ctx, capacityStore, hostID, projectB, capacity.Usage{
+			HostID: hostID, HostLimit: budget,
+			HostUsed: capacity.Resources{}, ProjectID: projectB,
+			ProjectLimit: budget, ProjectUsed: capacity.Resources{},
+		})
+		if observation, found, err := adapter.Find(ctx, spec.Ownership); err != nil || found {
+			t.Fatalf("清理后仍可找到容器: %+v, %t, %v", observation, found, err)
+		}
+	})
+
+	t.Run("repeated stop does not touch a new execution with the same ownership", func(t *testing.T) {
+		firstID, secondID := uuid.New(), uuid.New()
+		remember(projectB, firstID)
+		remember(projectB, secondID)
+		spec := httpSpec(instance, projectB, "binding-reuse-stop", image)
+		first, err := service.Start(ctx, executions.StartRequest{ExecutionID: firstID, ProjectID: projectB, Spec: spec})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := service.Stop(ctx, executions.StopRequest{
+			ExecutionID: firstID, ProjectID: projectB,
+			Ownership: spec.Ownership, ContainerID: first.Container.ID,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		second, err := service.Start(ctx, executions.StartRequest{ExecutionID: secondID, ProjectID: projectB, Spec: spec})
+		if err != nil {
+			t.Fatalf("释放后复用归属失败: %v", err)
+		}
+		if err := service.Stop(ctx, executions.StopRequest{
+			ExecutionID: firstID, ProjectID: projectB,
+			Ownership: spec.Ownership, ContainerID: first.Container.ID,
+		}); err != nil {
+			t.Fatalf("重复停止旧执行返回 %v", err)
+		}
+		if observation, found, err := adapter.Find(ctx, spec.Ownership); err != nil || !found || !observation.Running {
+			t.Fatalf("重复停止旧执行影响了新容器: %+v, %t, %v", observation, found, err)
+		}
+		if err := service.Stop(ctx, executions.StopRequest{
+			ExecutionID: secondID, ProjectID: projectB,
+			Ownership: spec.Ownership, ContainerID: second.Container.ID,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("stop rejects a container with a different binding configuration", func(t *testing.T) {
+		executionID := uuid.New()
+		remember(projectB, executionID)
+		spec := httpSpec(instance, projectB, "binding-mismatch", image)
+		execution, err := service.Start(ctx, executions.StartRequest{ExecutionID: executionID, ProjectID: projectB, Spec: spec})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := docker.ContainerRemove(ctx, execution.Container.ID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true}); err != nil {
+			t.Fatal(err)
+		}
+		replacementSpec := spec
+		replacementSpec.Limits.CPUMillis = 500
+		replacement, err := adapter.Create(ctx, replacementSpec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
+			defer cleanupCancel()
+			_, _ = docker.ContainerRemove(cleanupCtx, replacement.ID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true})
+		})
+		if err := service.Stop(ctx, executions.StopRequest{
+			ExecutionID: executionID, ProjectID: projectB,
+			Ownership: spec.Ownership, ContainerID: execution.Container.ID,
+		}); !errors.Is(err, executions.ErrExecutionConflict) {
+			t.Fatalf("不同配置的绑定容器返回 %v，要求 ErrExecutionConflict", err)
+		}
+		assertUsage(t, ctx, capacityStore, hostID, projectB, capacity.Usage{
+			HostID: hostID, HostLimit: budget,
+			HostUsed:  capacity.Resources{CPUMillis: 1000, MemoryBytes: 1 << 30, Instances: 1},
+			ProjectID: projectB, ProjectLimit: budget,
+			ProjectUsed: capacity.Resources{CPUMillis: 1000, MemoryBytes: 1 << 30, Instances: 1},
+		})
+		if observation, found, err := adapter.Find(ctx, spec.Ownership); err != nil || !found {
+			t.Fatalf("配置不匹配后替换容器丢失: %+v, %t, %v", observation, found, err)
+		}
+		if _, err := docker.ContainerRemove(ctx, replacement.ID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true}); err != nil {
+			t.Fatal(err)
+		}
+		if err := service.Stop(ctx, executions.StopRequest{
+			ExecutionID: executionID, ProjectID: projectB,
+			Ownership: spec.Ownership, ContainerID: execution.Container.ID,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("start failure cleans up binding and capacity", func(t *testing.T) {
+		executionID := uuid.New()
+		remember(projectB, executionID)
+		spec := httpSpec(instance, projectB, "binding-start-failure", image)
+		spec.User = "nonexistentuser"
+		if _, err := service.Start(ctx, executions.StartRequest{ExecutionID: executionID, ProjectID: projectB, Spec: spec}); err == nil {
+			t.Fatal("无效用户启动未返回错误")
+		}
+		reservation, err := capacityStore.GetReservation(ctx, projectB, executionID)
+		if err != nil || reservation.State != capacity.Released {
+			t.Fatalf("启动失败后预留为 %+v, %v，要求 released", reservation, err)
+		}
+		if observation, found, err := adapter.Find(ctx, spec.Ownership); err != nil || found {
+			t.Fatalf("启动失败后存在容器: %+v, %t, %v", observation, found, err)
+		}
+		assertUsage(t, ctx, capacityStore, hostID, projectB, capacity.Usage{
+			HostID: hostID, HostLimit: budget,
+			HostUsed: capacity.Resources{}, ProjectID: projectB,
+			ProjectLimit: budget, ProjectUsed: capacity.Resources{},
+		})
+
+		reusedID := uuid.New()
+		remember(projectB, reusedID)
+		reusedSpec := httpSpec(instance, projectB, "binding-start-failure", image)
+		reused, err := service.Start(ctx, executions.StartRequest{ExecutionID: reusedID, ProjectID: projectB, Spec: reusedSpec})
+		if err != nil {
+			t.Fatalf("释放后复用归属失败: %v", err)
+		}
+		if err := service.Stop(ctx, executions.StopRequest{
+			ExecutionID: reusedID, ProjectID: projectB,
+			Ownership: reusedSpec.Ownership, ContainerID: reused.Container.ID,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("retry with a different image is rejected", func(t *testing.T) {
+		executionID := uuid.New()
+		remember(projectB, executionID)
+		original := httpSpec(instance, projectB, "binding-image", image)
+		execution, err := service.Start(ctx, executions.StartRequest{ExecutionID: executionID, ProjectID: projectB, Spec: original})
+		if err != nil {
+			t.Fatal(err)
+		}
+		changed := original
+		changed.Image = "example.invalid/other:latest"
+		if _, err := service.Start(ctx, executions.StartRequest{ExecutionID: executionID, ProjectID: projectB, Spec: changed}); !errors.Is(err, capacity.ErrIdempotencyConflict) {
+			t.Fatalf("同一执行更换镜像返回 %v，要求 ErrIdempotencyConflict", err)
+		}
+		if err := service.Stop(ctx, executions.StopRequest{
+			ExecutionID: executionID, ProjectID: projectB,
+			Ownership: original.Ownership, ContainerID: execution.Container.ID,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
 }
 
 func httpSpec(instance string, projectID uuid.UUID, resource, image string) containers.Spec {

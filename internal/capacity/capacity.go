@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math"
 	"strings"
 	"time"
 	"unicode"
@@ -26,7 +27,9 @@ const (
 	stateActive   = "active"
 	stateReleased = "released"
 
-	maxHostIDLength = 64
+	maxHostIDLength       = 64
+	maxBindingFieldLength = 48
+	maxImageLength        = 255
 )
 
 var (
@@ -40,7 +43,8 @@ var (
 	// satisfy the requested resources.
 	ErrInsufficientCapacity = errors.New("容量不足")
 	// ErrIdempotencyConflict reports that an execution identifier was already
-	// reserved with a different host, project or resource request.
+	// reserved with a different host, project, resource or container binding
+	// request.
 	ErrIdempotencyConflict = errors.New("执行标识已用于不同预留")
 	// ErrExecutionReleased reports that an execution identifier has already
 	// been released and cannot reserve capacity again.
@@ -50,6 +54,11 @@ var (
 	// ErrReservationNotFound reports that the project has no reservation for
 	// the requested execution identifier.
 	ErrReservationNotFound = errors.New("容量预留不存在")
+	// ErrOwnershipConflict reports that another active execution already owns
+	// the requested container binding.
+	ErrOwnershipConflict = errors.New("容器归属已由其他执行使用")
+	// ErrBindingNotFound reports that a reservation has no container binding.
+	ErrBindingNotFound = errors.New("容量预留未绑定容器归属")
 )
 
 // Resources describes CPU, memory and instance amounts. CPU uses millicores,
@@ -69,6 +78,45 @@ func (r Resources) validate() error {
 	}
 	if r.Instances <= 0 {
 		return fmt.Errorf("容量需要正的实例数: %w", fs.ErrInvalid)
+	}
+	return nil
+}
+
+// Binding identifies the managed container that owns a reservation. The tuple
+// of environment, project, resource and generation is unique among active
+// reservations, so an execution can only retry with the container ownership
+// recorded at admission.
+type Binding struct {
+	Environment string
+	Project     string
+	Resource    string
+	Generation  uint64
+	Image       string
+}
+
+func (b Binding) isZero() bool {
+	return b.Environment == "" && b.Project == "" && b.Resource == "" && b.Generation == 0 && b.Image == ""
+}
+
+func (b Binding) validate() error {
+	if b.isZero() {
+		return nil
+	}
+	if err := validateBindingIdentifier("容器归属环境", b.Environment); err != nil {
+		return err
+	}
+	if err := validateBindingIdentifier("容器归属项目", b.Project); err != nil {
+		return err
+	}
+	if err := validateBindingIdentifier("容器归属资源", b.Resource); err != nil {
+		return err
+	}
+	if b.Generation == 0 || b.Generation > math.MaxInt64 {
+		return fmt.Errorf("容器归属执行序号需要正整数: %w", fs.ErrInvalid)
+	}
+	if b.Image == "" || len(b.Image) > maxImageLength || !utf8.ValidString(b.Image) ||
+		strings.IndexFunc(b.Image, func(char rune) bool { return char == 0 || unicode.IsSpace(char) }) >= 0 {
+		return fmt.Errorf("容器镜像需要 1 至 %d 字节且不含空白: %w", maxImageLength, fs.ErrInvalid)
 	}
 	return nil
 }
@@ -97,23 +145,28 @@ const (
 	Released ReservationState = stateReleased
 )
 
-// Reservation records the capacity held by one execution.
+// Reservation records the capacity held by one execution and, when bound, the
+// managed container that owns it.
 type Reservation struct {
 	ExecutionID uuid.UUID
 	HostID      string
 	ProjectID   uuid.UUID
 	Resources   Resources
+	Binding     Binding
+	ContainerID string
 	State       ReservationState
 	CreatedAt   time.Time
 	ReleasedAt  *time.Time
 }
 
-// Request asks to reserve resources for one execution on one host.
+// Request asks to reserve resources for one execution on one host. Binding is
+// optional for capacity-only callers; the execution service always supplies it.
 type Request struct {
 	ExecutionID uuid.UUID
 	HostID      string
 	ProjectID   uuid.UUID
 	Resources   Resources
+	Binding     Binding
 }
 
 func (r Request) validate() error {
@@ -126,7 +179,10 @@ func (r Request) validate() error {
 	if err := validateHostID(r.HostID); err != nil {
 		return err
 	}
-	return r.Resources.validate()
+	if err := r.Resources.validate(); err != nil {
+		return err
+	}
+	return r.Binding.validate()
 }
 
 // Usage reports configured limits and active usage for a host and project.
@@ -190,15 +246,21 @@ func (r projectQuotaRow) resources() Resources {
 }
 
 type reservationRow struct {
-	ExecutionID uuid.UUID  `gorm:"column:execution_id;primaryKey"`
-	HostID      string     `gorm:"column:host_id"`
-	ProjectID   uuid.UUID  `gorm:"column:project_id"`
-	CPUMillis   int64      `gorm:"column:cpu_millis"`
-	MemoryBytes int64      `gorm:"column:memory_bytes"`
-	Instances   int64      `gorm:"column:instances"`
-	State       string     `gorm:"column:state"`
-	CreatedAt   time.Time  `gorm:"column:created_at"`
-	ReleasedAt  *time.Time `gorm:"column:released_at"`
+	ExecutionID          uuid.UUID  `gorm:"column:execution_id;primaryKey"`
+	HostID               string     `gorm:"column:host_id"`
+	ProjectID            uuid.UUID  `gorm:"column:project_id"`
+	CPUMillis            int64      `gorm:"column:cpu_millis"`
+	MemoryBytes          int64      `gorm:"column:memory_bytes"`
+	Instances            int64      `gorm:"column:instances"`
+	ContainerEnvironment *string    `gorm:"column:container_environment"`
+	ContainerProject     *string    `gorm:"column:container_project"`
+	ContainerResource    *string    `gorm:"column:container_resource"`
+	ContainerGeneration  *int64     `gorm:"column:container_generation"`
+	ContainerImage       *string    `gorm:"column:container_image"`
+	ContainerID          *string    `gorm:"column:container_id"`
+	State                string     `gorm:"column:state"`
+	CreatedAt            time.Time  `gorm:"column:created_at"`
+	ReleasedAt           *time.Time `gorm:"column:released_at"`
 }
 
 func (reservationRow) TableName() string { return "capacity_reservations" }
@@ -207,12 +269,35 @@ func (r reservationRow) resources() Resources {
 	return Resources{CPUMillis: r.CPUMillis, MemoryBytes: r.MemoryBytes, Instances: r.Instances}
 }
 
+func (r reservationRow) binding() Binding {
+	if r.ContainerEnvironment == nil || r.ContainerProject == nil || r.ContainerResource == nil ||
+		r.ContainerGeneration == nil || r.ContainerImage == nil {
+		return Binding{}
+	}
+	return Binding{
+		Environment: *r.ContainerEnvironment,
+		Project:     *r.ContainerProject,
+		Resource:    *r.ContainerResource,
+		Generation:  uint64(*r.ContainerGeneration),
+		Image:       *r.ContainerImage,
+	}
+}
+
+func (r reservationRow) containerID() string {
+	if r.ContainerID == nil {
+		return ""
+	}
+	return *r.ContainerID
+}
+
 func (r reservationRow) toReservation() Reservation {
 	return Reservation{
 		ExecutionID: r.ExecutionID,
 		HostID:      r.HostID,
 		ProjectID:   r.ProjectID,
 		Resources:   r.resources(),
+		Binding:     r.binding(),
+		ContainerID: r.containerID(),
 		State:       ReservationState(r.State),
 		CreatedAt:   r.CreatedAt,
 		ReleasedAt:  r.ReleasedAt,
@@ -347,7 +432,9 @@ func (s *Store) SetProjectQuota(ctx context.Context, projectID uuid.UUID, capaci
 // Reserve records capacity for an execution. The returned bool is true only
 // when this call created the reservation. Repeating the same request returns
 // the existing active reservation. The same execution identifier with a
-// different host, project or resource request returns ErrIdempotencyConflict.
+// different host, project, resource or container binding request returns
+// ErrIdempotencyConflict. A container binding owned by another active execution
+// returns ErrOwnershipConflict.
 func (s *Store) Reserve(ctx context.Context, request Request) (Reservation, bool, error) {
 	if err := request.validate(); err != nil {
 		return Reservation{}, false, err
@@ -363,7 +450,7 @@ func (s *Store) Reserve(ctx context.Context, request Request) (Reservation, bool
 			Where("execution_id = ?", request.ExecutionID).Take(&existing).Error
 		if existingErr == nil {
 			var err error
-			result, created, err = resolveExisting(existing, request)
+			result, created, err = resolveExisting(tx, &existing, request)
 			return err
 		}
 		if !errors.Is(existingErr, gorm.ErrRecordNotFound) {
@@ -382,9 +469,15 @@ func (s *Store) Reserve(ctx context.Context, request Request) (Reservation, bool
 			return fmt.Errorf("锁定主机 %s 的容量: %w", request.HostID, err)
 		}
 
+		if !request.Binding.isZero() {
+			if err := lockBinding(tx, request.Binding); err != nil {
+				return err
+			}
+		}
+
 		// Claim the execution identifier before checking usage. The unique
-		// index makes concurrent duplicates wait for the winner, including
-		// requests that use different hosts.
+		// indexes make concurrent duplicates wait for the winner, including
+		// requests that use different hosts or container bindings.
 		row := reservationRow{
 			ExecutionID: request.ExecutionID,
 			HostID:      request.HostID,
@@ -395,22 +488,44 @@ func (s *Store) Reserve(ctx context.Context, request Request) (Reservation, bool
 			State:       stateActive,
 			CreatedAt:   currentTime(),
 		}
+		applyBinding(&row, request.Binding)
 		insert := tx.Clauses(
-			clause.OnConflict{Columns: []clause.Column{{Name: "execution_id"}}, DoNothing: true},
+			clause.OnConflict{DoNothing: true},
 			clause.Returning{},
 		).Create(&row)
 		if insert.Error != nil {
 			return fmt.Errorf("登记执行 %s 的容量预留: %w", request.ExecutionID, insert.Error)
 		}
 		if insert.RowsAffected == 0 {
+			// The execution identifier or the container binding already
+			// exists. Resolve the execution first so an idempotent retry keeps
+			// its original result.
 			var existing reservationRow
-			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-				Where("execution_id = ?", request.ExecutionID).Take(&existing).Error; err != nil {
-				return fmt.Errorf("读取执行 %s 的已有预留: %w", request.ExecutionID, err)
+			existingErr := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+				Where("execution_id = ?", request.ExecutionID).Take(&existing).Error
+			if existingErr == nil {
+				var err error
+				result, created, err = resolveExisting(tx, &existing, request)
+				return err
 			}
-			var err error
-			result, created, err = resolveExisting(existing, request)
-			return err
+			if !errors.Is(existingErr, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("读取执行 %s 的已有预留: %w", request.ExecutionID, existingErr)
+			}
+			if !request.Binding.isZero() {
+				var owner reservationRow
+				ownerErr := tx.Where("state = ? AND container_environment = ? AND container_project = ? AND container_resource = ? AND container_generation = ?",
+					stateActive, request.Binding.Environment, request.Binding.Project, request.Binding.Resource,
+					int64(request.Binding.Generation)).Take(&owner).Error
+				if ownerErr == nil {
+					return fmt.Errorf("%w: 容器归属 %s/%s/%s/%d 已由执行 %s 使用",
+						ErrOwnershipConflict, request.Binding.Environment, request.Binding.Project,
+						request.Binding.Resource, request.Binding.Generation, owner.ExecutionID)
+				}
+				if !errors.Is(ownerErr, gorm.ErrRecordNotFound) {
+					return fmt.Errorf("检查执行 %s 的容器归属: %w", request.ExecutionID, ownerErr)
+				}
+			}
+			return fmt.Errorf("登记执行 %s 的容量预留: 冲突但未找到已有记录", request.ExecutionID)
 		}
 
 		var quota projectQuotaRow
@@ -448,10 +563,14 @@ func (s *Store) Reserve(ctx context.Context, request Request) (Reservation, bool
 	return result, created, nil
 }
 
-func resolveExisting(existing reservationRow, request Request) (Reservation, bool, error) {
-	if existing.HostID != request.HostID || existing.ProjectID != request.ProjectID ||
-		existing.resources() != request.Resources {
-		return Reservation{}, false, fmt.Errorf("%w: 执行标识 %s 已用于其他预留", ErrIdempotencyConflict, request.ExecutionID)
+func resolveExisting(tx *gorm.DB, existing *reservationRow, request Request) (Reservation, bool, error) {
+	if err := validateExisting(existing, request); err != nil {
+		return Reservation{}, false, err
+	}
+	if !request.Binding.isZero() && existing.binding().isZero() {
+		if err := bindExisting(tx, existing, request.Binding); err != nil {
+			return Reservation{}, false, err
+		}
 	}
 	switch existing.State {
 	case stateActive:
@@ -461,6 +580,140 @@ func resolveExisting(existing reservationRow, request Request) (Reservation, boo
 	default:
 		return Reservation{}, false, fmt.Errorf("执行标识 %s 的预留状态 %q 无效", request.ExecutionID, existing.State)
 	}
+}
+
+func validateExisting(existing *reservationRow, request Request) error {
+	if existing.HostID != request.HostID || existing.ProjectID != request.ProjectID ||
+		existing.resources() != request.Resources {
+		return fmt.Errorf("%w: 执行标识 %s 已用于其他预留", ErrIdempotencyConflict, request.ExecutionID)
+	}
+	if request.Binding.isZero() {
+		return nil
+	}
+	current := existing.binding()
+	if current.isZero() {
+		if existing.State != stateActive {
+			return fmt.Errorf("%w: 执行标识 %s", ErrExecutionReleased, request.ExecutionID)
+		}
+		return nil
+	}
+	if current != request.Binding {
+		return fmt.Errorf("%w: 执行标识 %s 已绑定其他容器归属", ErrIdempotencyConflict, request.ExecutionID)
+	}
+	return nil
+}
+
+func bindExisting(tx *gorm.DB, existing *reservationRow, binding Binding) error {
+	if err := lockBinding(tx, binding); err != nil {
+		return err
+	}
+	var owner reservationRow
+	ownerErr := tx.Where("state = ? AND container_environment = ? AND container_project = ? AND container_resource = ? AND container_generation = ? AND execution_id <> ?",
+		stateActive, binding.Environment, binding.Project, binding.Resource, int64(binding.Generation), existing.ExecutionID).
+		Take(&owner).Error
+	if ownerErr == nil {
+		return fmt.Errorf("%w: 容器归属 %s/%s/%s/%d 已由执行 %s 使用",
+			ErrOwnershipConflict, binding.Environment, binding.Project, binding.Resource, binding.Generation, owner.ExecutionID)
+	}
+	if !errors.Is(ownerErr, gorm.ErrRecordNotFound) {
+		return fmt.Errorf("检查执行 %s 的容器归属: %w", existing.ExecutionID, ownerErr)
+	}
+	update := tx.Model(&reservationRow{}).
+		Where("execution_id = ? AND state = ? AND container_environment IS NULL", existing.ExecutionID, stateActive).
+		Updates(bindingColumns(binding))
+	if update.Error != nil {
+		return fmt.Errorf("绑定执行 %s 的容器归属: %w", existing.ExecutionID, update.Error)
+	}
+	if update.RowsAffected != 1 {
+		return fmt.Errorf("绑定执行 %s 的容器归属: 状态已变化", existing.ExecutionID)
+	}
+	applyBinding(existing, binding)
+	return nil
+}
+
+func lockBinding(tx *gorm.DB, binding Binding) error {
+	key := fmt.Sprintf("%d:%s%d:%s%d:%s%d", len(binding.Environment), binding.Environment,
+		len(binding.Project), binding.Project, len(binding.Resource), binding.Resource, binding.Generation)
+	if err := tx.Exec("SELECT pg_advisory_xact_lock(hashtext(?))", key).Error; err != nil {
+		return fmt.Errorf("锁定容器归属: %w", err)
+	}
+	return nil
+}
+
+func applyBinding(row *reservationRow, binding Binding) {
+	if binding.isZero() {
+		return
+	}
+	environment := binding.Environment
+	project := binding.Project
+	resource := binding.Resource
+	generation := int64(binding.Generation)
+	image := binding.Image
+	row.ContainerEnvironment = &environment
+	row.ContainerProject = &project
+	row.ContainerResource = &resource
+	row.ContainerGeneration = &generation
+	row.ContainerImage = &image
+}
+
+func bindingColumns(binding Binding) map[string]any {
+	return map[string]any{
+		"container_environment": binding.Environment,
+		"container_project":     binding.Project,
+		"container_resource":    binding.Resource,
+		"container_generation":  int64(binding.Generation),
+		"container_image":       binding.Image,
+	}
+}
+
+// SetContainerID records the managed container that owns an active reservation.
+// It is idempotent for the same identifier and allows replacing a stale
+// identifier after a container was recreated.
+func (s *Store) SetContainerID(ctx context.Context, projectID, executionID uuid.UUID, containerID string) (Reservation, error) {
+	if projectID == uuid.Nil || executionID == uuid.Nil {
+		return Reservation{}, fmt.Errorf("绑定容器需要项目和执行标识: %w", fs.ErrInvalid)
+	}
+	if err := validateContainerID(containerID); err != nil {
+		return Reservation{}, err
+	}
+	var result Reservation
+	err := s.writeTransaction(ctx, func(tx *gorm.DB) error {
+		var current reservationRow
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("execution_id = ?", executionID).Take(&current).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("%w: %s", ErrReservationNotFound, executionID)
+			}
+			return fmt.Errorf("读取执行 %s 的容量预留: %w", executionID, err)
+		}
+		if current.ProjectID != projectID {
+			return fmt.Errorf("%w: %s", ErrReservationNotFound, executionID)
+		}
+		if current.State != stateActive {
+			return fmt.Errorf("%w: 执行标识 %s", ErrExecutionReleased, executionID)
+		}
+		if current.binding().isZero() {
+			return fmt.Errorf("%w: %s", ErrBindingNotFound, executionID)
+		}
+		if current.containerID() != containerID {
+			update := tx.Model(&reservationRow{}).
+				Where("execution_id = ? AND state = ?", executionID, stateActive).
+				Updates(map[string]any{"container_id": containerID})
+			if update.Error != nil {
+				return fmt.Errorf("记录执行 %s 的容器标识: %w", executionID, update.Error)
+			}
+			if update.RowsAffected != 1 {
+				return fmt.Errorf("记录执行 %s 的容器标识: 状态已变化", executionID)
+			}
+			current.ContainerID = &containerID
+		}
+		result = current.toReservation()
+		return nil
+	})
+	if err != nil {
+		return Reservation{}, err
+	}
+	return result, nil
 }
 
 // Release marks a reservation as released after the caller has confirmed that
@@ -668,6 +921,26 @@ func currentTime() time.Time {
 // ValidateHostID reports whether hostID can identify a configured host budget.
 func ValidateHostID(hostID string) error {
 	return validateHostID(hostID)
+}
+
+func validateContainerID(containerID string) error {
+	if containerID == "" || containerID != strings.TrimSpace(containerID) || len(containerID) > 128 || !utf8.ValidString(containerID) {
+		return fmt.Errorf("容器标识需要 1 至 128 字节的有效文本: %w", fs.ErrInvalid)
+	}
+	if strings.IndexFunc(containerID, func(char rune) bool { return char == 0 || unicode.IsControl(char) }) >= 0 {
+		return fmt.Errorf("容器标识不能包含控制字符: %w", fs.ErrInvalid)
+	}
+	return nil
+}
+
+func validateBindingIdentifier(field, value string) error {
+	if value == "" || value != strings.TrimSpace(value) || len(value) > maxBindingFieldLength || !utf8.ValidString(value) {
+		return fmt.Errorf("%s 需要 1 至 %d 字节的有效文本: %w", field, maxBindingFieldLength, fs.ErrInvalid)
+	}
+	if strings.IndexFunc(value, func(char rune) bool { return char == 0 || unicode.IsControl(char) }) >= 0 {
+		return fmt.Errorf("%s 不能包含控制字符: %w", field, fs.ErrInvalid)
+	}
+	return nil
 }
 
 func validateHostID(hostID string) error {

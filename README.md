@@ -18,7 +18,7 @@ Cloudlet 是一台服务器就能运行的 **Agentic Serverless 平台**。项�
 | Gateway | 静态域名路由、HTTP 转发和上游错误响应 |
 | CLI | 查询客户端版本、检查 API 健康状态 |
 | Containers | Docker Engine 镜像摘要准备与容器生命周期适配器，按归属标签创建、启动、观测、停止和删除容器 |
-| 容量预留 | 主机与项目 CPU、内存和实例额度的事务预留、确认释放、占用查询与容器启动准入 |
+| 容量预留 | 主机与项目额度事务预留、执行标识与容器归属及容器 ID 绑定、确认释放与占用查询 |
 | Workers、Durable Objects、Browser Run | 已定义模块边界与开发任务 |
 | 协作与交付 | Issue 表单、标签、PR 检查、Agent 交接、CI、镜像交付与版本发布 |
 

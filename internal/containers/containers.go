@@ -111,8 +111,8 @@ func (p PublishedPort) HostAddress() string {
 }
 
 // Observation is the inspected state of a managed container. Ports contains
-// only loopback bindings reported by Docker. CPUMillis and MemoryBytes are the
-// enforced limits reported by Docker.
+// only loopback bindings reported by Docker. CPUMillis, MemoryBytes, PIDs and
+// OpenFiles are the enforced limits reported by Docker.
 type Observation struct {
 	ID          string
 	Name        string
@@ -122,6 +122,8 @@ type Observation struct {
 	ExitCode    int
 	CPUMillis   int64
 	MemoryBytes int64
+	PIDs        int64
+	OpenFiles   int64
 	Ports       []PublishedPort
 }
 
@@ -369,6 +371,14 @@ func observe(info container.InspectResponse) (Observation, error) {
 	if info.HostConfig != nil {
 		observation.CPUMillis = info.HostConfig.NanoCPUs / 1_000_000
 		observation.MemoryBytes = info.HostConfig.Memory
+		if info.HostConfig.PidsLimit != nil {
+			observation.PIDs = *info.HostConfig.PidsLimit
+		}
+		for _, limit := range info.HostConfig.Ulimits {
+			if limit.Name == "nofile" {
+				observation.OpenFiles = limit.Soft
+			}
+		}
 	}
 	ports, err := publishedPorts(info.NetworkSettings)
 	if err != nil {

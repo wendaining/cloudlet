@@ -1,14 +1,13 @@
 // Package executions starts and stops managed containers under transactional
 // host and project capacity reservations.
 //
-// Start reserves capacity before any Docker operation. A failed create is
-// checked by deterministic name; if no container exists the reservation is
-// released, otherwise the existing container is adopted after verifying its
-// image and resource limits. A failed start stops
-// and removes the created container, then releases capacity only after removal
-// is confirmed. If cleanup or release fails, the reservation stays active so
-// the platform cannot overcommit. Stop releases capacity only after the
-// container is confirmed removed.
+// A reservation records the container ownership and the Docker container
+// identifier for its execution. Start reserves capacity before any Docker
+// operation, then binds the reservation to the deterministic container
+// ownership. Retrying the same execution can only restore that ownership; a
+// different ownership is rejected before Docker is touched. Stop verifies the
+// recorded ownership and container identifier before releasing capacity, and a
+// missing identifier alone never proves cleanup.
 package executions
 
 import (
@@ -26,31 +25,16 @@ import (
 
 const cleanupTimeout = 30 * time.Second
 
-// ErrExecutionConflict reports that an active execution already has a
-// container with a different image or resource limits than the request.
+// ErrExecutionConflict reports that an execution's recorded container binding
+// does not match the requested ownership, image, resource limits or container
+// identifier.
 var ErrExecutionConflict = errors.New("执行已有不同的容器配置")
-
-// Reservations is the capacity store used to admit an execution.
-type Reservations interface {
-	Reserve(context.Context, capacity.Request) (capacity.Reservation, bool, error)
-	Release(context.Context, uuid.UUID, uuid.UUID) (capacity.Reservation, error)
-	GetReservation(context.Context, uuid.UUID, uuid.UUID) (capacity.Reservation, error)
-}
-
-// Containers is the Docker adapter used to run an execution.
-type Containers interface {
-	Create(context.Context, containers.Spec) (containers.Container, error)
-	Start(context.Context, containers.Ownership, string) (containers.Observation, error)
-	Stop(context.Context, containers.Ownership, string) error
-	Remove(context.Context, containers.Ownership, string) error
-	Find(context.Context, containers.Ownership) (containers.Observation, bool, error)
-}
 
 // Service admits and runs containers for one host budget. It is safe for
 // concurrent use.
 type Service struct {
-	reservations Reservations
-	containers   Containers
+	reservations *capacity.Store
+	containers   *containers.Adapter
 	hostID       string
 
 	locksMu sync.Mutex
@@ -64,7 +48,7 @@ type executionLock struct {
 
 // NewService requires a capacity store, a container adapter and the host
 // identifier whose budget is charged for every execution.
-func NewService(reservations Reservations, containerRuntime Containers, hostID string) (*Service, error) {
+func NewService(reservations *capacity.Store, containerRuntime *containers.Adapter, hostID string) (*Service, error) {
 	if reservations == nil {
 		return nil, fmt.Errorf("create execution service: capacity store is required: %w", fs.ErrInvalid)
 	}
@@ -86,7 +70,7 @@ func NewService(reservations Reservations, containerRuntime Containers, hostID s
 // project must equal ProjectID so container labels and the capacity reservation
 // identify the same project. Ownership must uniquely identify the execution;
 // reusing the same environment, project, resource and generation for a different
-// execution identifier can adopt the same container.
+// execution identifier is rejected by the persisted binding.
 type StartRequest struct {
 	ExecutionID uuid.UUID
 	ProjectID   uuid.UUID
@@ -119,11 +103,12 @@ type Execution struct {
 	Reservation capacity.Reservation
 }
 
-// Start reserves host and project capacity, then creates and starts the
-// container. The reservation is made before any Docker operation, so an
-// over-budget request never starts a container. Repeating the same request for
-// an active execution adopts its existing container. A definite create failure
-// releases the reservation; retrying that execution identifier then returns
+// Start reserves host and project capacity, binds the reservation to the
+// requested container ownership, then creates and starts the container. The
+// reservation is made before any Docker operation, so an over-budget request
+// never starts a container. Repeating the same request for an active execution
+// adopts its recorded container. A definite create failure releases the
+// reservation; retrying that execution identifier then returns
 // capacity.ErrExecutionReleased, so a retry needs a new identifier.
 func (s *Service) Start(ctx context.Context, request StartRequest) (Execution, error) {
 	if err := request.validate(); err != nil {
@@ -132,7 +117,8 @@ func (s *Service) Start(ctx context.Context, request StartRequest) (Execution, e
 	unlock := s.lockExecution(request.ExecutionID)
 	defer unlock()
 
-	reservation, created, err := s.reservations.Reserve(ctx, capacity.Request{
+	binding := bindingFor(request.Spec)
+	reservation, _, err := s.reservations.Reserve(ctx, capacity.Request{
 		ExecutionID: request.ExecutionID,
 		HostID:      s.hostID,
 		ProjectID:   request.ProjectID,
@@ -141,47 +127,21 @@ func (s *Service) Start(ctx context.Context, request StartRequest) (Execution, e
 			MemoryBytes: request.Spec.Limits.MemoryBytes,
 			Instances:   1,
 		},
+		Binding: binding,
 	})
 	if err != nil {
 		return Execution{}, fmt.Errorf("准入执行 %s: %w", request.ExecutionID, err)
 	}
+	if reservation.Binding != binding {
+		return Execution{Reservation: reservation}, fmt.Errorf("%w: 执行 %s 的容器归属与预留不一致", ErrExecutionConflict, request.ExecutionID)
+	}
 
-	if !created {
-		existing, found, err := s.containers.Find(ctx, request.Spec.Ownership)
-		if err != nil {
-			return Execution{Reservation: reservation}, fmt.Errorf("查找已准入执行 %s 的容器: %w", request.ExecutionID, err)
-		}
-		if found {
-			if err := checkAdoptedContainer(request.ExecutionID, existing, request.Spec); err != nil {
-				return Execution{
-					Container:   containers.Container{ID: existing.ID, Name: existing.Name},
-					Observation: existing,
-					Reservation: reservation,
-				}, err
-			}
-			if existing.Running {
-				return Execution{
-					Container:   containers.Container{ID: existing.ID, Name: existing.Name},
-					Observation: existing,
-					Reservation: reservation,
-				}, nil
-			}
-			observation, err := s.containers.Start(ctx, request.Spec.Ownership, existing.ID)
-			if err != nil {
-				return Execution{
-					Container:   containers.Container{ID: existing.ID, Name: existing.Name},
-					Observation: existing,
-					Reservation: reservation,
-				}, fmt.Errorf("恢复执行 %s 的容器: %w", request.ExecutionID, err)
-			}
-			return Execution{
-				Container:   containers.Container{ID: observation.ID, Name: observation.Name},
-				Observation: observation,
-				Reservation: reservation,
-			}, nil
-		}
-		// The reservation survived a previous attempt but no container exists.
-		// Continue with creation so a retry can finish the execution.
+	existing, found, err := s.containers.Find(ctx, request.Spec.Ownership)
+	if err != nil {
+		return Execution{Reservation: reservation}, fmt.Errorf("查找执行 %s 的容器: %w", request.ExecutionID, err)
+	}
+	if found {
+		return s.adoptExisting(ctx, request, reservation, existing)
 	}
 
 	createdContainer, err := s.containers.Create(ctx, request.Spec)
@@ -189,44 +149,27 @@ func (s *Service) Start(ctx context.Context, request StartRequest) (Execution, e
 		cause := fmt.Errorf("创建执行 %s 的容器: %w", request.ExecutionID, err)
 		// A failed create is normally a definite failure with no container.
 		// Check the deterministic name anyway: Docker may have created the
-		// container before the response was lost, and a concurrent controller
-		// may own the name. Adopt it only when it carries this execution's
-		// ownership; otherwise keep the reservation and report the blocker.
+		// container before the response was lost, or a concurrent controller
+		// may own the name.
 		existing, found, findErr := s.containers.Find(ctx, request.Spec.Ownership)
 		if findErr != nil {
 			return Execution{Reservation: reservation}, errors.Join(cause, fmt.Errorf("检查执行 %s 的容器: %w", request.ExecutionID, findErr))
 		}
 		if found {
-			if err := checkAdoptedContainer(request.ExecutionID, existing, request.Spec); err != nil {
-				return Execution{
-					Container:   containers.Container{ID: existing.ID, Name: existing.Name},
-					Observation: existing,
-					Reservation: reservation,
-				}, errors.Join(cause, err)
-			}
-			if existing.Running {
-				return Execution{
-					Container:   containers.Container{ID: existing.ID, Name: existing.Name},
-					Observation: existing,
-					Reservation: reservation,
-				}, nil
-			}
-			observation, startErr := s.containers.Start(ctx, request.Spec.Ownership, existing.ID)
-			if startErr != nil {
-				return Execution{
-					Container:   containers.Container{ID: existing.ID, Name: existing.Name},
-					Observation: existing,
-					Reservation: reservation,
-				}, errors.Join(cause, fmt.Errorf("恢复执行 %s 的容器: %w", request.ExecutionID, startErr))
-			}
-			return Execution{
-				Container:   containers.Container{ID: observation.ID, Name: observation.Name},
-				Observation: observation,
-				Reservation: reservation,
-			}, nil
+			return s.adoptExisting(ctx, request, reservation, existing)
 		}
 		return Execution{}, s.releaseAfterFailure(ctx, request.ProjectID, request.ExecutionID, cause)
 	}
+
+	updated, err := s.reservations.SetContainerID(ctx, request.ProjectID, request.ExecutionID, createdContainer.ID)
+	if err != nil {
+		cause := fmt.Errorf("记录执行 %s 的容器标识: %w", request.ExecutionID, err)
+		return Execution{
+			Container:   createdContainer,
+			Reservation: reservation,
+		}, s.cleanupAfterStartFailure(ctx, request, createdContainer, cause)
+	}
+	reservation = updated
 
 	observation, err := s.containers.Start(ctx, request.Spec.Ownership, createdContainer.ID)
 	if err != nil {
@@ -243,10 +186,51 @@ func (s *Service) Start(ctx context.Context, request StartRequest) (Execution, e
 	}, nil
 }
 
+func (s *Service) adoptExisting(ctx context.Context, request StartRequest, reservation capacity.Reservation, existing containers.Observation) (Execution, error) {
+	if err := checkAdoptedContainer(request.ExecutionID, existing, request.Spec); err != nil {
+		return Execution{
+			Container:   containers.Container{ID: existing.ID, Name: existing.Name},
+			Observation: existing,
+			Reservation: reservation,
+		}, err
+	}
+	if reservation.ContainerID != existing.ID {
+		updated, err := s.reservations.SetContainerID(ctx, request.ProjectID, request.ExecutionID, existing.ID)
+		if err != nil {
+			return Execution{
+				Container:   containers.Container{ID: existing.ID, Name: existing.Name},
+				Observation: existing,
+				Reservation: reservation,
+			}, fmt.Errorf("记录执行 %s 的容器标识: %w", request.ExecutionID, err)
+		}
+		reservation = updated
+	}
+	if existing.Running {
+		return Execution{
+			Container:   containers.Container{ID: existing.ID, Name: existing.Name},
+			Observation: existing,
+			Reservation: reservation,
+		}, nil
+	}
+	observation, err := s.containers.Start(ctx, request.Spec.Ownership, existing.ID)
+	if err != nil {
+		return Execution{
+			Container:   containers.Container{ID: existing.ID, Name: existing.Name},
+			Observation: existing,
+			Reservation: reservation,
+		}, fmt.Errorf("恢复执行 %s 的容器: %w", request.ExecutionID, err)
+	}
+	return Execution{
+		Container:   containers.Container{ID: observation.ID, Name: observation.Name},
+		Observation: observation,
+		Reservation: reservation,
+	}, nil
+}
+
 // StopRequest asks to stop and remove one execution. ContainerID is the
-// identifier returned by Start; requiring it keeps capacity release tied to a
-// container whose ownership was verified. Stop releases capacity only after the
-// container is confirmed removed, and a repeated Stop is idempotent.
+// identifier returned by Start and must match the persisted reservation
+// binding. Stop releases capacity only after the bound container is confirmed
+// removed, and a repeated Stop is idempotent.
 type StopRequest struct {
 	ExecutionID uuid.UUID
 	ProjectID   uuid.UUID
@@ -273,9 +257,12 @@ func (r StopRequest) validate() error {
 	return nil
 }
 
-// Stop stops and removes the execution's container, then releases its capacity.
-// A missing container is treated as confirmed cleanup. If stopping or removing
-// fails, the reservation stays active.
+// Stop stops and removes the execution's bound container, then releases its
+// capacity. The recorded ownership and container identifier are verified before
+// any Docker operation. If the recorded container is already gone, the service
+// looks up the bound ownership before treating cleanup as confirmed; a missing
+// identifier alone never releases capacity. If stopping or removing fails, the
+// reservation stays active.
 func (s *Service) Stop(ctx context.Context, request StopRequest) error {
 	if err := request.validate(); err != nil {
 		return err
@@ -290,20 +277,106 @@ func (s *Service) Stop(ctx context.Context, request StopRequest) error {
 	if reservation.HostID != s.hostID {
 		return fmt.Errorf("停止执行 %s: 容量预留属于主机 %s，当前服务主机为 %s: %w", request.ExecutionID, reservation.HostID, s.hostID, fs.ErrInvalid)
 	}
+	if reservation.State == capacity.Released {
+		// Cleanup was already confirmed before release. A container with the
+		// same ownership now belongs to a newer execution and must not be
+		// touched by a repeated stop of the old execution.
+		return nil
+	}
+	if reservation.Binding == (capacity.Binding{}) {
+		return fmt.Errorf("%w: 执行 %s", capacity.ErrBindingNotFound, request.ExecutionID)
+	}
+	if !bindingMatchesOwnership(reservation.Binding, request.Ownership) {
+		return fmt.Errorf("%w: 执行 %s 的容器归属与预留不一致", ErrExecutionConflict, request.ExecutionID)
+	}
+	if reservation.ContainerID != "" && reservation.ContainerID != request.ContainerID {
+		return fmt.Errorf("%w: 执行 %s 的容器标识与预留不一致", ErrExecutionConflict, request.ExecutionID)
+	}
 
-	containerID := request.ContainerID
+	containerID := reservation.ContainerID
+	if containerID == "" {
+		observation, found, err := s.containers.Find(ctx, request.Ownership)
+		if err != nil {
+			return fmt.Errorf("查找执行 %s 的容器: %w", request.ExecutionID, err)
+		}
+		if !found {
+			return s.releaseAfterCleanup(ctx, request.ProjectID, request.ExecutionID)
+		}
+		if err := checkBoundContainer(reservation, observation); err != nil {
+			return err
+		}
+		updated, err := s.reservations.SetContainerID(ctx, request.ProjectID, request.ExecutionID, observation.ID)
+		if err != nil {
+			return fmt.Errorf("记录执行 %s 的容器标识: %w", request.ExecutionID, err)
+		}
+		reservation = updated
+		containerID = observation.ID
+	}
+
 	if err := s.containers.Stop(ctx, request.Ownership, containerID); err != nil && !errors.Is(err, containers.ErrNotFound) {
 		return fmt.Errorf("停止执行 %s 的容器 %s: %w", request.ExecutionID, containerID, err)
 	}
 	if err := s.containers.Remove(ctx, request.Ownership, containerID); err != nil && !errors.Is(err, containers.ErrNotFound) {
 		return fmt.Errorf("删除执行 %s 的容器 %s: %w", request.ExecutionID, containerID, err)
 	}
-	// Capacity is released only after the container is confirmed gone. Use a
-	// detached context so a cancelled request does not leak an already cleaned
-	// reservation.
-	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
-	defer cancel()
-	return s.release(releaseCtx, request.ProjectID, request.ExecutionID)
+
+	// The recorded identifier may be stale after a container was recreated or
+	// removed outside the service. Confirm by ownership before releasing.
+	observation, found, err := s.containers.Find(ctx, request.Ownership)
+	if err != nil {
+		return fmt.Errorf("确认执行 %s 的容器已删除: %w", request.ExecutionID, err)
+	}
+	if found {
+		if err := checkBoundContainer(reservation, observation); err != nil {
+			return err
+		}
+		updated, err := s.reservations.SetContainerID(ctx, request.ProjectID, request.ExecutionID, observation.ID)
+		if err != nil {
+			return fmt.Errorf("记录执行 %s 的容器标识: %w", request.ExecutionID, err)
+		}
+		reservation = updated
+		if err := s.containers.Stop(ctx, request.Ownership, observation.ID); err != nil && !errors.Is(err, containers.ErrNotFound) {
+			return fmt.Errorf("停止执行 %s 的容器 %s: %w", request.ExecutionID, observation.ID, err)
+		}
+		if err := s.containers.Remove(ctx, request.Ownership, observation.ID); err != nil && !errors.Is(err, containers.ErrNotFound) {
+			return fmt.Errorf("删除执行 %s 的容器 %s: %w", request.ExecutionID, observation.ID, err)
+		}
+		if _, stillFound, err := s.containers.Find(ctx, request.Ownership); err != nil {
+			return fmt.Errorf("确认执行 %s 的容器已删除: %w", request.ExecutionID, err)
+		} else if stillFound {
+			return fmt.Errorf("执行 %s 的容器仍然存在: %w", request.ExecutionID, fs.ErrInvalid)
+		}
+	}
+	return s.releaseAfterCleanup(ctx, request.ProjectID, request.ExecutionID)
+}
+
+func bindingFor(spec containers.Spec) capacity.Binding {
+	return capacity.Binding{
+		Environment: spec.Ownership.Environment,
+		Project:     spec.Ownership.Project,
+		Resource:    spec.Ownership.Resource,
+		Generation:  spec.Ownership.Generation,
+		Image:       spec.Image,
+	}
+}
+
+func bindingMatchesOwnership(binding capacity.Binding, ownership containers.Ownership) bool {
+	return binding.Environment == ownership.Environment &&
+		binding.Project == ownership.Project &&
+		binding.Resource == ownership.Resource &&
+		binding.Generation == ownership.Generation
+}
+
+func checkBoundContainer(reservation capacity.Reservation, existing containers.Observation) error {
+	if existing.Image != reservation.Binding.Image {
+		return fmt.Errorf("%w: 执行 %s 的绑定容器镜像 %q 与预留 %q 不一致", ErrExecutionConflict, reservation.ExecutionID, existing.Image, reservation.Binding.Image)
+	}
+	if existing.CPUMillis != reservation.Resources.CPUMillis || existing.MemoryBytes != reservation.Resources.MemoryBytes {
+		return fmt.Errorf("%w: 执行 %s 的绑定容器资源上限为 CPU %d 毫核、内存 %d 字节，预留为 CPU %d 毫核、内存 %d 字节",
+			ErrExecutionConflict, reservation.ExecutionID, existing.CPUMillis, existing.MemoryBytes,
+			reservation.Resources.CPUMillis, reservation.Resources.MemoryBytes)
+	}
+	return nil
 }
 
 func checkAdoptedContainer(executionID uuid.UUID, existing containers.Observation, spec containers.Spec) error {
@@ -313,6 +386,10 @@ func checkAdoptedContainer(executionID uuid.UUID, existing containers.Observatio
 	if existing.CPUMillis != spec.Limits.CPUMillis || existing.MemoryBytes != spec.Limits.MemoryBytes {
 		return fmt.Errorf("%w: 执行 %s 的容器资源上限为 CPU %d 毫核、内存 %d 字节，请求为 CPU %d 毫核、内存 %d 字节",
 			ErrExecutionConflict, executionID, existing.CPUMillis, existing.MemoryBytes, spec.Limits.CPUMillis, spec.Limits.MemoryBytes)
+	}
+	if existing.PIDs != spec.Limits.PIDs || existing.OpenFiles != spec.Limits.OpenFiles {
+		return fmt.Errorf("%w: 执行 %s 的容器限制为进程 %d、打开文件 %d，请求为进程 %d、打开文件 %d",
+			ErrExecutionConflict, executionID, existing.PIDs, existing.OpenFiles, spec.Limits.PIDs, spec.Limits.OpenFiles)
 	}
 	return nil
 }
@@ -341,8 +418,10 @@ func (s *Service) cleanupAfterStartFailure(ctx context.Context, request StartReq
 	return cause
 }
 
-func (s *Service) release(ctx context.Context, projectID, executionID uuid.UUID) error {
-	if _, err := s.reservations.Release(ctx, projectID, executionID); err != nil {
+func (s *Service) releaseAfterCleanup(ctx context.Context, projectID, executionID uuid.UUID) error {
+	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
+	defer cancel()
+	if _, err := s.reservations.Release(releaseCtx, projectID, executionID); err != nil {
 		return fmt.Errorf("释放执行 %s 的容量预留: %w", executionID, err)
 	}
 	return nil

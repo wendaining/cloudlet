@@ -345,7 +345,8 @@ func TestAdapterFind(t *testing.T) {
 		t.Fatalf("查找已创建容器返回 %+v, %t, %v", observation, found, err)
 	}
 	if observation.ID != created.ID || observation.Name != created.Name || observation.Running ||
-		observation.CPUMillis != spec.Limits.CPUMillis || observation.MemoryBytes != spec.Limits.MemoryBytes {
+		observation.CPUMillis != spec.Limits.CPUMillis || observation.MemoryBytes != spec.Limits.MemoryBytes ||
+		observation.PIDs != spec.Limits.PIDs || observation.OpenFiles != spec.Limits.OpenFiles {
 		t.Fatalf("已创建容器观测错误: %+v", observation)
 	}
 
