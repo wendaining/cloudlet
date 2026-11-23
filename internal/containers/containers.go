@@ -111,15 +111,25 @@ func (p PublishedPort) HostAddress() string {
 }
 
 // Observation is the inspected state of a managed container. Ports contains
-// only loopback bindings reported by Docker.
+// only loopback bindings reported by Docker. CPUMillis, MemoryBytes, PIDs and
+// OpenFiles are the enforced limits reported by Docker.
 type Observation struct {
-	ID       string
-	Name     string
-	Image    string
-	Status   string
-	Running  bool
-	ExitCode int
-	Ports    []PublishedPort
+	ID          string
+	Name        string
+	Image       string
+	Status      string
+	Running     bool
+	ExitCode    int
+	CPUMillis   int64
+	MemoryBytes int64
+	PIDs        int64
+	OpenFiles   int64
+	Ports       []PublishedPort
+}
+
+// Validate reports whether the ownership can identify a managed container.
+func (o Ownership) Validate() error {
+	return o.validate()
 }
 
 func (o Ownership) validate() error {
@@ -212,6 +222,11 @@ func (o Ownership) verifyLabels(labels map[string]string) error {
 		}
 	}
 	return nil
+}
+
+// Validate reports whether the spec can be passed to Create.
+func (s Spec) Validate() error {
+	return s.validate()
 }
 
 func (s Spec) validate() error {
@@ -352,6 +367,18 @@ func observe(info container.InspectResponse) (Observation, error) {
 	}
 	if observation.Image == "" {
 		observation.Image = info.Image
+	}
+	if info.HostConfig != nil {
+		observation.CPUMillis = info.HostConfig.NanoCPUs / 1_000_000
+		observation.MemoryBytes = info.HostConfig.Memory
+		if info.HostConfig.PidsLimit != nil {
+			observation.PIDs = *info.HostConfig.PidsLimit
+		}
+		for _, limit := range info.HostConfig.Ulimits {
+			if limit.Name == "nofile" {
+				observation.OpenFiles = limit.Soft
+			}
+		}
 	}
 	ports, err := publishedPorts(info.NetworkSettings)
 	if err != nil {

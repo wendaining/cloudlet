@@ -8,7 +8,7 @@ import { Projects } from './Projects';
 import { ProjectDetail } from './ProjectDetail';
 import styles from './app.module.css';
 
-function Home() {
+function AuthenticatedRoutes() {
   const account = useQuery({ queryKey: ['session'], queryFn: session });
   if (account.isPending)
     return (
@@ -30,16 +30,17 @@ function Home() {
         />
       </main>
     );
-  return account.data ? <Overview session={account.data} /> : <Login />;
-}
-
-export function App() {
+  if (!account.data) return <Login />;
   return (
     <Routes>
-      <Route path="/" element={<Home />} />
+      <Route path="/" element={<Overview session={account.data} />} />
       <Route path="/projects" element={<Projects />} />
       <Route path="/projects/:projectID" element={<ProjectDetail />} />
       <Route path="*" element={<Result status="404" title="页面不存在" />} />
     </Routes>
   );
+}
+
+export function App() {
+  return <AuthenticatedRoutes />;
 }
