@@ -33,7 +33,10 @@ var (
 // container's actual published loopback endpoint. Port is the container TCP
 // port whose Docker-reported host binding is requested, Path is the origin-form
 // request path, Timeout is the overall probe deadline, Interval is the pause
-// between attempts, and Statuses lists the accepted HTTP status codes.
+// between attempts, and Statuses lists the accepted final HTTP status codes
+// between 200 and 599. Informational responses are rejected because net/http
+// consumes 1xx responses other than 101 before returning the final response,
+// and 101 is a protocol switch rather than a readiness result.
 type ReadinessProbe struct {
 	Port     uint16
 	Path     string
@@ -258,8 +261,8 @@ func (p ReadinessProbe) validate() error {
 		return fmt.Errorf("validate readiness probe: at least one accepted status is required: %w", fs.ErrInvalid)
 	}
 	for _, status := range p.Statuses {
-		if status < 100 || status > 599 {
-			return fmt.Errorf("validate readiness probe: status %d must be between 100 and 599: %w", status, fs.ErrInvalid)
+		if status < 200 || status > 599 {
+			return fmt.Errorf("validate readiness probe: status %d must be a final response between 200 and 599: %w", status, fs.ErrInvalid)
 		}
 	}
 	return nil

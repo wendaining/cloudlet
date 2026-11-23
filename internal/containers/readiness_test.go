@@ -84,6 +84,9 @@ func TestReadinessProbeValidate(t *testing.T) {
 		{"negative interval", func(p *ReadinessProbe) { p.Interval = -time.Millisecond }},
 		{"no statuses", func(p *ReadinessProbe) { p.Statuses = nil }},
 		{"status below range", func(p *ReadinessProbe) { p.Statuses = []int{99} }},
+		{"informational status 100", func(p *ReadinessProbe) { p.Statuses = []int{100} }},
+		{"switching protocols status 101", func(p *ReadinessProbe) { p.Statuses = []int{101} }},
+		{"informational status 199", func(p *ReadinessProbe) { p.Statuses = []int{199} }},
 		{"status above range", func(p *ReadinessProbe) { p.Statuses = []int{600} }},
 	}
 	for _, test := range tests {
@@ -105,11 +108,26 @@ func TestReadinessProbeValidateAcceptsQueryAndStatusRange(t *testing.T) {
 			t.Fatalf("validate() with path %q = %v", path, err)
 		}
 	}
-	for _, status := range []int{100, 200, 204, 302, 404, 503, 599} {
+	for _, status := range []int{200, 204, 302, 404, 503, 599} {
 		probe := validReadinessProbe()
 		probe.Statuses = []int{status}
 		if err := probe.validate(); err != nil {
 			t.Fatalf("validate() with status %d = %v", status, err)
+		}
+	}
+}
+
+func TestWaitReadyRejectsInformationalStatusBeforeDocker(t *testing.T) {
+	// A nil Docker client proves validation happens before any container
+	// observation. Informational responses are consumed by net/http, so they
+	// cannot be used as readiness outcomes.
+	adapter := &Adapter{}
+	for _, status := range []int{100, 101, 103, 199} {
+		probe := validReadinessProbe()
+		probe.Statuses = []int{status}
+		_, err := adapter.WaitReady(context.Background(), validOwnership(), "0123456789ab", probe)
+		if err == nil || !errors.Is(err, fs.ErrInvalid) || !strings.Contains(err.Error(), "final response") {
+			t.Fatalf("WaitReady() with status %d = %v, want final-response validation error", status, err)
 		}
 	}
 }
