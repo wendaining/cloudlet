@@ -63,6 +63,13 @@ test('non-root Chromium navigates, captures PNG and shuts down', { timeout: 3000
         body { font-family: Slow, sans-serif; }</style><body>Pending font</body>`);
     } else if (request.url === '/viewport') {
       response.end(`${html}<script>document.title = [innerWidth, innerHeight, devicePixelRatio].join('x');</script>`);
+    } else if (request.url === '/custom-window-properties') {
+      response.end(`${html}<script>
+        Object.defineProperties(window, {
+          innerWidth: { value: 400 }, innerHeight: { value: 300 }, devicePixelRatio: { value: 1 },
+        });
+        document.title = [innerWidth, innerHeight, devicePixelRatio].join('x');
+      </script>`);
     } else if (request.url === '/large-image') {
       response.end(`${html}<style>body { margin: 0; }</style><canvas width="1280" height="720"></canvas>
         <script>
@@ -225,6 +232,12 @@ test('non-root Chromium navigates, captures PNG and shuts down', { timeout: 3000
   response = await navigate({ url: `${url}/viewport` });
   assert.equal(response.status, 200);
   assert.equal((await response.json()).title, '640x480x1.5');
+  response = await queryViewport();
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { width: 640, height: 480, device_scale_factor: 1.5 });
+  response = await navigate({ url: `${url}/custom-window-properties` });
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).title, '400x300x1');
   response = await queryViewport();
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { width: 640, height: 480, device_scale_factor: 1.5 });

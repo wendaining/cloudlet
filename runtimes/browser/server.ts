@@ -62,7 +62,7 @@ function isWebURL(url: string) {
 
 const browser = await chromium.launch({ chromiumSandbox: true, handleSIGTERM: false, handleSIGINT: false });
 let stopping = false;
-let activeCommand: 'navigation' | 'screenshot' | 'viewport' | undefined;
+let activeCommand: 'navigation' | 'screenshot' | undefined;
 let hasPage = false;
 const server = createServer({ requestTimeout: 15000, headersTimeout: 5000 }, (request, response) => {
   void handle(request, response).catch(() => {
@@ -129,8 +129,8 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
     send(response, 401, { error: 'unauthorized' });
     return;
   }
-  const command = viewport ? { timeout: defaultTimeout, url: undefined } : await readCommand(request, screenshot);
-  if (command.error) {
+  const command = viewport ? undefined : await readCommand(request, screenshot);
+  if (command?.error) {
     if (command.status === 413) {
       response.setHeader('Connection', 'close');
       request.resume();
@@ -142,22 +142,27 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
     send(response, 409, { error: `${activeCommand}_in_progress` });
     return;
   }
+  if (!command) {
+    const size = page.viewportSize();
+    if (!size || page.isClosed()) {
+      send(response, 502, { error: 'viewport_failed' });
+      return;
+    }
+    send(response, 200, { ...size, device_scale_factor: viewportOptions.deviceScaleFactor });
+    return;
+  }
   if (screenshot && (!hasPage || page.isClosed() || !isWebURL(page.url()))) {
     send(response, 409, { error: 'no_page' });
     return;
   }
 
-  activeCommand = viewport ? 'viewport' : screenshot ? 'screenshot' : 'navigation';
+  activeCommand = screenshot ? 'screenshot' : 'navigation';
   let expired = false;
   const timer = new AbortController();
   try {
     const result = await Promise.race([
       delay(command.timeout, undefined, { signal: timer.signal }),
-      viewport ? page.evaluate(() => ({
-        width: window.innerWidth,
-        height: window.innerHeight,
-        device_scale_factor: window.devicePixelRatio,
-      })) : command.url ? navigate(command.url) : page.screenshot({ type: 'png', fullPage: false, timeout: 0 }),
+      command.url ? navigate(command.url) : page.screenshot({ type: 'png', fullPage: false, timeout: 0 }),
     ]);
     if (result) {
       if (!Buffer.isBuffer(result)) {
