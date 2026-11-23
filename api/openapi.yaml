@@ -152,6 +152,30 @@ paths:
           $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
+    patch:
+      operationId: renameProject
+      description: 更新项目显示名称；仅项目所有者可以调用，项目 ID 与成员关系保持不变。
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RenameProjectRequest'
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          $ref: '#/components/responses/Project'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
   /api/v1/projects/{projectID}/members:
     parameters:
       - name: projectID
@@ -251,6 +275,14 @@ components:
           type: integer
           format: int64
     CreateProjectRequest:
+      type: object
+      additionalProperties: false
+      required: [name]
+      properties:
+        name:
+          type: string
+          description: 服务端去除首尾空白后必须包含 1 至 100 个 Unicode 字符；原始字符串可以包含首尾空白。
+    RenameProjectRequest:
       type: object
       additionalProperties: false
       required: [name]

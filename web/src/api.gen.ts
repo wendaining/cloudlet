@@ -133,7 +133,8 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /** @description 更新项目显示名称；仅项目所有者可以调用，项目 ID 与成员关系保持不变。 */
+        patch: operations["renameProject"];
         trace?: never;
     };
     "/api/v1/projects/{projectID}/members": {
@@ -178,6 +179,10 @@ export interface components {
             database_version: number;
         };
         CreateProjectRequest: {
+            /** @description 服务端去除首尾空白后必须包含 1 至 100 个 Unicode 字符；原始字符串可以包含首尾空白。 */
+            name: string;
+        };
+        RenameProjectRequest: {
             /** @description 服务端去除首尾空白后必须包含 1 至 100 个 Unicode 字符；原始字符串可以包含首尾空白。 */
             name: string;
         };
@@ -447,6 +452,29 @@ export interface operations {
         responses: {
             200: components["responses"]["Project"];
             401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    renameProject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RenameProjectRequest"];
+            };
+        };
+        responses: {
+            200: components["responses"]["Project"];
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
