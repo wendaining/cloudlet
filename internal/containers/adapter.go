@@ -15,11 +15,11 @@ import (
 	"github.com/moby/moby/client"
 )
 
-// Adapter manages containers on one Docker Engine. It is safe for concurrent
-// use. The caller owns the Docker client and must close it after the adapter is
-// no longer used. Every operation other than Create inspects the container
-// first and returns ErrNotOwned when its canonical name or ownership labels do
-// not match.
+// Adapter manages containers and images on one Docker Engine. It is safe for
+// concurrent use. The caller owns the Docker client and must close it after the
+// adapter is no longer used. Every container operation other than Create
+// inspects the container first and returns ErrNotOwned when its canonical name
+// or ownership labels do not match.
 type Adapter struct {
 	docker *client.Client
 }
