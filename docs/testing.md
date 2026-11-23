@@ -54,6 +54,8 @@ go test -race -count=1 -tags=integration -v ./internal/workers
 
 同一入口中的 `TestWorkerdPersistsDurableObjectSQLite` 通过 HTTP 调用名为 `alpha` 和 `beta` 的两个对象。两个对象使用相同的 SQL 表和键保存各自的值。测试停止第一个容器，用原数据卷启动新容器，然后确认两个对象的标识和各自的值都保持不变。
 
+`TestWorkerPreflightReportsRuntimePhase` 使用真实 workerd 分别载入可运行模块、语法错误模块和初始化报错模块，检查返回阶段为 `ready`、`load` 和 `initialize`。
+
 ## Browser Run 验证
 
 在 Node.js 24 和本机 Linux Docker Engine 下执行：
