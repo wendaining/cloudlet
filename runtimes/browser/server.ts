@@ -1,7 +1,7 @@
 import { timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { setTimeout as delay } from 'node:timers/promises';
-import { chromium, type Page } from 'playwright';
+import { chromium, errors, type Page } from 'playwright';
 import { readSessionDeadline } from './session-deadline.ts';
 import { readViewport } from './viewport.ts';
 
@@ -62,11 +62,16 @@ function isWebURL(url: string) {
   return url.startsWith('http:') || url.startsWith('https:');
 }
 
+const launchTimeout = 30000;
+const remainingAtLaunch = sessionDeadline === undefined ? Infinity : sessionDeadline - Date.now();
 const browser = await chromium.launch({
   chromiumSandbox: true, handleSIGTERM: false, handleSIGINT: false,
-  timeout: sessionDeadline === undefined ? 30000 : Math.min(30000, Math.max(1, sessionDeadline - Date.now())),
+  timeout: Math.min(launchTimeout, Math.max(1, remainingAtLaunch)),
 }).catch((error: unknown) => {
-  if (sessionDeadline !== undefined && Date.now() >= sessionDeadline) process.exit(0);
+  if (error instanceof errors.TimeoutError && remainingAtLaunch <= launchTimeout &&
+      sessionDeadline !== undefined && Date.now() >= sessionDeadline) {
+    process.exit(0);
+  }
   throw error;
 });
 let stopping = false;

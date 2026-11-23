@@ -20,9 +20,13 @@ test('validates UTC session deadline and rejects expired or invalid configuratio
   assert.equal(readSessionDeadline(undefined, now), undefined);
   assert.equal(readSessionDeadline('2030-01-01T00:00:00.001Z', now), now + 1);
   assert.equal(readSessionDeadline('2030-01-01T00:00:01Z', now), now + 1000);
+  assert.equal(readSessionDeadline('2030-01-01T00:00:00.5Z', now), now + 500);
+  assert.equal(readSessionDeadline('2030-01-01T00:00:00.12Z', now), now + 120);
+  assert.equal(readSessionDeadline('2030-01-01T00:00:00.123456789Z', now), now + 123);
+  assert.equal(readSessionDeadline('2030-01-01T00:00:01.000000Z', now), now + 1000);
   assert.throws(() => readSessionDeadline('2030-01-01T00:00:00Z', now), /future/);
   assert.throws(() => readSessionDeadline('2029-12-31T23:59:59Z', now), /future/);
-  for (const value of ['', '2030-02-30T00:00:00Z', '2030-01-01T00:00:00+00:00']) {
+  for (const value of ['', '2030-02-30T00:00:00Z', '2030-01-01T00:00:00+00:00', '2030-01-01T00:00:00.1234567890Z']) {
     assert.throws(() => readSessionDeadline(value, now), /UTC timestamp/);
   }
 });
@@ -163,7 +167,7 @@ test('non-root Chromium navigates, captures PNG and shuts down', { timeout: 3000
     'create', '--name', expiring, '--init', '--cap-drop=ALL', '--shm-size=256m',
     '--security-opt', 'no-new-privileges', '--security-opt', `seccomp=${seccomp}`,
     '-p', '127.0.0.1::8080', '-e', 'CLOUDLET_BROWSER_TOKEN',
-    '-e', `CLOUDLET_BROWSER_DEADLINE=${new Date(deadline).toISOString()}`, image,
+    '-e', `CLOUDLET_BROWSER_DEADLINE=${new Date(deadline).toISOString().replace('Z', '123456Z')}`, image,
   ], { ...process.env, CLOUDLET_BROWSER_TOKEN: token });
   try {
     await docker(['start', expiring]);
@@ -189,6 +193,16 @@ test('non-root Chromium navigates, captures PNG and shuts down', { timeout: 3000
   } finally {
     await docker(['rm', '-f', expiring]);
   }
+
+  await assert.rejects(
+    docker([
+      'run', '--rm', '--init', '--cap-drop=ALL', '--security-opt', `seccomp=${seccomp}`,
+      '-e', 'CLOUDLET_BROWSER_TOKEN',
+      '-e', `CLOUDLET_BROWSER_DEADLINE=${new Date(Date.now() + 30000).toISOString()}`,
+      '-e', 'PLAYWRIGHT_BROWSERS_PATH=/no-browser-installed', image,
+    ], { ...process.env, CLOUDLET_BROWSER_TOKEN: token }),
+    { code: 1, stderr: /Executable doesn't exist/ },
+  );
 
   const url = `http://host.test:${fixture.address().port}`;
   const command = (path, input, key = token) => fetch(`${origin}${path}`, {

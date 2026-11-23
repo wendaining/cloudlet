@@ -75,7 +75,7 @@ docker build -t cloudlet-browser:check runtimes/browser
 npm --prefix runtimes/browser run test:integration
 ```
 
-集成测试自行构建镜像，启动非 root Chromium 容器，并使用测试进程提供的真实 HTTP 页面验证导航地址和标题。测试解码截图并检查 1280 × 720 的尺寸与页面像素，也覆盖无效凭据、没有可截图页面和超出 2 MiB 上限的结果。测试让 Chromium 等待未响应的页面或字体，分别验证导航和截图返回 504 并退出，并检查收到 SIGTERM 后正常退出。容器通过 `host-gateway` 访问测试页面，内部接口只发布至主机回环地址。Docker 主机需支持 Chromium sandbox 使用的用户命名空间。
+集成测试自行构建镜像，启动非 root Chromium 容器，并使用测试进程提供的真实 HTTP 页面验证导航地址和标题。测试解码截图并检查 1280 × 720 的尺寸与页面像素，也覆盖无效凭据、没有可截图页面和超出 2 MiB 上限的结果。测试让 Chromium 等待未响应的页面或字体，分别验证导航和截图返回 504 并退出，并检查收到 SIGTERM 后正常退出。期限用例验证 RFC 3339 时间边界、纳秒格式下容器自行退出以及 Chromium 启动失败时保留实际错误。容器通过 `host-gateway` 访问测试页面，内部接口只发布至主机回环地址。Docker 主机需支持 Chromium sandbox 使用的用户命名空间。
 
 ## 容器执行适配器验收
 
