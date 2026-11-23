@@ -43,7 +43,10 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		return fmt.Errorf("listen gateway: %w", err)
 	}
 	defer gatewayListener.Close()
-	management, closeSessions := controlplane.NewHandler(store, cfg, logger)
+	management, closeSessions, err := controlplane.NewHandler(store, cfg, logger)
+	if err != nil {
+		return err
+	}
 	defer closeSessions()
 	api := newServer(management)
 	front := newServer(proxy)

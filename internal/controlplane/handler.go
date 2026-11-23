@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/wendaining/cloudlet/internal/apigen"
+	"github.com/wendaining/cloudlet/internal/capacity"
 	"github.com/wendaining/cloudlet/internal/config"
 	"github.com/wendaining/cloudlet/internal/database"
 	"github.com/wendaining/cloudlet/internal/version"
@@ -25,13 +27,21 @@ import (
 
 type handler struct {
 	store    *database.Store
+	capacity *capacity.Store
 	sessions *scs.SessionManager
 	config   config.Config
 	logger   *slog.Logger
 }
 
-func NewHandler(store *database.Store, cfg config.Config, logger *slog.Logger) (http.Handler, func()) {
+func NewHandler(store *database.Store, cfg config.Config, logger *slog.Logger) (http.Handler, func(), error) {
 	h := &handler{store: store, config: cfg, logger: logger}
+	if store != nil {
+		capacityStore, err := capacity.NewStore(store.DB)
+		if err != nil {
+			return nil, func() {}, fmt.Errorf("初始化容量存储: %w", err)
+		}
+		h.capacity = capacityStore
+	}
 	router := gin.New()
 	router.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 	router.GET("/readyz", func(c *gin.Context) {
@@ -48,7 +58,7 @@ func NewHandler(store *database.Store, cfg config.Config, logger *slog.Logger) (
 	})
 	apigen.RegisterHandlers(router, h)
 	if store == nil {
-		return router, func() {}
+		return router, func() {}, nil
 	}
 	sessionStore := postgresstore.New(store.SQL)
 	h.sessions = scs.New()
@@ -66,7 +76,7 @@ func NewHandler(store *database.Store, cfg config.Config, logger *slog.Logger) (
 		w.WriteHeader(http.StatusInternalServerError)
 		json.NewEncoder(w).Encode(apigen.Error{Message: "会话存储失败"})
 	}
-	return http.NewCrossOriginProtection().Handler(h.sessions.LoadAndSave(router)), sessionStore.StopCleanup
+	return http.NewCrossOriginProtection().Handler(h.sessions.LoadAndSave(router)), sessionStore.StopCleanup, nil
 }
 
 func (h *handler) GetVersion(c *gin.Context) { c.JSON(http.StatusOK, version.Current()) }
@@ -210,6 +220,30 @@ func (h *handler) GetProject(c *gin.Context, projectID string) {
 		return
 	}
 	c.JSON(http.StatusOK, projectResponse(project))
+}
+
+// GetProjectCapacity exposes the project quota and active usage. Host budgets
+// remain internal because they aggregate usage across projects.
+func (h *handler) GetProjectCapacity(c *gin.Context, projectID string) {
+	_, normalizedID, _, ok := h.projectAccess(c, projectID)
+	if !ok {
+		return
+	}
+	usage, err := h.capacity.ProjectUsage(c.Request.Context(), uuid.MustParse(normalizedID))
+	if errors.Is(err, capacity.ErrProjectQuotaNotFound) {
+		c.JSON(http.StatusNotFound, apigen.Error{Message: "项目配额未配置"})
+		return
+	}
+	if err != nil {
+		h.failure(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, apigen.ProjectCapacity{
+		ProjectId: usage.ProjectID,
+		Limit:     resourceAmounts(usage.Limit),
+		Used:      resourceAmounts(usage.Used),
+		Remaining: resourceAmounts(usage.Remaining),
+	})
 }
 
 func (h *handler) ListProjectMembers(c *gin.Context, projectID string) {
@@ -358,6 +392,14 @@ func (h *handler) projectAccess(c *gin.Context, projectID string) (database.User
 
 func projectResponse(project database.Project) apigen.Project {
 	return apigen.Project{Id: uuid.MustParse(project.ID), Name: project.Name}
+}
+
+func resourceAmounts(resources capacity.Resources) apigen.ResourceAmounts {
+	return apigen.ResourceAmounts{
+		CpuMillis:   resources.CPUMillis,
+		MemoryBytes: resources.MemoryBytes,
+		Instances:   resources.Instances,
+	}
 }
 
 func (h *handler) currentUser(c *gin.Context) (database.User, bool) {

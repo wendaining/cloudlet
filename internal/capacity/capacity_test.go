@@ -1,6 +1,7 @@
 package capacity
 
 import (
+	"context"
 	"errors"
 	"io/fs"
 	"strings"
@@ -60,6 +61,18 @@ func TestRequestValidate(t *testing.T) {
 				t.Fatalf("无效预留请求返回 %v，要求 fs.ErrInvalid", err)
 			}
 		})
+	}
+}
+
+func TestRemainingResources(t *testing.T) {
+	limit := Resources{CPUMillis: 4000, MemoryBytes: 4 << 30, Instances: 4}
+	used := Resources{CPUMillis: 3000, MemoryBytes: 3 << 30, Instances: 2}
+	if actual := remainingResources(limit, used); actual != (Resources{CPUMillis: 1000, MemoryBytes: 1 << 30, Instances: 2}) {
+		t.Fatalf("剩余容量返回 %+v", actual)
+	}
+	overused := Resources{CPUMillis: 5000, MemoryBytes: 5 << 30, Instances: 5}
+	if actual := remainingResources(limit, overused); actual != (Resources{}) {
+		t.Fatalf("超用后的剩余容量返回 %+v，要求零值", actual)
 	}
 }
 
@@ -165,5 +178,12 @@ func TestValidateHostID(t *testing.T) {
 func TestNewStoreRejectsNilDatabase(t *testing.T) {
 	if _, err := NewStore(nil); err == nil {
 		t.Fatal("空数据库连接创建存储未返回错误")
+	}
+}
+
+func TestProjectUsageRejectsNilProject(t *testing.T) {
+	store := &Store{}
+	if _, err := store.ProjectUsage(context.Background(), uuid.Nil); !errors.Is(err, fs.ErrInvalid) {
+		t.Fatalf("空项目标识查询容量返回 %v，要求 fs.ErrInvalid", err)
 	}
 }

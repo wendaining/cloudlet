@@ -8,7 +8,7 @@
 | npm run lint:config | JSON、YAML、Issue 表单与 Actions 约定 |
 | npm run lint:tooling | 脚本语法、ShellCheck、配置文件与真实端口检查 |
 | make test | Go race 测试、真实 HTTP、Gateway 转发与服务停止 |
-| make test-integration | Docker 中的 PostgreSQL 迁移、账号、会话、项目与成员角色、操作记录、容量预留、就绪检查、workerd 执行和容器创建、启动、观测、停止与删除 |
+| make test-integration | Docker 中的 PostgreSQL 迁移、账号、会话、项目与成员角色、操作记录、容量预留、项目容量查询、就绪检查、workerd 执行和容器创建、启动、观测、停止与删除 |
 | make web-check | TypeScript、ESLint、Prettier、Vite 构建与接口生成一致性 |
 | make dev-check | 真实本机进程、数据库、热重载、完整停止、多实例与失败清理 |
 | make test-e2e | 真实 Chromium 在桌面和手机尺寸下完成登录、刷新和退出 |
@@ -39,6 +39,16 @@ go test -race -count=1 -tags=integration ./internal/capacity
 ```
 
 用例并发申请最后一份容量，确认只有一个请求成功；同一执行标识重复申请只产生一条活动预留；不同项目共享主机预算；释放后其他项目可以重新申请；已释放标识不能再次预留；配额低于当前占用时返回冲突。回归用例将数据库默认隔离级别设为 REPEATABLE READ，验证写事务仍显式按 READ COMMITTED 读取最新占用，并发申请最后一份容量仍只有一个请求成功。
+
+## 项目容量查询验收
+
+项目容量查询使用真实 PostgreSQL 和 HTTP 管理 API，验证项目成员读取项目额度、活动预留占用与剩余量。
+
+```sh
+go test -race -count=1 -tags=integration ./internal/controlplane
+```
+
+用例创建两个实际预留，确认查询结果等于两项之和；释放其中一项后再次查询，确认占用减少且剩余量增加；查看者可以读取，非成员、未知项目和未配置配额返回 404，未登录返回 401。接口在 REPEATABLE READ 只读事务中读取配额和占用，两个值来自同一快照。剩余量只表示项目配额内的余量，不表示主机当前余量。
 
 ## workerd 集成验证
 

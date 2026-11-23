@@ -22,7 +22,10 @@ import (
 )
 
 func TestGatewayAndClientAgainstManagementAPI(t *testing.T) {
-	management, cleanup := controlplane.NewHandler(nil, config.Config{}, slog.Default())
+	management, cleanup, err := controlplane.NewHandler(nil, config.Config{}, slog.Default())
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer cleanup()
 	api := httptest.NewServer(management)
 	defer api.Close()

@@ -61,6 +61,7 @@ PostgreSQL 当前保存账号、登录会话、项目、操作记录与容量预
 | /api/v1/environment | GET | 返回当前实例与数据库版本，需要登录 |
 | /api/v1/projects | GET、POST | 列出当前用户可见项目，创建项目并授予创建者 owner 角色 |
 | /api/v1/projects/{projectID} | GET | 读取当前用户可访问的项目 |
+| /api/v1/projects/{projectID}/capacity | GET | 项目成员读取项目额度、活动预留占用与剩余量 |
 | /api/v1/projects/{projectID}/operations | GET | 按时间升序读取项目内操作 |
 | /api/v1/projects/{projectID}/members | GET、POST | 列出项目成员；所有者添加已有账号或更新 developer/viewer 角色 |
 
@@ -86,7 +87,7 @@ API 与 Gateway 使用 HTTP 头读取超时和空闲连接超时。收到 SIGTER
 
 ## 容量预留
 
-`internal/capacity` 在 PostgreSQL 事务中同时检查主机预算和项目配额。`Reserve` 以执行标识为全局幂等键，登记 CPU 毫核、内存字节与实例数；主机容量行和项目配额行按固定顺序加锁，因此多个项目共享同一主机预算时不会超额。`Release` 在调用方确认执行与副作用清理完成后释放，重复调用保持幂等，已释放的执行标识不能再次预留。`Usage` 汇总活动预留，执行结果不明时预留继续占用容量。写事务显式使用 READ COMMITTED，确保获得行锁后读取已提交的最新占用；`Usage` 使用 REPEATABLE READ 读取一致快照。降低主机容量或项目配额低于当前占用时返回冲突。Docker 准入由 #52 接入。
+`internal/capacity` 在 PostgreSQL 事务中同时检查主机预算和项目配额。`Reserve` 以执行标识为全局幂等键，登记 CPU 毫核、内存字节与实例数；主机容量行和项目配额行按固定顺序加锁，因此多个项目共享同一主机预算时不会超额。`Release` 在调用方确认执行与副作用清理完成后释放，重复调用保持幂等，已释放的执行标识不能再次预留。`Usage` 汇总活动预留，执行结果不明时预留继续占用容量。写事务显式使用 READ COMMITTED，确保获得行锁后读取已提交的最新占用；`Usage` 使用 REPEATABLE READ 读取一致快照。降低主机容量或项目配额低于当前占用时返回冲突。项目成员可通过 `GET /api/v1/projects/{projectID}/capacity` 查询项目额度、活动预留占用和剩余量；该接口在 REPEATABLE READ 只读事务中同时读取配额与占用，非成员按 404 拒绝。剩余量只表示项目配额内的余量，实际启动仍同时受主机预算约束。Docker 准入由 #52 接入。
 
 ## 执行环境
 
