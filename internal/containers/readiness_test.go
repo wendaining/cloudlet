@@ -188,6 +188,64 @@ func TestWaitReadyAcceptsConfiguredStatus(t *testing.T) {
 	}
 }
 
+func TestWaitReadyStopsWhenAcceptedBodyStaysOpen(t *testing.T) {
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.WriteHeader(http.StatusOK)
+		writer.(http.Flusher).Flush()
+		<-release
+	}))
+	defer server.Close()
+	defer close(release)
+
+	probe := validReadinessProbe()
+	probe.Timeout = 2 * time.Second
+	start := time.Now()
+	readiness, err := waitForHTTP(context.Background(), newProbeClient(), probe, fixedObservation(probeObservation(t, server.Listener.Addr().String(), true)))
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !readiness.Ready || readiness.StatusCode != http.StatusOK || readiness.Attempts != 1 {
+		t.Fatalf("readiness = %+v, want ready after the first status", readiness)
+	}
+	if elapsed > time.Second {
+		t.Fatalf("elapsed = %s, want the probe to stop when the accepted status arrives", elapsed)
+	}
+}
+
+func TestWaitReadyRetriesWhenRejectedBodyStaysOpen(t *testing.T) {
+	release := make(chan struct{})
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		if requests.Add(1) == 1 {
+			writer.WriteHeader(http.StatusServiceUnavailable)
+			writer.(http.Flusher).Flush()
+			<-release
+			return
+		}
+		writer.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	defer close(release)
+
+	probe := validReadinessProbe()
+	probe.Timeout = 2 * time.Second
+	probe.Interval = 10 * time.Millisecond
+	start := time.Now()
+	readiness, err := waitForHTTP(context.Background(), newProbeClient(), probe, fixedObservation(probeObservation(t, server.Listener.Addr().String(), true)))
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !readiness.Ready || readiness.StatusCode != http.StatusOK || readiness.Attempts != 2 {
+		t.Fatalf("readiness = %+v, want ready on the second attempt", readiness)
+	}
+	if elapsed > time.Second {
+		t.Fatalf("elapsed = %s, want the rejected streaming body to be closed immediately", elapsed)
+	}
+}
+
 func TestWaitReadyTimesOut(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
 		writer.WriteHeader(http.StatusServiceUnavailable)

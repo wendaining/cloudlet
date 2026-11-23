@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"net/http"
 	"net/url"
@@ -18,10 +17,6 @@ const (
 	// maxProbePath bounds the request path so a malformed configuration cannot
 	// build an unbounded request URL.
 	maxProbePath = 2048
-	// maxProbeBody bounds how much of a readiness response is read before the
-	// connection is closed. Readiness is decided by the status code, but the
-	// body is drained so keep-alive connections remain reusable.
-	maxProbeBody = 4 << 10
 	// maxProbeHeaderBytes bounds response headers from a container so a
 	// misbehaving service cannot make the probe allocate an unbounded buffer.
 	maxProbeHeaderBytes = 64 << 10
@@ -171,9 +166,9 @@ func waitForHTTP(ctx context.Context, client *http.Client, probe ReadinessProbe,
 	}
 }
 
-// probeOnce sends one HTTP GET request and drains a bounded amount of the
-// response body. The status code is returned even when draining fails so the
-// caller can record the last observed response.
+// probeOnce sends one HTTP GET request and returns the response status code.
+// Readiness is decided solely by the status code, so the response body is
+// closed without being read; a streaming body must not delay the probe.
 func probeOnce(ctx context.Context, client *http.Client, endpoint string) (int, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
@@ -184,14 +179,6 @@ func probeOnce(ctx context.Context, client *http.Client, endpoint string) (int, 
 		return 0, err
 	}
 	defer response.Body.Close()
-	// A switching-protocols response hands the connection to another protocol;
-	// draining it would wait for an unrelated stream instead of the HTTP
-	// response.
-	if response.StatusCode != http.StatusSwitchingProtocols {
-		if _, err := io.Copy(io.Discard, io.LimitReader(response.Body, maxProbeBody)); err != nil {
-			return response.StatusCode, fmt.Errorf("read readiness response: %w", err)
-		}
-	}
 	return response.StatusCode, nil
 }
 
