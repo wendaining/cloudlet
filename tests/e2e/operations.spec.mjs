@@ -34,17 +34,15 @@ test("项目详情通过真实 API 展示操作状态与空态", async ({ page }
   );
   expect(seeded).toHaveLength(3);
 
-  const responsePromise = page.waitForResponse(
-    (response) =>
-      response.url().includes(`/api/v1/projects/${projectID}/operations`) &&
-      response.status() === 200,
+  const response = await page.request.get(
+    `/api/v1/projects/${projectID}/operations`,
   );
-  await page.reload();
-  const response = await responsePromise;
+  expect(response.ok()).toBeTruthy();
   const operations = await response.json();
   expect(operations.map((operation) => operation.id).sort()).toEqual(
     seeded.map((operation) => operation.ID).sort(),
   );
+  await page.reload();
   const operationCard = page.locator(".ant-card").filter({
     has: page.getByText("操作记录", { exact: true }),
   });
@@ -59,7 +57,9 @@ test("项目详情通过真实 API 展示操作状态与空态", async ({ page }
     .filter({ hasText: "e2e_deploy_succeeded" });
   await expect(succeeded).toContainText("准备中");
   await expect(succeeded).toContainText("成功");
-  const failed = page.getByRole("row").filter({ hasText: "e2e_deploy_failed" });
+  const failed = operationCard
+    .getByRole("row")
+    .filter({ hasText: "e2e_deploy_failed" });
   await expect(failed).toContainText("已接收");
   await expect(failed).toContainText("失败");
   await expect(failed.locator("code")).toHaveText(
@@ -105,5 +105,15 @@ test("项目详情通过真实 API 展示操作状态与空态", async ({ page }
   await page.getByRole("button", { name: "创建项目", exact: true }).click();
   await expect(page.getByText("操作记录", { exact: true })).toBeVisible();
   await expect(page.getByText("暂无操作记录")).toBeVisible();
+
+  await page.evaluate(async () => {
+    const response = await fetch("/api/v1/auth/logout", { method: "POST" });
+    if (!response.ok) throw new Error(`logout returned ${response.status}`);
+  });
+  await page.reload();
+  await expect(
+    page.getByRole("button", { name: "登录", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("操作记录", { exact: true })).toHaveCount(0);
   expect(pageErrors).toEqual([]);
 });

@@ -1,5 +1,8 @@
 package main
 
+// This development-only helper seeds deterministic Operation records for the
+// Playwright suite. It requires CLOUDLET_DATABASE_URL and an existing project.
+
 import (
 	"context"
 	"encoding/json"

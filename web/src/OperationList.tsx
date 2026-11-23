@@ -11,7 +11,6 @@ import {
   Tag,
 } from 'antd';
 import type { TableProps } from 'antd';
-import { session } from './client';
 import { projectOperations } from './client';
 import type { Operation } from './client';
 
@@ -35,14 +34,23 @@ function timestamp(value: string) {
   }).format(new Date(value));
 }
 
-type Props = { projectID: string };
-export function OperationList({ projectID }: Props) {
-  const account = useQuery({ queryKey: ['session'], queryFn: session });
+type Props = {
+  projectID: string;
+  accountID?: string;
+  sessionPending: boolean;
+  sessionError: Error | null;
+};
+export function OperationList({
+  projectID,
+  accountID,
+  sessionPending,
+  sessionError,
+}: Props) {
   const [selected, setSelected] = useState<Operation | null>(null);
   const query = useQuery({
-    queryKey: ['operations', account.data?.user.id, projectID],
+    queryKey: ['operations', accountID, projectID],
     queryFn: () => projectOperations(projectID),
-    enabled: Boolean(account.data?.user.id),
+    enabled: Boolean(accountID),
   });
   const columns: TableProps<Operation>['columns'] = [
     {
@@ -99,10 +107,24 @@ export function OperationList({ projectID }: Props) {
     },
   ];
 
+  if (sessionPending) return <Card title="操作记录" loading />;
+  if (sessionError || !accountID) {
+    return (
+      <Card title="操作记录">
+        <Alert
+          role="alert"
+          type="error"
+          title={sessionError?.message ?? '登录状态已失效，请重新登录'}
+        />
+      </Card>
+    );
+  }
+
   return (
     <Card title="操作记录" loading={query.isPending}>
       {query.error ? (
         <Alert
+          role="alert"
           type="error"
           title={query.error.message}
           action={

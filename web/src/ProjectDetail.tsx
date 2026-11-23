@@ -48,7 +48,12 @@ export function ProjectDetail() {
     );
   return (
     <main className={styles.detail}>
-      <OperationList projectID={projectID} />
+      <OperationList
+        projectID={projectID}
+        accountID={account.data?.user.id}
+        sessionPending={account.isPending}
+        sessionError={account.error}
+      />
       <Card
         title={query.data.name}
         extra={<Link to="/projects">返回项目列表</Link>}
