@@ -8,7 +8,7 @@
 | npm run lint:config | JSON、YAML、Issue 表单与 Actions 约定 |
 | npm run lint:tooling | 脚本语法、ShellCheck、配置文件与真实端口检查 |
 | make test | Go race 测试、真实 HTTP、Gateway 转发与服务停止 |
-| make test-integration | Docker 中的 PostgreSQL 迁移、账号、会话、项目与成员角色、操作记录、容量预留、就绪检查、workerd 执行和容器创建、启动、观测、停止与删除 |
+| make test-integration | Docker 中的 PostgreSQL 迁移、账号、会话、项目与成员角色、操作记录、容量预留、容器容量准入、就绪检查、workerd 执行和容器创建、启动、观测、停止与删除 |
 | make web-check | TypeScript、ESLint、Prettier、Vite 构建与接口生成一致性 |
 | make dev-check | 真实本机进程、数据库、热重载、完整停止、多实例与失败清理 |
 | make test-e2e | 真实 Chromium 在桌面和手机尺寸下完成登录、刷新和退出 |
@@ -39,6 +39,16 @@ go test -race -count=1 -tags=integration ./internal/capacity
 ```
 
 用例并发申请最后一份容量，确认只有一个请求成功；同一执行标识重复申请只产生一条活动预留；不同项目共享主机预算；释放后其他项目可以重新申请；已释放标识不能再次预留；配额低于当前占用时返回冲突。回归用例将数据库默认隔离级别设为 REPEATABLE READ，验证写事务仍显式按 READ COMMITTED 读取最新占用，并发申请最后一份容量仍只有一个请求成功。
+
+## 容器容量准入验收
+
+容量准入使用真实 PostgreSQL 和 Docker 验证预留先于容器启动，以及确认清理后才释放容量。
+
+```sh
+go test -race -count=1 -tags=integration ./internal/executions
+```
+
+用例在四核四 GiB 主机预算下预占三核三 GiB 与三个实例，再并发提交八个一核一 GiB、单实例的容器启动请求。只有一个请求成功，其余返回容量不足且没有创建容器；成功启动的固定镜像通过实际发布的回环端口返回预期页面。仅停止容器时预留保持活动；停止并删除容器后容量恢复，后续申请可以再次成功。无效镜像导致创建失败时释放预留且不留下容器。同一执行标识的并发启动只创建一个容器，并只扣减一次容量。
 
 ## workerd 集成验证
 

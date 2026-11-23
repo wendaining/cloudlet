@@ -61,6 +61,31 @@ func (a *Adapter) Create(ctx context.Context, spec Spec) (Container, error) {
 	return Container{ID: result.ID, Name: options.Name}, nil
 }
 
+// Find returns the managed container for the ownership's deterministic name.
+// A missing container returns found=false without an error. A container with
+// the same name but different ownership labels returns ErrNotOwned.
+func (a *Adapter) Find(ctx context.Context, ownership Ownership) (Observation, bool, error) {
+	if err := ownership.validate(); err != nil {
+		return Observation{}, false, err
+	}
+	name := ownership.containerName()
+	result, err := a.docker.ContainerInspect(ctx, name, client.ContainerInspectOptions{})
+	if err != nil {
+		if cerrdefs.IsNotFound(err) {
+			return Observation{}, false, nil
+		}
+		return Observation{}, false, fmt.Errorf("find container %s: %w", name, err)
+	}
+	if err := ownership.verify(result.Container); err != nil {
+		return Observation{}, false, fmt.Errorf("find container %s: %w", name, err)
+	}
+	observation, err := observe(result.Container)
+	if err != nil {
+		return Observation{}, false, err
+	}
+	return observation, true, nil
+}
+
 // Start starts a container that belongs to the requested ownership. Starting a
 // running container is a no-op.
 func (a *Adapter) Start(ctx context.Context, ownership Ownership, id string) (Observation, error) {

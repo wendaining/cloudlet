@@ -665,6 +665,11 @@ func currentTime() time.Time {
 	return time.Now().UTC().Truncate(time.Microsecond)
 }
 
+// ValidateHostID reports whether hostID can identify a configured host budget.
+func ValidateHostID(hostID string) error {
+	return validateHostID(hostID)
+}
+
 func validateHostID(hostID string) error {
 	if hostID == "" || hostID != strings.TrimSpace(hostID) || len(hostID) > maxHostIDLength || !utf8.ValidString(hostID) {
 		return fmt.Errorf("主机标识需要 1 至 %d 字节的有效文本: %w", maxHostIDLength, fs.ErrInvalid)
