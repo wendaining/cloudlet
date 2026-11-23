@@ -205,6 +205,36 @@ paths:
           $ref: '#/components/responses/Error'
         '409':
           $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/members/{userID}:
+    parameters:
+      - name: projectID
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: userID
+        in: path
+        required: true
+        schema:
+          type: string
+    delete:
+      operationId: removeProjectMember
+      description: 移除项目成员；仅项目所有者可以调用，项目所有者不可移除。
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '204':
+          description: 成员已移除
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
 components:
   securitySchemes:
     SessionCookie:

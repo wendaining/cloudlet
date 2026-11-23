@@ -266,6 +266,11 @@ type ClientInterface interface {
 	// 添加已有账号为项目成员，或更新其 developer/viewer 角色；仅项目所有者可以调用。.
 	UpsertProjectMember(ctx context.Context, projectID string, body UpsertProjectMemberJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// RemoveProjectMember performs a DELETE /api/v1/projects/{projectID}/members/{userID} (the `RemoveProjectMember` operationId) request.
+	//
+	// 移除项目成员；仅项目所有者可以调用，项目所有者不可移除。.
+	RemoveProjectMember(ctx context.Context, projectID string, userID string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListProjectOperations performs a GET /api/v1/projects/{projectID}/operations (the `ListProjectOperations` operationId) request.
 	ListProjectOperations(ctx context.Context, projectID string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -431,6 +436,21 @@ func (c *Client) UpsertProjectMemberWithBody(ctx context.Context, projectID stri
 // 添加已有账号为项目成员，或更新其 developer/viewer 角色；仅项目所有者可以调用。.
 func (c *Client) UpsertProjectMember(ctx context.Context, projectID string, body UpsertProjectMemberJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewUpsertProjectMemberRequest(c.Server, projectID, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RemoveProjectMember performs a DELETE /api/v1/projects/{projectID}/members/{userID} (the `RemoveProjectMember` operationId) request.
+//
+// 移除项目成员；仅项目所有者可以调用，项目所有者不可移除。.
+func (c *Client) RemoveProjectMember(ctx context.Context, projectID string, userID string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRemoveProjectMemberRequest(c.Server, projectID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -770,6 +790,47 @@ func NewUpsertProjectMemberRequestWithBody(server string, projectID string, cont
 	return req, nil
 }
 
+// NewRemoveProjectMemberRequest constructs an http.Request for the RemoveProjectMember method
+func NewRemoveProjectMemberRequest(server string, projectID string, userID string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "userID", userID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/members/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewListProjectOperationsRequest constructs an http.Request for the ListProjectOperations method
 func NewListProjectOperationsRequest(server string, projectID string) (*http.Request, error) {
 	var err error
@@ -940,6 +1001,13 @@ type ClientWithResponsesInterface interface {
 	//
 	// 添加已有账号为项目成员，或更新其 developer/viewer 角色；仅项目所有者可以调用。.
 	UpsertProjectMemberWithResponse(ctx context.Context, projectID string, body UpsertProjectMemberJSONRequestBody, reqEditors ...RequestEditorFn) (*UpsertProjectMemberResponse, error)
+
+	// RemoveProjectMemberWithResponse performs a DELETE /api/v1/projects/{projectID}/members/{userID} (the `RemoveProjectMember` operationId) request.
+	//
+	// 移除项目成员；仅项目所有者可以调用，项目所有者不可移除。.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	RemoveProjectMemberWithResponse(ctx context.Context, projectID string, userID string, reqEditors ...RequestEditorFn) (*RemoveProjectMemberResponse, error)
 
 	// ListProjectOperationsWithResponse performs a GET /api/v1/projects/{projectID}/operations (the `ListProjectOperations` operationId) request.
 	//
@@ -1489,6 +1557,75 @@ func (r UpsertProjectMemberResponse) ContentType() string {
 	return ""
 }
 
+type RemoveProjectMemberResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Error
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Error
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *Error
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r RemoveProjectMemberResponse) GetJSON401() *Error {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r RemoveProjectMemberResponse) GetJSON403() *Error {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r RemoveProjectMemberResponse) GetJSON404() *Error {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r RemoveProjectMemberResponse) GetJSON409() *Error {
+	return r.JSON409
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r RemoveProjectMemberResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r RemoveProjectMemberResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r RemoveProjectMemberResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RemoveProjectMemberResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r RemoveProjectMemberResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type ListProjectOperationsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -1735,6 +1872,19 @@ func (c *ClientWithResponses) UpsertProjectMemberWithResponse(ctx context.Contex
 		return nil, err
 	}
 	return ParseUpsertProjectMemberResponse(rsp)
+}
+
+// RemoveProjectMemberWithResponse performs a DELETE /api/v1/projects/{projectID}/members/{userID} (the `RemoveProjectMember` operationId) request.
+//
+// 移除项目成员；仅项目所有者可以调用，项目所有者不可移除。.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) RemoveProjectMemberWithResponse(ctx context.Context, projectID string, userID string, reqEditors ...RequestEditorFn) (*RemoveProjectMemberResponse, error) {
+	rsp, err := c.RemoveProjectMember(ctx, projectID, userID, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRemoveProjectMemberResponse(rsp)
 }
 
 // ListProjectOperationsWithResponse performs a GET /api/v1/projects/{projectID}/operations (the `ListProjectOperations` operationId) request.
@@ -2164,6 +2314,63 @@ func ParseUpsertProjectMemberResponse(rsp *http.Response) (*UpsertProjectMemberR
 	return response, nil
 }
 
+// ParseRemoveProjectMemberResponse parses an HTTP response from a RemoveProjectMemberWithResponse call
+func ParseRemoveProjectMemberResponse(rsp *http.Response) (*RemoveProjectMemberResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RemoveProjectMemberResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case rsp.StatusCode == 204:
+		break // No content-type
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseListProjectOperationsResponse parses an HTTP response from a ListProjectOperationsWithResponse call
 func ParseListProjectOperationsResponse(rsp *http.Response) (*ListProjectOperationsResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -2273,6 +2480,9 @@ type ServerInterface interface {
 
 	// (POST /api/v1/projects/{projectID}/members)
 	UpsertProjectMember(c *gin.Context, projectID string)
+
+	// (DELETE /api/v1/projects/{projectID}/members/{userID})
+	RemoveProjectMember(c *gin.Context, projectID string, userID string)
 
 	// (GET /api/v1/projects/{projectID}/operations)
 	ListProjectOperations(c *gin.Context, projectID string)
@@ -2443,6 +2653,40 @@ func (siw *ServerInterfaceWrapper) UpsertProjectMember(c *gin.Context) {
 	siw.Handler.UpsertProjectMember(c, projectID)
 }
 
+// RemoveProjectMember operation middleware
+func (siw *ServerInterfaceWrapper) RemoveProjectMember(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "userID" -------------
+	var userID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "userID", c.Param("userID"), &userID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter userID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.RemoveProjectMember(c, projectID, userID)
+}
+
 // ListProjectOperations operation middleware
 func (siw *ServerInterfaceWrapper) ListProjectOperations(c *gin.Context) {
 
@@ -2519,4 +2763,5 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID", wrapper.GetProject)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/members", wrapper.ListProjectMembers)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/members", wrapper.UpsertProjectMember)
+	router.DELETE(options.BaseURL+"/api/v1/projects/:projectID/members/:userID", wrapper.RemoveProjectMember)
 }

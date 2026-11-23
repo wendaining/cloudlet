@@ -34,6 +34,7 @@ type User struct {
 }
 
 var ErrCredentials = errors.New("邮箱或密码错误")
+var ErrProjectOwner = errors.New("不能移除项目所有者")
 
 func Open(ctx context.Context, connection string) (*Store, error) {
 	if connection == "" {
@@ -236,6 +237,28 @@ func (s *Store) ProjectMembers(ctx context.Context, projectID string) ([]Project
 		Order("CASE project_members.role WHEN 'owner' THEN 0 WHEN 'developer' THEN 1 ELSE 2 END, users.email").
 		Scan(&members).Error
 	return members, err
+}
+
+func (s *Store) RemoveProjectMember(ctx context.Context, projectID, userID string) error {
+	result := s.DB.WithContext(ctx).Where("project_id = ? AND user_id = ? AND role <> ?", projectID, userID, "owner").Delete(&ProjectMember{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 1 {
+		return nil
+	}
+	var member ProjectMember
+	err := s.DB.WithContext(ctx).Where("project_id = ? AND user_id = ?", projectID, userID).First(&member).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return gorm.ErrRecordNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if member.Role == "owner" {
+		return ErrProjectOwner
+	}
+	return gorm.ErrRecordNotFound
 }
 
 func (s *Store) UpsertProjectMember(ctx context.Context, projectID, userID, role string) error {
