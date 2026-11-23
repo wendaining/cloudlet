@@ -6,12 +6,14 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/google/uuid"
@@ -101,8 +103,24 @@ func TestMCPReadOnlyQueriesUseAuthenticatedProjectAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	var proxyHits atomic.Int32
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		proxyHits.Add(1)
+		http.Error(w, "management API must bypass the proxy", http.StatusBadGateway)
+	}))
+	t.Cleanup(proxy.Close)
+	t.Setenv("HTTP_PROXY", proxy.URL)
+	t.Setenv("HTTPS_PROXY", proxy.URL)
+	t.Setenv("NO_PROXY", "")
+
+	listener, err := net.Listen("tcp4", net.JoinHostPort(nonLoopbackIPv4(t), "0"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	server := httptest.NewUnstartedServer(nil)
-	endpoint := "http://" + server.Listener.Addr().String()
+	server.Listener.Close()
+	server.Listener = listener
+	endpoint := "http://" + listener.Addr().String()
 	handler, closeSessions, err := controlplane.NewHandlerWithMCP(store,
 		config.Config{Instance: "mcp-integration", PublicOrigin: "http://localhost"}, slog.Default(), endpoint)
 	if err != nil {
@@ -118,7 +136,13 @@ func TestMCPReadOnlyQueriesUseAuthenticatedProjectAccess(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		client := &http.Client{Jar: jar, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
+		client := &http.Client{
+			Jar:       jar,
+			Transport: &http.Transport{Proxy: nil},
+			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
 		body, err := json.Marshal(map[string]string{"email": email, "password": password})
 		if err != nil {
 			t.Fatal(err)
@@ -140,7 +164,13 @@ func TestMCPReadOnlyQueriesUseAuthenticatedProjectAccess(t *testing.T) {
 	}
 	ownerHTTP, otherHTTP := login(ownerEmail, ownerPassword), login(otherEmail, otherPassword)
 	newSession := func(source *http.Client) *mcp.ClientSession {
-		clientHTTP := &http.Client{Jar: source.Jar, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}
+		clientHTTP := &http.Client{
+			Jar:       source.Jar,
+			Transport: &http.Transport{Proxy: nil},
+			CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
 		client := mcp.NewClient(&mcp.Implementation{Name: "cloudlet-test-client", Version: "1.0.0"}, nil)
 		session, err := client.Connect(ctx, &mcp.StreamableClientTransport{Endpoint: server.URL + "/mcp", HTTPClient: clientHTTP, DisableStandaloneSSE: true}, nil)
 		if err != nil {
@@ -236,4 +266,29 @@ func TestMCPReadOnlyQueriesUseAuthenticatedProjectAccess(t *testing.T) {
 	if result := call(anonymous, "list_projects", map[string]any{}); !result.IsError {
 		t.Fatal("unauthenticated MCP query succeeded")
 	}
+	if hits := proxyHits.Load(); hits != 0 {
+		t.Fatalf("MCP management API request used HTTP proxy %d times", hits)
+	}
+}
+
+func nonLoopbackIPv4(t *testing.T) string {
+	t.Helper()
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, networkInterface := range interfaces {
+		addresses, err := networkInterface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, address := range addresses {
+			ip, _, err := net.ParseCIDR(address.String())
+			if err == nil && ip.To4() != nil && !ip.IsLoopback() {
+				return ip.String()
+			}
+		}
+	}
+	t.Skip("no non-loopback IPv4 address")
+	return ""
 }

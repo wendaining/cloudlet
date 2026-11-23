@@ -25,8 +25,11 @@ func New(endpoint string) (*Client, error) {
 		return nil, fmt.Errorf("invalid API endpoint: %q", endpoint)
 	}
 	client := &Client{endpoint: base, http: &http.Client{Timeout: 10 * time.Second}}
+	apiTransport := http.DefaultTransport.(*http.Transport).Clone()
+	apiTransport.Proxy = nil
 	apiHTTP := &http.Client{
-		Timeout: 10 * time.Second,
+		Timeout:   10 * time.Second,
+		Transport: apiTransport,
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
