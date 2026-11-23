@@ -297,6 +297,36 @@ func (h *handler) UpsertProjectMember(c *gin.Context, projectID string) {
 	})
 }
 
+func (h *handler) RemoveProjectMember(c *gin.Context, projectID, userID string) {
+	_, normalizedID, membership, ok := h.projectAccess(c, projectID)
+	if !ok {
+		return
+	}
+	if membership.Role != "owner" {
+		c.JSON(http.StatusForbidden, apigen.Error{Message: "只有项目所有者可以管理成员"})
+		return
+	}
+	targetID, err := uuid.Parse(userID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, apigen.Error{Message: "项目成员不存在"})
+		return
+	}
+	err = h.store.RemoveProjectMember(c.Request.Context(), normalizedID, targetID.String())
+	if errors.Is(err, database.ErrProjectOwner) {
+		c.JSON(http.StatusConflict, apigen.Error{Message: "不能移除项目所有者"})
+		return
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		c.JSON(http.StatusNotFound, apigen.Error{Message: "项目成员不存在"})
+		return
+	}
+	if err != nil {
+		h.failure(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 func (h *handler) ListProjectOperations(c *gin.Context, projectID string) {
 	user, ok := h.currentUser(c)
 	if !ok {
