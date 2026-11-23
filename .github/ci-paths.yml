@@ -44,6 +44,7 @@ tooling:
 database:
   - 'internal/database/**'
   - 'internal/operations/**'
+  - 'internal/capacity/**'
   - 'internal/controlplane/**'
   - 'internal/config/**'
   - 'internal/server/**'

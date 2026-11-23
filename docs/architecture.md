@@ -32,6 +32,7 @@ Cloudlet 在一台 Linux 服务器上管理计算资源。本地开发在成员�
 | internal/controlplane | 管理 HTTP 接口 |
 | internal/database | PostgreSQL 连接、迁移版本、账号与项目数据 |
 | internal/operations | 操作记录的幂等登记、按项目查询与阶段推进 |
+| internal/capacity | 主机与项目容量的事务预留、确认释放与占用查询 |
 | internal/apigen | OpenAPI 生成的类型、Gin 接口和客户端 |
 | migrations | 内嵌 SQL 迁移文件与当前版本 |
 | internal/gateway | 按域名选择上游并转发 HTTP 请求 |
@@ -43,7 +44,7 @@ Cloudlet 在一台 Linux 服务器上管理计算资源。本地开发在成员�
 | internal/browser | 复用容器管理的 Playwright 会话 |
 | pkg/client | CLI 与其他客户端共享的 API 客户端 |
 
-PostgreSQL 当前保存账号、登录会话、项目与操作记录。Workers 模块已提供独立的运行配置，资源元数据和生命周期的开发目标见 [开发任务](roadmap.md)。Durable Objects 的存储能力随 workerd 集成验证。
+PostgreSQL 当前保存账号、登录会话、项目、操作记录与容量预留。Workers 模块已提供独立的运行配置，资源元数据和生命周期的开发目标见 [开发任务](roadmap.md)。Durable Objects 的存储能力随 workerd 集成验证。
 
 项目拥有稳定的 project_id。创建项目在事务内写入项目和创建者的 owner 成员记录。项目列表和单项目读取同时校验当前会话账号的项目成员关系。项目成员列表对所有成员开放；所有者可以按邮箱把已有账号添加为 developer 或 viewer，或更新已有成员的角色，创建者的 owner 身份保持不变。非成员访问返回 404，成员越权修改返回 403。
 
@@ -80,6 +81,10 @@ Gateway 使用配置中的 `host` 匹配请求域名，匹配时忽略大小写�
 配置文件在启动时读取，未知字段、重复路由、无效地址或目标协议会阻止启动。使用 -config 指定配置文件。
 
 API 与 Gateway 使用 HTTP 头读取超时和空闲连接超时。收到 SIGTERM 或 SIGINT 后停止接收连接，在十秒内等待已有请求完成。进程输出 JSON 日志。
+
+## 容量预留
+
+`internal/capacity` 在 PostgreSQL 事务中同时检查主机预算和项目配额。`Reserve` 以执行标识为全局幂等键，登记 CPU 毫核、内存字节与实例数；主机容量行和项目配额行按固定顺序加锁，因此多个项目共享同一主机预算时不会超额。`Release` 在调用方确认执行与副作用清理完成后释放，重复调用保持幂等，已释放的执行标识不能再次预留。`Usage` 汇总活动预留，执行结果不明时预留继续占用容量。降低主机容量或项目配额低于当前占用时返回冲突。Docker 准入由 #52 接入。
 
 ## 执行环境
 
