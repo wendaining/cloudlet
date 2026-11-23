@@ -64,6 +64,19 @@ export async function createProject(body: CreateProjectRequest) {
   return data;
 }
 
+export type Operation = components['schemas']['Operation'];
+
+export async function projectOperations(id: string) {
+  const { data, error, response } = await client.GET(
+    '/api/v1/projects/{projectID}/operations',
+    { params: { path: { projectID: id } } },
+  );
+  const status = response.status;
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error(`操作列表查询失败，状态码 ${status}`);
+  return data;
+}
+
 export async function project(id: string) {
   const { data, error, response } = await client.GET(
     '/api/v1/projects/{projectID}',
