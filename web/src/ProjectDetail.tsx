@@ -1,7 +1,8 @@
 import { Alert, Button, Card, Descriptions, Result } from 'antd';
 import { Link, useParams } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
-import { project } from './client';
+import { project, session } from './client';
+import { ProjectMembers } from './ProjectMembers';
 import styles from './app.module.css';
 
 export function ProjectDetail() {
@@ -14,7 +15,7 @@ export function ProjectDetail() {
     },
     enabled: Boolean(projectID),
   });
-
+  const account = useQuery({ queryKey: ['session'], queryFn: session });
   if (!projectID) return <Result status="404" title="页面不存在" />;
   if (query.isPending)
     return (
@@ -59,6 +60,10 @@ export function ProjectDetail() {
           </Descriptions.Item>
         </Descriptions>
       </Card>
+      <ProjectMembers
+        projectID={query.data.id}
+        accountID={account.data?.user.id}
+      />
     </main>
   );
 }
