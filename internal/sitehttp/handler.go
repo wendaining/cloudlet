@@ -3,6 +3,7 @@ package sitehttp
 
 import (
 	"bufio"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // New returns a handler for the provided site filesystem. The caller keeps
@@ -82,11 +84,7 @@ func (h handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		serveFileError(w, r, name, err)
 		return
 	}
-	defer func() {
-		if err := file.Close(); err != nil {
-			slog.ErrorContext(r.Context(), "close static site file", "path", name, "error", err)
-		}
-	}()
+	defer closeFile(r, name, file)
 	body := bufio.NewReader(file)
 	contentType := mime.TypeByExtension(path.Ext(name))
 	if contentType == "" {
@@ -97,12 +95,48 @@ func (h handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		contentType = http.DetectContentType(sample)
 	}
-	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
+	hash := sha256.New()
+	length, err := io.Copy(hash, body)
+	if err == nil && length != info.Size() {
+		err = fmt.Errorf("read %d of %d bytes: %w", length, info.Size(), io.ErrUnexpectedEOF)
+	}
+	if err != nil {
+		serveFileError(w, r, name, err)
+		return
+	}
+	etag := fmt.Sprintf(`"%x"`, hash.Sum(nil))
+	lastModified := info.ModTime().UTC().Truncate(time.Second)
+	headers := w.Header()
+	headers.Set("ETag", etag)
+	headers.Set("Cache-Control", cachePolicy(contentType))
+	if !lastModified.IsZero() {
+		headers.Set("Last-Modified", lastModified.Format(http.TimeFormat))
+	}
+	if notModified(r.Header, etag, lastModified) {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+
+	headers.Set("Content-Type", contentType)
+	headers.Set("Content-Length", strconv.FormatInt(info.Size(), 10))
 	if r.Method == http.MethodHead {
 		return
 	}
-	written, err := io.Copy(w, body)
+	if seeker, ok := file.(io.Seeker); ok {
+		if _, err := seeker.Seek(0, io.SeekStart); err != nil {
+			serveFileError(w, r, name, err)
+			return
+		}
+	} else {
+		reopened, err := h.site.Open(name)
+		if err != nil {
+			serveFileError(w, r, name, err)
+			return
+		}
+		defer closeFile(r, name, reopened)
+		file = reopened
+	}
+	written, err := io.Copy(w, file)
 	if err == nil && written != info.Size() {
 		err = fmt.Errorf("sent %d of %d bytes: %w", written, info.Size(), io.ErrUnexpectedEOF)
 	}
@@ -112,7 +146,16 @@ func (h handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func closeFile(r *http.Request, name string, file fs.File) {
+	if err := file.Close(); err != nil {
+		slog.ErrorContext(r.Context(), "close static site file", "path", name, "error", err)
+	}
+}
+
 func serveFileError(w http.ResponseWriter, r *http.Request, name string, err error) {
+	w.Header().Del("ETag")
+	w.Header().Del("Last-Modified")
+	w.Header().Del("Cache-Control")
 	if errors.Is(err, fs.ErrNotExist) {
 		http.NotFound(w, r)
 		return

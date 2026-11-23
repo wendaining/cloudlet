@@ -82,6 +82,10 @@ Gateway 使用配置中的 `host` 匹配请求域名，匹配时忽略大小写�
 
 API 与 Gateway 使用 HTTP 头读取超时和空闲连接超时。收到 SIGTERM 或 SIGINT 后停止接收连接，在十秒内等待已有请求完成。进程输出 JSON 日志。
 
+## 静态文件验证与缓存
+
+静态文件通过内容的 SHA-256 摘要生成强 `ETag`，文件修改时间可用时提供 `Last-Modified`。GET 和 HEAD 优先按 `If-None-Match` 验证，其次按 `If-Modified-Since` 验证，命中返回 304。HTML 每次使用前重新验证，其他静态文件可公开缓存 300 秒。
+
 ## 容量预留
 
 `internal/capacity` 在 PostgreSQL 事务中同时检查主机预算和项目配额。`Reserve` 以执行标识为全局幂等键，登记 CPU 毫核、内存字节与实例数；主机容量行和项目配额行按固定顺序加锁，因此多个项目共享同一主机预算时不会超额。`Release` 在调用方确认执行与副作用清理完成后释放，重复调用保持幂等，已释放的执行标识不能再次预留。`Usage` 汇总活动预留，执行结果不明时预留继续占用容量。写事务显式使用 READ COMMITTED，确保获得行锁后读取已提交的最新占用；`Usage` 使用 REPEATABLE READ 读取一致快照。降低主机容量或项目配额低于当前占用时返回冲突。Docker 准入由 #52 接入。
