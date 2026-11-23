@@ -71,17 +71,21 @@ npm --prefix runtimes/browser run test:integration
 
 使用真实 Docker 启动 configs/images.json 中的固定镜像，读取适配器观测到的回环端口并请求预期响应。名称或归属标签不匹配的容器不会被启动、观测、停止或删除。停止和删除后容器与端口释放。
 
+镜像准备使用真实 Docker Engine 和本地 registry。测试从空缓存按摘要拉取导入的测试镜像，核对返回的镜像标识与摘要；停止 registry 后再次准备，确认直接复用已核对摘要的本地镜像；再以不存在的摘要请求拉取，确认返回包含具体镜像引用的拉取失败。registry 镜像按 digest 固定，缺失时由 Docker Engine 拉取。
+
 HTTP 就绪探测使用真实 Docker 启动延迟就绪、持续返回 503 和启动后退出的服务。延迟服务在探测期间连接失败，随后返回 200；持续 503 的服务在截止时间后返回 `ErrNotReady` 并保留最后状态；启动后退出的容器在截止时间前快速失败并报告退出码。未发布端口与不匹配归属分别返回明确错误。
 
 ```sh
 make test-integration
 # 只运行容器适配器
 go test -race -count=1 -tags=integration ./internal/containers
+# 只运行镜像准备
+go test -race -count=1 -tags=integration -run TestAdapterPrepareImage ./internal/containers
 # 只运行 HTTP 就绪探测
 go test -race -count=1 -tags=integration -run TestAdapterWaitReady ./internal/containers
 ```
 
-镜像缺失时由 Docker Engine 拉取。测试结束清理所属容器。
+测试结束清理所属容器、本地 registry 与拉取的测试镜像。
 
 ## 执行模块的业务验收
 

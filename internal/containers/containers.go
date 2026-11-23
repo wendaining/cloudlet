@@ -33,8 +33,10 @@ const (
 	loopbackHost        = "127.0.0.1"
 	maxIdentifierLength = 48
 	maxContainerName    = 200
-	maxImageLength      = 255
-	stopTimeout         = 10 * time.Second
+	// A repository name may use 255 bytes and a digest adds the algorithm and
+	// encoded value, so the limit covers a fully qualified reference.
+	maxImageLength = 512
+	stopTimeout    = 10 * time.Second
 )
 
 var (
@@ -46,6 +48,13 @@ var (
 	// ErrConflict reports that a container with the requested name already
 	// exists.
 	ErrConflict = errors.New("container already exists")
+	// ErrImagePull reports that Docker Engine could not pull the requested
+	// image. The underlying registry or transport error remains available
+	// through errors.Is and errors.As.
+	ErrImagePull = errors.New("image pull failed")
+	// ErrImageDigestMismatch reports that the local image does not report the
+	// requested immutable digest.
+	ErrImageDigestMismatch = errors.New("image digest mismatch")
 )
 
 // Ownership is the platform scope that owns a managed container. Environment
@@ -67,10 +76,11 @@ type Limits struct {
 	OpenFiles   int64
 }
 
-// Spec describes the container to create. Image is the image reference, User
-// is the non-root user, Port is the container TCP port published on loopback,
-// Env holds process variables in KEY=value form, Command overrides the image
-// command, and Limits are the required resource limits.
+// Spec describes the container to create. Image is the image reference,
+// normally the Reference returned by PrepareImage so the container uses an
+// immutable digest, User is the non-root user, Port is the container TCP port
+// published on loopback, Env holds process variables in KEY=value form, Command
+// overrides the image command, and Limits are the required resource limits.
 type Spec struct {
 	Ownership Ownership
 	Image     string

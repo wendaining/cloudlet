@@ -16,12 +16,12 @@ import (
 	"github.com/moby/moby/client"
 )
 
-// Adapter manages containers on one Docker Engine. It is safe for concurrent
-// use. The caller owns the Docker client and must close it after the adapter is
-// no longer used. Every operation other than Create inspects the container
-// first and returns ErrNotOwned when its canonical name or ownership labels do
-// not match. WaitReady additionally probes HTTP readiness through the actual
-// published loopback endpoint.
+// Adapter manages containers and images on one Docker Engine. It is safe for
+// concurrent use. The caller owns the Docker client and must close it after the
+// adapter is no longer used. Every container operation other than Create
+// inspects the container first and returns ErrNotOwned when its canonical name
+// or ownership labels do not match.
+// WaitReady probes HTTP readiness through the published loopback endpoint.
 type Adapter struct {
 	docker     *client.Client
 	httpClient *http.Client
