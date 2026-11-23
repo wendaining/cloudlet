@@ -8,7 +8,7 @@
 | npm run lint:config | JSON、YAML、Issue 表单与 Actions 约定 |
 | npm run lint:tooling | 脚本语法、ShellCheck、配置文件与真实端口检查 |
 | make test | Go race 测试、真实 HTTP、Gateway 转发与服务停止 |
-| make test-integration | Docker 中的 PostgreSQL 迁移、账号、会话、项目与成员角色、操作记录、容量预留、就绪检查、workerd 执行和容器创建、启动、观测、停止与删除 |
+| make test-integration | Docker 中的 PostgreSQL 迁移、账号、会话、项目与成员角色、操作记录、路由快照、容量预留、就绪检查、workerd 执行和容器创建、启动、观测、停止与删除 |
 | make web-check | TypeScript、ESLint、Prettier、Vite 构建与接口生成一致性 |
 | make dev-check | 真实本机进程、数据库、热重载、完整停止、多实例与失败清理 |
 | make test-e2e | 真实 Chromium 在桌面和手机尺寸下完成登录、刷新和退出 |
@@ -39,6 +39,16 @@ go test -race -count=1 -tags=integration ./internal/capacity
 ```
 
 用例并发申请最后一份容量，确认只有一个请求成功；同一执行标识重复申请只产生一条活动预留；不同项目共享主机预算；释放后其他项目可以重新申请；已释放标识不能再次预留；配额低于当前占用时返回冲突。回归用例将数据库默认隔离级别设为 REPEATABLE READ，验证写事务仍显式按 READ COMMITTED 读取最新占用，并发申请最后一份容量仍只有一个请求成功。
+
+## 路由快照验收
+
+项目路由使用真实 PostgreSQL、HTTP 上游和 Gateway 验证。
+
+```sh
+go test -race -count=1 -tags=integration -run TestProjectRouteSnapshots ./internal/routes
+```
+
+用例发布两个项目的路由并分别访问，移除一个项目后另一个继续可用。跨项目域名冲突被拒绝，失败发布保留原路由。启动配置域名不能用于动态路由，拒绝后快照版本不变化。新建 Publisher 从数据库恢复路由。并发发布多个项目后全部路由可访问。
 
 ## workerd 集成验证
 

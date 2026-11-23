@@ -61,6 +61,18 @@ database:
   - '.github/ci-paths.yml'
   - '!**/*.md'
 
+routes:
+  - 'internal/routes/**'
+  - 'internal/gateway/**'
+  - 'internal/database/**'
+  - 'migrations/**'
+  - 'configs/images.json'
+  - 'go.mod'
+  - 'go.sum'
+  - '.github/workflows/ci.yml'
+  - '.github/ci-paths.yml'
+  - '!**/*.md'
+
 workers:
   - 'internal/workers/**'
   - 'internal/durableobjects/**'
