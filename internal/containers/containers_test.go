@@ -30,6 +30,7 @@ func validSpec() Spec {
 		Command:   []string{"run"},
 		Env:       []string{"A=1"},
 		Port:      8080,
+		Access:    AccessPublished,
 		Limits: Limits{
 			CPUMillis:   500,
 			MemoryBytes: 64 << 20,
@@ -149,6 +150,22 @@ func TestSpecValidate(t *testing.T) {
 		{"numeric root user with group", func(s *Spec) { s.User = "0:1000" }},
 		{"root group", func(s *Spec) { s.User = "1000:0" }},
 		{"user with whitespace", func(s *Spec) { s.User = "app user" }},
+		{"missing access", func(s *Spec) { s.Access = "" }},
+		{"unknown access", func(s *Spec) { s.Access = "host" }},
+		{"network access without network", func(s *Spec) { s.Access = AccessNetwork }},
+		{"network access with empty network", func(s *Spec) { s.Access = AccessNetwork; s.Network = "" }},
+		{"network access with reserved bridge", func(s *Spec) { s.Access = AccessNetwork; s.Network = "bridge" }},
+		{"network access with reserved host", func(s *Spec) { s.Access = AccessNetwork; s.Network = "host" }},
+		{"network access with reserved none", func(s *Spec) { s.Access = AccessNetwork; s.Network = "none" }},
+		{"network access with reserved default", func(s *Spec) { s.Access = AccessNetwork; s.Network = "default" }},
+		{"network access with leading dash", func(s *Spec) { s.Access = AccessNetwork; s.Network = "-network" }},
+		{"network access with slash", func(s *Spec) { s.Access = AccessNetwork; s.Network = "project/network" }},
+		{"network access with space", func(s *Spec) { s.Access = AccessNetwork; s.Network = "project network" }},
+		{"network access with too long name", func(s *Spec) {
+			s.Access = AccessNetwork
+			s.Network = strings.Repeat("a", maxNetworkName+1)
+		}},
+		{"published access with network", func(s *Spec) { s.Network = "cloudlet-network" }},
 		{"zero port", func(s *Spec) { s.Port = 0 }},
 		{"zero cpu", func(s *Spec) { s.Limits.CPUMillis = 0 }},
 		{"cpu above maximum", func(s *Spec) { s.Limits.CPUMillis = 1_000_001 }},
@@ -203,8 +220,13 @@ func TestCreateOptions(t *testing.T) {
 	if options.Config.Image != spec.Image || options.Config.User != spec.User {
 		t.Fatalf("config image/user = %q/%q", options.Config.Image, options.Config.User)
 	}
-	if !maps.Equal(options.Config.Labels, spec.Ownership.labels()) {
-		t.Fatalf("labels = %v", options.Config.Labels)
+	for key, want := range spec.Ownership.labels() {
+		if got := options.Config.Labels[key]; got != want {
+			t.Fatalf("label %s = %q, want %q", key, got, want)
+		}
+	}
+	if options.Config.Labels[LabelPort] != "8080" {
+		t.Fatalf("port label = %q, want 8080", options.Config.Labels[LabelPort])
 	}
 	port := network.MustParsePort("8080/tcp")
 	if _, found := options.Config.ExposedPorts[port]; !found {
@@ -219,6 +241,9 @@ func TestCreateOptions(t *testing.T) {
 	}
 	if options.HostConfig.NetworkMode != network.NetworkBridge {
 		t.Fatalf("network mode = %q, want bridge", options.HostConfig.NetworkMode)
+	}
+	if options.NetworkingConfig != nil {
+		t.Fatalf("published access must not set a networking config: %+v", options.NetworkingConfig)
 	}
 	if options.HostConfig.AutoRemove {
 		t.Fatal("managed containers must not auto-remove")
@@ -247,6 +272,73 @@ func TestCreateOptions(t *testing.T) {
 	spec.Env[0] = "CHANGED=1"
 	if options.Config.Cmd[0] != "run" || options.Config.Env[0] != "A=1" {
 		t.Fatalf("create options share command or environment slices: %v %v", options.Config.Cmd, options.Config.Env)
+	}
+}
+
+func TestCreateOptionsNetwork(t *testing.T) {
+	spec := validSpec()
+	spec.Access = AccessNetwork
+	spec.Network = "cloudlet-execution"
+	options, err := spec.createOptions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if options.Name != "cloudlet-7-default-9-project-1-10-resource-1-1" {
+		t.Fatalf("name = %q", options.Name)
+	}
+	if options.HostConfig == nil || options.Config == nil {
+		t.Fatal("create options must include config and host config")
+	}
+	if options.HostConfig.NetworkMode != container.NetworkMode("cloudlet-execution") {
+		t.Fatalf("network mode = %q, want cloudlet-execution", options.HostConfig.NetworkMode)
+	}
+	if len(options.HostConfig.PortBindings) != 0 {
+		t.Fatalf("network access must not publish ports: %+v", options.HostConfig.PortBindings)
+	}
+	if options.NetworkingConfig == nil {
+		t.Fatal("network access must set a networking config")
+	}
+	endpoint, found := options.NetworkingConfig.EndpointsConfig["cloudlet-execution"]
+	if !found {
+		t.Fatalf("endpoint config = %+v, want cloudlet-execution", options.NetworkingConfig.EndpointsConfig)
+	}
+	wantAlias := spec.Ownership.networkAlias()
+	if !slices.Contains(endpoint.Aliases, wantAlias) {
+		t.Fatalf("aliases = %v, want %q", endpoint.Aliases, wantAlias)
+	}
+	if !validDNSLabel(wantAlias) {
+		t.Fatalf("network alias %q is not a valid DNS label", wantAlias)
+	}
+	port := network.MustParsePort("8080/tcp")
+	if _, found := options.Config.ExposedPorts[port]; !found {
+		t.Fatalf("exposed ports = %v, want %s", options.Config.ExposedPorts, port)
+	}
+	if options.HostConfig.AutoRemove {
+		t.Fatal("managed containers must not auto-remove")
+	}
+	if !options.HostConfig.RestartPolicy.IsNone() {
+		t.Fatalf("restart policy = %+v, want disabled", options.HostConfig.RestartPolicy)
+	}
+}
+
+func TestNetworkAliasIsStableAndUnique(t *testing.T) {
+	ownership := validOwnership()
+	alias := ownership.networkAlias()
+	if alias != ownership.networkAlias() {
+		t.Fatalf("network alias is not stable: %q != %q", alias, ownership.networkAlias())
+	}
+	if !validDNSLabel(alias) {
+		t.Fatalf("network alias %q is not a valid DNS label", alias)
+	}
+	other := ownership
+	other.Generation = 2
+	if other.networkAlias() == alias {
+		t.Fatalf("network alias %q does not distinguish generations", alias)
+	}
+	long := ownership
+	long.Resource = strings.Repeat("a", maxIdentifierLength)
+	if !validDNSLabel(long.networkAlias()) {
+		t.Fatalf("network alias %q is not a valid DNS label", long.networkAlias())
 	}
 }
 
@@ -284,6 +376,195 @@ func TestObserve(t *testing.T) {
 	}
 	if observation.Ports[1].ContainerPort != 8443 || observation.Ports[1].HostAddress() != "[::1]:49153" {
 		t.Fatalf("second port = %+v", observation.Ports[1])
+	}
+	if observation.Endpoints != nil {
+		t.Fatalf("endpoints = %+v, want none for the default bridge", observation.Endpoints)
+	}
+}
+
+func TestObserveNetworkEndpoints(t *testing.T) {
+	const containerName = "cloudlet-7-default-9-project-1-10-resource-1-1"
+	alias := managedNetworkAlias(containerName)
+	info := container.InspectResponse{
+		ID:   "0123456789abcdef",
+		Name: "/" + containerName,
+		Config: &container.Config{
+			Image:        "nginx:1.29.3-alpine",
+			ExposedPorts: network.PortSet{network.MustParsePort("8080/tcp"): {}, network.MustParsePort("9090/tcp"): {}},
+			Labels:       map[string]string{LabelPort: "8080"},
+		},
+		State: &container.State{Status: container.StateRunning, Running: true},
+		NetworkSettings: &container.NetworkSettings{
+			Networks: map[string]*network.EndpointSettings{
+				"bridge": {IPAddress: netip.MustParseAddr("172.17.0.2")},
+				"cloudlet-execution": {
+					IPAddress: netip.MustParseAddr("172.18.0.2"),
+					Aliases:   []string{alias},
+				},
+				"cloudlet-other": {
+					GlobalIPv6Address: netip.MustParseAddr("fd00::2"),
+				},
+			},
+		},
+	}
+	observation, err := observe(info)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(observation.Endpoints) != 2 {
+		t.Fatalf("endpoints = %+v, want 2", observation.Endpoints)
+	}
+	want := []NetworkEndpoint{
+		{Network: "cloudlet-execution", Name: alias, IP: netip.MustParseAddr("172.18.0.2"), ContainerPort: 8080, Protocol: "tcp"},
+		{Network: "cloudlet-other", Name: "", IP: netip.MustParseAddr("fd00::2"), ContainerPort: 8080, Protocol: "tcp"},
+	}
+	if !slices.Equal(observation.Endpoints, want) {
+		t.Fatalf("endpoints = %+v, want %+v", observation.Endpoints, want)
+	}
+	if got, want := observation.Endpoints[0].Address(), alias+":8080"; got != want {
+		t.Fatalf("Address() = %q, want %q", got, want)
+	}
+	if got, want := observation.Endpoints[0].IPAddress(), "172.18.0.2:8080"; got != want {
+		t.Fatalf("IPAddress() = %q, want %q", got, want)
+	}
+	if got, want := observation.Endpoints[1].Address(), "[fd00::2]:8080"; got != want {
+		t.Fatalf("Address() without alias = %q, want %q", got, want)
+	}
+	if got, want := observation.Endpoints[1].IPAddress(), "[fd00::2]:8080"; got != want {
+		t.Fatalf("IPv6 IPAddress() = %q, want %q", got, want)
+	}
+}
+
+func TestObserveNetworkEndpointFromDNSNames(t *testing.T) {
+	const containerName = "cloudlet-7-default-9-project-1-10-resource-1-1"
+	alias := managedNetworkAlias(containerName)
+	observation, err := observe(container.InspectResponse{
+		ID:   "0123456789abcdef",
+		Name: "/" + containerName,
+		Config: &container.Config{
+			ExposedPorts: network.PortSet{network.MustParsePort("8080/tcp"): {}},
+			Labels:       map[string]string{LabelPort: "8080"},
+		},
+		State: &container.State{Status: container.StateRunning, Running: true},
+		NetworkSettings: &container.NetworkSettings{
+			Networks: map[string]*network.EndpointSettings{
+				"cloudlet-execution": {
+					IPAddress: netip.MustParseAddr("172.18.0.2"),
+					DNSNames:  []string{alias},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(observation.Endpoints) != 1 || observation.Endpoints[0].Name != alias {
+		t.Fatalf("endpoints = %+v, want alias %q", observation.Endpoints, alias)
+	}
+}
+
+func TestObserveNetworkEndpointWithoutAddress(t *testing.T) {
+	observation, err := observe(container.InspectResponse{
+		ID:   "0123456789abcdef",
+		Name: "/cloudlet-7-default-9-project-1-10-resource-1-1",
+		Config: &container.Config{
+			ExposedPorts: network.PortSet{network.MustParsePort("8080/tcp"): {}},
+			Labels:       map[string]string{LabelPort: "8080"},
+		},
+		State: &container.State{Status: container.StateExited},
+		NetworkSettings: &container.NetworkSettings{
+			Networks: map[string]*network.EndpointSettings{
+				"cloudlet-execution": {},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observation.Endpoints != nil {
+		t.Fatalf("endpoints = %+v, want none for a stopped container", observation.Endpoints)
+	}
+}
+
+func TestObserveRejectsInvalidNetworkData(t *testing.T) {
+	base := container.InspectResponse{
+		ID:   "0123456789abcdef",
+		Name: "/cloudlet-7-default-9-project-1-10-resource-1-1",
+		Config: &container.Config{
+			ExposedPorts: network.PortSet{network.MustParsePort("8080/tcp"): {}},
+			Labels:       map[string]string{LabelPort: "8080"},
+		},
+		State: &container.State{Status: container.StateRunning, Running: true},
+		NetworkSettings: &container.NetworkSettings{
+			Networks: map[string]*network.EndpointSettings{
+				"cloudlet-execution": {IPAddress: netip.MustParseAddr("172.18.0.2")},
+			},
+		},
+	}
+	tests := []struct {
+		name   string
+		change func(*container.InspectResponse)
+	}{
+		{"nil endpoint settings", func(info *container.InspectResponse) {
+			info.NetworkSettings.Networks["cloudlet-execution"] = nil
+		}},
+		{"loopback address", func(info *container.InspectResponse) {
+			info.NetworkSettings.Networks["cloudlet-execution"].IPAddress = netip.MustParseAddr("127.0.0.1")
+		}},
+		{"unspecified address", func(info *container.InspectResponse) {
+			info.NetworkSettings.Networks["cloudlet-execution"].IPAddress = netip.MustParseAddr("0.0.0.0")
+		}},
+		{"link-local address", func(info *container.InspectResponse) {
+			info.NetworkSettings.Networks["cloudlet-execution"].IPAddress = netip.MustParseAddr("169.254.1.1")
+		}},
+		{"invalid port label", func(info *container.InspectResponse) {
+			info.Config.Labels[LabelPort] = "http"
+		}},
+		{"zero port label", func(info *container.InspectResponse) {
+			info.Config.Labels[LabelPort] = "0"
+		}},
+		{"port label with protocol", func(info *container.InspectResponse) {
+			info.Config.Labels[LabelPort] = "8080/tcp"
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			info := base
+			info.Config = &container.Config{
+				ExposedPorts: base.Config.ExposedPorts,
+				Labels:       maps.Clone(base.Config.Labels),
+			}
+			networks := map[string]*network.EndpointSettings{}
+			for name, settings := range base.NetworkSettings.Networks {
+				clone := *settings
+				networks[name] = &clone
+			}
+			info.NetworkSettings = &container.NetworkSettings{Networks: networks}
+			test.change(&info)
+			if _, err := observe(info); err == nil || !errors.Is(err, fs.ErrInvalid) {
+				t.Fatalf("observe() = %v, want fs.ErrInvalid", err)
+			}
+		})
+	}
+}
+
+func TestObserveNetworkWithoutManagedPort(t *testing.T) {
+	observation, err := observe(container.InspectResponse{
+		ID:     "0123456789abcdef",
+		Name:   "/cloudlet-7-default-9-project-1-10-resource-1-1",
+		Config: &container.Config{ExposedPorts: network.PortSet{network.MustParsePort("8080/tcp"): {}}},
+		State:  &container.State{Status: container.StateRunning, Running: true},
+		NetworkSettings: &container.NetworkSettings{
+			Networks: map[string]*network.EndpointSettings{
+				"cloudlet-execution": {IPAddress: netip.MustParseAddr("172.18.0.2")},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observation.Endpoints != nil {
+		t.Fatalf("endpoints = %+v, want none without a managed port label", observation.Endpoints)
 	}
 }
 
@@ -344,6 +625,9 @@ func TestObserveWithoutNetworkSettings(t *testing.T) {
 	if observation.Ports != nil {
 		t.Fatalf("ports = %+v, want none", observation.Ports)
 	}
+	if observation.Endpoints != nil {
+		t.Fatalf("endpoints = %+v, want none", observation.Endpoints)
+	}
 }
 
 func TestValidateContainerID(t *testing.T) {
@@ -357,4 +641,100 @@ func TestValidateContainerID(t *testing.T) {
 			t.Fatalf("validateContainerID(%q) = %v, want fs.ErrInvalid", id, err)
 		}
 	}
+}
+
+func TestSpecValidateAcceptsNetworkAccess(t *testing.T) {
+	for _, name := range []string{"a", "cloudlet-execution", "cloudlet_net.1", strings.Repeat("a", maxNetworkName)} {
+		spec := validSpec()
+		spec.Access = AccessNetwork
+		spec.Network = name
+		if err := spec.validate(); err != nil {
+			t.Fatalf("validate network %q: %v", name, err)
+		}
+	}
+}
+
+func TestVerifyNetwork(t *testing.T) {
+	valid := network.Inspect{Network: network.Network{Name: "cloudlet-execution", Scope: "local", Driver: "bridge"}}
+	if err := verifyNetwork("cloudlet-execution", valid); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name   string
+		change func(*network.Inspect)
+	}{
+		{"name mismatch", func(info *network.Inspect) { info.Name = "other" }},
+		{"swarm scope", func(info *network.Inspect) { info.Scope = "swarm" }},
+		{"config only", func(info *network.Inspect) { info.ConfigOnly = true }},
+		{"non-bridge driver", func(info *network.Inspect) { info.Driver = "macvlan" }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			info := valid
+			test.change(&info)
+			if err := verifyNetwork("cloudlet-execution", info); err == nil || !errors.Is(err, fs.ErrInvalid) {
+				t.Fatalf("verifyNetwork() = %v, want fs.ErrInvalid", err)
+			}
+		})
+	}
+}
+
+func TestObserveNetworkEndpointWithoutAlias(t *testing.T) {
+	const containerName = "cloudlet-7-default-9-project-1-10-resource-1-1"
+	observation, err := observe(container.InspectResponse{
+		ID:   "0123456789abcdef",
+		Name: "/" + containerName,
+		Config: &container.Config{
+			ExposedPorts: network.PortSet{network.MustParsePort("8080/tcp"): {}},
+			Labels:       map[string]string{LabelPort: "8080"},
+		},
+		State: &container.State{Status: container.StateRunning, Running: true},
+		NetworkSettings: &container.NetworkSettings{
+			Networks: map[string]*network.EndpointSettings{
+				"cloudlet-execution": {IPAddress: netip.MustParseAddr("172.18.0.2")},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(observation.Endpoints) != 1 {
+		t.Fatalf("endpoints = %+v, want 1", observation.Endpoints)
+	}
+	endpoint := observation.Endpoints[0]
+	if endpoint.Name != "" {
+		t.Fatalf("endpoint name = %q, want empty without a registered alias", endpoint.Name)
+	}
+	if got, want := endpoint.Address(), "172.18.0.2:8080"; got != want {
+		t.Fatalf("Address() = %q, want %q", got, want)
+	}
+}
+
+func TestManagedNetworkAliasFormat(t *testing.T) {
+	alias := validOwnership().networkAlias()
+	if !strings.HasPrefix(alias, "cloudlet-") {
+		t.Fatalf("network alias %q does not use the cloudlet prefix", alias)
+	}
+	if len(alias) != len("cloudlet-")+32 {
+		t.Fatalf("network alias %q has length %d, want %d", alias, len(alias), len("cloudlet-")+32)
+	}
+	if !validDNSLabel(alias) {
+		t.Fatalf("network alias %q is not a valid DNS label", alias)
+	}
+}
+
+func validDNSLabel(value string) bool {
+	if value == "" || len(value) > 63 {
+		return false
+	}
+	if value[0] == '-' || value[len(value)-1] == '-' {
+		return false
+	}
+	for index := 0; index < len(value); index++ {
+		char := value[index]
+		if !(char >= 'a' && char <= 'z' || char >= 'A' && char <= 'Z' || char >= '0' && char <= '9' || char == '-') {
+			return false
+		}
+	}
+	return true
 }
