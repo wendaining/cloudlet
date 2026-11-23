@@ -21,6 +21,21 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("management API returned HTTP %d", e.StatusCode)
 }
 
+// ListProjectOperations returns operations visible in a project accessible to the session.
+func (c *Client) ListProjectOperations(ctx context.Context, projectID string) ([]apigen.Operation, error) {
+	response, err := c.api.ListProjectOperationsWithResponse(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("list operations for project %q: %w", projectID, err)
+	}
+	if response.StatusCode() != http.StatusOK {
+		return nil, &APIError{StatusCode: response.StatusCode()}
+	}
+	if response.JSON200 == nil {
+		return nil, errors.New("list project operations returned an empty response")
+	}
+	return *response.JSON200, nil
+}
+
 // ProjectOperation returns an operation visible in the specified project.
 // It selects from the authenticated project-scoped list so the API enforces
 // membership without requiring a new endpoint.
@@ -34,22 +49,12 @@ func (c *Client) ProjectOperation(ctx context.Context, projectID, operationID st
 		return apigen.Operation{}, fmt.Errorf("invalid operation ID %q: %w", operationID, err)
 	}
 
-	response, err := c.api.ListProjectOperationsWithResponse(ctx, projectUUID.String())
+	operations, err := c.ListProjectOperations(ctx, projectUUID.String())
 	if err != nil {
-		return apigen.Operation{}, fmt.Errorf("list project operations: %w", err)
+		return apigen.Operation{}, err
 	}
-	if response.StatusCode() != http.StatusOK {
-		return apigen.Operation{}, &APIError{StatusCode: response.StatusCode()}
-	}
-	if response.JSON200 == nil {
-		return apigen.Operation{}, fmt.Errorf("list project operations returned an empty response")
-	}
-	for _, operation := range *response.JSON200 {
-		foundUUID, err := uuid.Parse(operation.Id.String())
-		if err != nil {
-			return apigen.Operation{}, fmt.Errorf("API returned invalid operation ID %q: %w", operation.Id, err)
-		}
-		if foundUUID == operationUUID {
+	for _, operation := range operations {
+		if operation.Id == operationUUID {
 			return operation, nil
 		}
 	}
