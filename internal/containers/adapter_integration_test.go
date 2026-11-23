@@ -377,6 +377,140 @@ func TestAdapterCreateRejectsMissingNetwork(t *testing.T) {
 	}
 }
 
+func TestAdapterCreateRejectsNetworkIDPrefix(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	docker, err := client.New(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = docker.Close() })
+	adapter, err := containers.New(ctx, docker)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	networkName := createTestNetwork(ctx, t, docker)
+	networkInfo, err := docker.NetworkInspect(ctx, networkName, client.NetworkInspectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Docker resolves a network ID prefix even though the adapter requires a
+	// name. The mismatch must be reported as a missing network, not as an
+	// invalid spec.
+	prefix := networkInfo.Network.ID[:12]
+	ownership := containers.Ownership{
+		Environment: "integration",
+		Project:     "project-" + rand.Text(),
+		Resource:    "container-" + rand.Text(),
+		Generation:  1,
+	}
+	spec := containers.Spec{
+		Ownership: ownership,
+		Image:     httpImage(t),
+		User:      "101",
+		Port:      8080,
+		Access:    containers.AccessNetwork,
+		Network:   prefix,
+		Limits: containers.Limits{
+			CPUMillis:   500,
+			MemoryBytes: 128 << 20,
+			PIDs:        64,
+			OpenFiles:   1024,
+		},
+	}
+	_, createErr := adapter.Create(ctx, spec)
+	if !errors.Is(createErr, containers.ErrNetworkNotFound) {
+		t.Fatalf("create with network ID prefix = %v, want ErrNetworkNotFound", createErr)
+	}
+	filters := make(client.Filters).Add("label", containers.LabelResource+"="+ownership.Resource)
+	list, err := docker.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: filters})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Items) != 0 {
+		t.Fatalf("network ID prefix still created containers: %+v", list.Items)
+	}
+}
+
+func TestAdapterStartReportsMissingNetwork(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
+	defer cancel()
+
+	docker, err := client.New(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = docker.Close() })
+
+	image := httpImage(t)
+	ensureImage(ctx, t, docker, image)
+	adapter, err := containers.New(ctx, docker)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	networkName := createTestNetwork(ctx, t, docker)
+	ownership := containers.Ownership{
+		Environment: "integration",
+		Project:     "project-" + rand.Text(),
+		Resource:    "container-" + rand.Text(),
+		Generation:  1,
+	}
+	spec := containers.Spec{
+		Ownership: ownership,
+		Image:     image,
+		User:      "101",
+		Port:      8080,
+		Access:    containers.AccessNetwork,
+		Network:   networkName,
+		Limits: containers.Limits{
+			CPUMillis:   500,
+			MemoryBytes: 128 << 20,
+			PIDs:        64,
+			OpenFiles:   1024,
+		},
+	}
+	created, err := adapter.Create(ctx, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cleanupCancel()
+		if err := adapter.Stop(cleanupCtx, ownership, created.ID); err != nil && !errors.Is(err, containers.ErrNotFound) {
+			t.Errorf("cleanup stop: %v", err)
+		}
+		if err := adapter.Remove(cleanupCtx, ownership, created.ID); err != nil && !errors.Is(err, containers.ErrNotFound) {
+			t.Errorf("cleanup remove: %v", err)
+		}
+		if _, err := docker.ContainerInspect(cleanupCtx, created.ID, client.ContainerInspectOptions{}); err == nil {
+			_, _ = docker.ContainerRemove(cleanupCtx, created.ID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true})
+		}
+	})
+
+	// A created container does not keep its network alive. Removing the network
+	// must surface as a network error, not as a missing container.
+	if _, err := docker.NetworkRemove(ctx, networkName, client.NetworkRemoveOptions{}); err != nil {
+		t.Fatalf("remove network %s: %v", networkName, err)
+	}
+	_, startErr := adapter.Start(ctx, ownership, created.ID)
+	if !errors.Is(startErr, containers.ErrNetworkNotFound) {
+		t.Fatalf("start after network removal = %v, want ErrNetworkNotFound", startErr)
+	}
+	if errors.Is(startErr, containers.ErrNotFound) {
+		t.Fatalf("start after network removal = %v, must not be ErrNotFound", startErr)
+	}
+	observation, err := adapter.Observe(ctx, ownership, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observation.Running || observation.Status != string(container.StateCreated) {
+		t.Fatalf("container state after failed start = %+v, want created", observation)
+	}
+}
+
 func httpImage(t *testing.T) string {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join("..", "..", "configs", "images.json"))

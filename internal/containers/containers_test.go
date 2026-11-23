@@ -662,18 +662,43 @@ func TestVerifyNetwork(t *testing.T) {
 	tests := []struct {
 		name   string
 		change func(*network.Inspect)
+		want   error
 	}{
-		{"name mismatch", func(info *network.Inspect) { info.Name = "other" }},
-		{"swarm scope", func(info *network.Inspect) { info.Scope = "swarm" }},
-		{"config only", func(info *network.Inspect) { info.ConfigOnly = true }},
-		{"non-bridge driver", func(info *network.Inspect) { info.Driver = "macvlan" }},
+		{"name mismatch", func(info *network.Inspect) { info.Name = "other" }, ErrNetworkNotFound},
+		{"swarm scope", func(info *network.Inspect) { info.Scope = "swarm" }, fs.ErrInvalid},
+		{"config only", func(info *network.Inspect) { info.ConfigOnly = true }, fs.ErrInvalid},
+		{"non-bridge driver", func(info *network.Inspect) { info.Driver = "macvlan" }, fs.ErrInvalid},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			info := valid
 			test.change(&info)
-			if err := verifyNetwork("cloudlet-execution", info); err == nil || !errors.Is(err, fs.ErrInvalid) {
-				t.Fatalf("verifyNetwork() = %v, want fs.ErrInvalid", err)
+			if err := verifyNetwork("cloudlet-execution", info); !errors.Is(err, test.want) {
+				t.Fatalf("verifyNetwork() = %v, want %v", err, test.want)
+			}
+		})
+	}
+}
+
+func TestManagedNetworkMode(t *testing.T) {
+	tests := []struct {
+		name string
+		info container.InspectResponse
+		want string
+	}{
+		{"missing host config", container.InspectResponse{}, ""},
+		{"empty mode", container.InspectResponse{HostConfig: &container.HostConfig{}}, ""},
+		{"default", container.InspectResponse{HostConfig: &container.HostConfig{NetworkMode: network.NetworkDefault}}, ""},
+		{"bridge", container.InspectResponse{HostConfig: &container.HostConfig{NetworkMode: network.NetworkBridge}}, ""},
+		{"host", container.InspectResponse{HostConfig: &container.HostConfig{NetworkMode: network.NetworkHost}}, ""},
+		{"none", container.InspectResponse{HostConfig: &container.HostConfig{NetworkMode: network.NetworkNone}}, ""},
+		{"shared container", container.InspectResponse{HostConfig: &container.HostConfig{NetworkMode: "container:abc"}}, ""},
+		{"user network", container.InspectResponse{HostConfig: &container.HostConfig{NetworkMode: "cloudlet-execution"}}, "cloudlet-execution"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := managedNetworkMode(test.info); got != test.want {
+				t.Fatalf("managedNetworkMode() = %q, want %q", got, test.want)
 			}
 		})
 	}

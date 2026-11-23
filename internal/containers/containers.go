@@ -109,6 +109,10 @@ type Limits struct {
 // Access is required. AccessPublished publishes Port on the host loopback
 // interface. AccessNetwork joins the existing user-defined bridge network in
 // Network and exposes Port only to peers on that network.
+//
+// The adapter does not verify network ownership. Callers must pass a
+// platform-controlled network name; project network isolation and ownership
+// labels are handled by #154.
 type Spec struct {
 	Ownership Ownership
 	Image     string
