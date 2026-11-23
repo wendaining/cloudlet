@@ -54,6 +54,17 @@ go test -race -count=1 -tags=integration -v ./internal/workers
 
 同一入口中的 `TestWorkerdPersistsDurableObjectSQLite` 通过 HTTP 调用名为 `alpha` 和 `beta` 的两个对象。两个对象使用相同的 SQL 表和键保存各自的值。测试停止第一个容器，用原数据卷启动新容器，然后确认两个对象的标识和各自的值都保持不变。
 
+## Worker 构建验证
+
+`runtimes/workers` 提供 TypeScript Worker 构建命令。默认入口为 `src/index.ts`，默认输出为 `dist/index.mjs`。命令先执行 tsc 类型检查，再用 esbuild 打包为单文件 ES Module。
+
+```sh
+npm run check --workspace runtimes/workers
+npm run build --workspace runtimes/workers
+```
+
+`TestWorkerBuildRunsInWorkerd` 使用同一示例源码构建两次并比较 SHA-256，再用固定 workerd 调用构建结果。`TestWorkerBuildReportsTypeErrors` 修改类型后验证构建返回 TS2322 诊断。
+
 ## Browser Run 验证
 
 在 Node.js 24 和本机 Linux Docker Engine 下执行：

@@ -3,6 +3,7 @@
 /.local/
 node_modules/
 web/dist/
+runtimes/workers/dist/
 playwright-report/
 test-results/
 *.test

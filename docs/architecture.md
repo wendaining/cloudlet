@@ -40,6 +40,7 @@ Cloudlet 在一台 Linux 服务器上管理计算资源。本地开发在成员�
 | internal/version | 构建版本和提交标识 |
 | internal/workers | ES Module 与 Durable Objects 的 workerd 配置、启动参数和镜像引用 |
 | internal/durableobjects | SQLite 命名空间、类绑定和存储挂载路径 |
+| runtimes/workers | TypeScript Worker 构建命令与示例入口 |
 | internal/containers | Docker Engine 镜像摘要准备、容器生命周期与回环端口观测 |
 | internal/browser | 复用容器管理的 Playwright 会话 |
 | pkg/client | CLI 与其他客户端共享的 API 客户端 |
