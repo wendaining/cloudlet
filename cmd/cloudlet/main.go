@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -32,10 +34,17 @@ func main() {
 			return json.NewEncoder(cmd.OutOrStdout()).Encode(map[string]string{"status": status})
 		},
 	}
+	root.SilenceErrors = true
+	root.AddCommand(newOperationCommand())
 	health.Flags().StringVar(&endpoint, "endpoint", "http://127.0.0.1:8080", "management API endpoint")
 	root.AddCommand(health)
 	root.AddCommand(newProjectsCommand())
 	if err := root.Execute(); err != nil {
-		os.Exit(1)
+		fmt.Fprintln(os.Stderr, err)
+		var commandErr *commandError
+		if errors.As(err, &commandErr) {
+			os.Exit(commandErr.code)
+		}
+		os.Exit(exitError)
 	}
 }
