@@ -59,6 +59,16 @@
   padding: 48px 24px;
 }
 
+.members {
+  margin-top: 24px;
+}
+
+.memberForm {
+  margin-top: 24px;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .loading {
   width: 240px;
   height: 100px;

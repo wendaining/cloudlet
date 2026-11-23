@@ -7,6 +7,10 @@ export type LoginRequest = components['schemas']['LoginRequest'];
 export type Project = components['schemas']['Project'];
 export type CreateProjectRequest =
   components['schemas']['CreateProjectRequest'];
+export type ProjectMember = components['schemas']['ProjectMember'];
+export type ProjectMemberRole = components['schemas']['ProjectMemberRole'];
+export type UpsertProjectMemberRequest =
+  components['schemas']['UpsertProjectMemberRequest'];
 const client = createClient<paths>();
 
 export async function session() {
@@ -88,5 +92,35 @@ export async function project(id: string) {
   if (response.status === 404) return null;
   if (error) throw new Error(error.message);
   if (!data) throw new Error(`项目查询失败，状态码 ${status}`);
+  return data;
+}
+
+export async function projectMembers(id: string) {
+  const { data, error, response } = await client.GET(
+    '/api/v1/projects/{projectID}/members',
+    {
+      params: { path: { projectID: id } },
+    },
+  );
+  const status = response.status;
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error(`项目成员查询失败，状态码 ${status}`);
+  return data;
+}
+
+export async function upsertProjectMember(
+  id: string,
+  body: UpsertProjectMemberRequest,
+) {
+  const { data, error, response } = await client.POST(
+    '/api/v1/projects/{projectID}/members',
+    {
+      params: { path: { projectID: id } },
+      body,
+    },
+  );
+  const status = response.status;
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error(`成员保存失败，状态码 ${status}`);
   return data;
 }

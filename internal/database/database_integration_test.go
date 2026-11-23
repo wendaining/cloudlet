@@ -205,6 +205,10 @@ func TestPostgresMigrationAccountsSessionsAndProjects(t *testing.T) {
 	if persisted.Role != "owner" {
 		t.Fatalf("重新连接后项目所有者关系错误: %+v", persisted)
 	}
+	persistedProject := decodeProject(t, memberRequest(t, client, http.MethodGet, api.URL+"/api/v1/projects/"+projectID, nil, http.StatusOK))
+	if persistedProject.Id != project.Id || persistedProject.Name != "重命名后项目" {
+		t.Fatalf("服务重连后项目名称错误: %+v", persistedProject)
+	}
 	persistedMembers, err := reopened.ProjectMembers(ctx, projectID)
 	if err != nil {
 		t.Fatal(err)
@@ -219,6 +223,9 @@ func TestPostgresMigrationAccountsSessionsAndProjects(t *testing.T) {
 	api = newServer(store)
 	t.Run("operations", func(t *testing.T) {
 		testOperations(t, ctx, store, connection, project.Id, user.ID)
+	})
+	t.Run("operation CLI", func(t *testing.T) {
+		testOperationCLI(t, ctx, api, store, project.Id, otherUser.ID, client)
 	})
 	request("POST", api.URL+"/api/v1/auth/logout", "", http.StatusNoContent)
 	request("GET", api.URL+"/api/v1/auth/session", "", http.StatusUnauthorized)
@@ -335,6 +342,14 @@ func projectMemberLifecycle(t *testing.T, ctx context.Context, api *httptest.Ser
 	memberRequest(t, viewerClient, http.MethodGet, otherBase, nil, http.StatusNotFound).Body.Close()
 	memberRequest(t, outsiderClient, http.MethodGet, base, nil, http.StatusNotFound).Body.Close()
 	memberRequest(t, outsiderClient, http.MethodPost, base, map[string]string{"email": viewerEmail, "role": "viewer"}, http.StatusNotFound).Body.Close()
+	projectRenameLifecycle(t, api, ownerClient, developerClient, viewerClient, outsiderClient, project)
+	if err := store.RenameProject(ctx, project.Id.String(), developer.ID, "直接越权改名"); !errors.Is(err, database.ErrProjectNotOwner) {
+		t.Fatalf("数据库更新未拒绝非所有者: %v", err)
+	}
+	renamedProject, err := store.Project(ctx, owner.ID, project.Id.String())
+	if err != nil || renamedProject.Name != "重命名后项目" {
+		t.Fatalf("数据库拒绝非所有者后项目名称错误: %+v, %v", renamedProject, err)
+	}
 
 	storedMembers, err := store.ProjectMembers(ctx, project.Id.String())
 	if err != nil {
@@ -378,6 +393,32 @@ func projectMemberLifecycle(t *testing.T, ctx context.Context, api *httptest.Ser
 		t.Fatal("超长邮箱通过了账号创建")
 	}
 	memberRequest(t, ownerClient, http.MethodPost, longBase, map[string]string{"email": tooLongEmail, "role": "viewer"}, http.StatusBadRequest).Body.Close()
+}
+
+func projectRenameLifecycle(t *testing.T, api *httptest.Server, ownerClient, developerClient, viewerClient, outsiderClient *http.Client, project apigen.Project) {
+	t.Helper()
+	url := api.URL + "/api/v1/projects/" + project.Id.String()
+	memberRequest(t, newSessionClient(t), http.MethodPatch, url, map[string]string{"name": "未授权"}, http.StatusUnauthorized).Body.Close()
+	memberRequest(t, developerClient, http.MethodPatch, url, map[string]string{"name": "开发者改名"}, http.StatusForbidden).Body.Close()
+	memberRequest(t, viewerClient, http.MethodPatch, url, map[string]string{"name": "观察者改名"}, http.StatusForbidden).Body.Close()
+	memberRequest(t, outsiderClient, http.MethodPatch, url, map[string]string{"name": "非成员改名"}, http.StatusNotFound).Body.Close()
+	memberRequest(t, ownerClient, http.MethodPatch, url, map[string]string{"name": "   "}, http.StatusBadRequest).Body.Close()
+	memberRequest(t, ownerClient, http.MethodPatch, url, map[string]string{"name": strings.Repeat("界", 101)}, http.StatusBadRequest).Body.Close()
+	memberRequest(t, ownerClient, http.MethodPatch, url, map[string]any{"name": "无效字段", "typo": true}, http.StatusBadRequest).Body.Close()
+	renamed := decodeProject(t, memberRequest(t, ownerClient, http.MethodPatch, url, map[string]string{"name": "  重命名后项目  "}, http.StatusOK))
+	if renamed.Id != project.Id || renamed.Name != "重命名后项目" {
+		t.Fatalf("项目重命名响应错误: %+v", renamed)
+	}
+	for _, client := range []*http.Client{ownerClient, developerClient, viewerClient} {
+		got := decodeProject(t, memberRequest(t, client, http.MethodGet, url, nil, http.StatusOK))
+		if got.Id != project.Id || got.Name != renamed.Name {
+			t.Fatalf("重命名后项目读取错误: %+v", got)
+		}
+		members := decodeProjectMembers(t, memberRequest(t, client, http.MethodGet, url+"/members", nil, http.StatusOK))
+		if len(members) != 3 || members[0].Role != "owner" || members[1].Role != "developer" || members[2].Role != "viewer" {
+			t.Fatalf("重命名后成员关系发生变化: %+v", members)
+		}
+	}
 }
 
 func newSessionClient(t *testing.T) *http.Client {
