@@ -530,32 +530,7 @@ func TestContainerAdmission(t *testing.T) {
 			_, _ = docker.ContainerRemove(cleanupCtx, replacement.ID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true})
 		})
 
-		if err := databaseStore.DB.Exec("CREATE SEQUENCE fail_release_once_seq").Error; err != nil {
-			t.Fatal(err)
-		}
-		if err := databaseStore.DB.Exec(`CREATE OR REPLACE FUNCTION fail_release_once_fn() RETURNS trigger AS $$
-			BEGIN
-				IF nextval('fail_release_once_seq') = 1 THEN
-					RAISE EXCEPTION 'forced release failure';
-				END IF;
-				RETURN NEW;
-			END;
-			$$ LANGUAGE plpgsql`).Error; err != nil {
-			t.Fatal(err)
-		}
-		if err := databaseStore.DB.Exec(`CREATE TRIGGER fail_release_once_trigger
-			BEFORE UPDATE ON capacity_reservations
-			FOR EACH ROW WHEN (OLD.state = 'active' AND NEW.state = 'released')
-			EXECUTE FUNCTION fail_release_once_fn()`).Error; err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() {
-			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
-			defer cleanupCancel()
-			_ = databaseStore.DB.WithContext(cleanupCtx).Exec("DROP TRIGGER IF EXISTS fail_release_once_trigger ON capacity_reservations").Error
-			_ = databaseStore.DB.WithContext(cleanupCtx).Exec("DROP FUNCTION IF EXISTS fail_release_once_fn()").Error
-			_ = databaseStore.DB.WithContext(cleanupCtx).Exec("DROP SEQUENCE IF EXISTS fail_release_once_seq").Error
-		})
+		installReleaseFailure(t, databaseStore)
 
 		if err := service.Stop(ctx, executions.StopRequest{
 			ExecutionID: executionID, ProjectID: projectB,
@@ -577,9 +552,7 @@ func TestContainerAdmission(t *testing.T) {
 			t.Fatalf("释放失败后替换容器仍存在: %+v, %t, %v", observation, found, err)
 		}
 
-		if err := databaseStore.DB.Exec("DROP TRIGGER IF EXISTS fail_release_once_trigger ON capacity_reservations").Error; err != nil {
-			t.Fatal(err)
-		}
+		dropReleaseFailureTrigger(t, databaseStore)
 		if err := service.Stop(ctx, executions.StopRequest{
 			ExecutionID: executionID, ProjectID: projectB,
 			Ownership: spec.Ownership, ContainerID: execution.Container.ID,
@@ -677,6 +650,65 @@ func TestContainerAdmission(t *testing.T) {
 		}
 	})
 
+	t.Run("long digest image is admitted", func(t *testing.T) {
+		executionID := uuid.New()
+		remember(projectB, executionID)
+		longImage := "registry.example.com/" + strings.Repeat("a", 200) + ":" + strings.Repeat("t", 30) + "@sha256:" + strings.Repeat("f", 64)
+		if len(longImage) <= 255 || len(longImage) > 512 {
+			t.Fatalf("边界镜像长度 %d 不在 256 至 512 之间", len(longImage))
+		}
+		spec := httpSpec(instance, projectB, "binding-long-image", longImage)
+		if _, err := service.Start(ctx, executions.StartRequest{ExecutionID: executionID, ProjectID: projectB, Spec: spec}); err == nil {
+			t.Fatal("不存在的长镜像启动未返回错误")
+		}
+		reservation, err := capacityStore.GetReservation(ctx, projectB, executionID)
+		if err != nil || reservation.State != capacity.Released {
+			t.Fatalf("长镜像未被准入或未释放: %+v, %v", reservation, err)
+		}
+		assertUsage(t, ctx, capacityStore, hostID, projectB, capacity.Usage{
+			HostID: hostID, HostLimit: budget,
+			HostUsed: capacity.Resources{}, ProjectID: projectB,
+			ProjectLimit: budget, ProjectUsed: capacity.Resources{},
+		})
+	})
+
+	t.Run("create failure returns reservation when release fails", func(t *testing.T) {
+		executionID := uuid.New()
+		remember(projectB, executionID)
+		spec := httpSpec(instance, projectB, "binding-create-release-failure", image)
+		spec.Image = "example.invalid/cloudlet-missing:latest"
+		installReleaseFailure(t, databaseStore)
+		execution, err := service.Start(ctx, executions.StartRequest{ExecutionID: executionID, ProjectID: projectB, Spec: spec})
+		if err == nil {
+			t.Fatal("无效镜像启动未返回错误")
+		}
+		if execution.Reservation.ExecutionID != executionID {
+			t.Fatalf("创建失败且释放失败时返回空预留: %+v", execution)
+		}
+		reservation, err := capacityStore.GetReservation(ctx, projectB, executionID)
+		if err != nil || reservation.State != capacity.Active {
+			t.Fatalf("创建失败且释放失败后预留为 %+v, %v，要求 active", reservation, err)
+		}
+		assertUsage(t, ctx, capacityStore, hostID, projectB, capacity.Usage{
+			HostID: hostID, HostLimit: budget,
+			HostUsed:  capacity.Resources{CPUMillis: 1000, MemoryBytes: 1 << 30, Instances: 1},
+			ProjectID: projectB, ProjectLimit: budget,
+			ProjectUsed: capacity.Resources{CPUMillis: 1000, MemoryBytes: 1 << 30, Instances: 1},
+		})
+		dropReleaseFailureTrigger(t, databaseStore)
+		if err := service.Stop(ctx, executions.StopRequest{
+			ExecutionID: executionID, ProjectID: projectB,
+			Ownership: spec.Ownership,
+		}); err != nil {
+			t.Fatalf("释放恢复失败: %v", err)
+		}
+		assertUsage(t, ctx, capacityStore, hostID, projectB, capacity.Usage{
+			HostID: hostID, HostLimit: budget,
+			HostUsed: capacity.Resources{}, ProjectID: projectB,
+			ProjectLimit: budget, ProjectUsed: capacity.Resources{},
+		})
+	})
+
 	t.Run("start failure cleans up binding and capacity", func(t *testing.T) {
 		executionID := uuid.New()
 		remember(projectB, executionID)
@@ -733,6 +765,43 @@ func TestContainerAdmission(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+}
+
+func installReleaseFailure(t *testing.T, store *database.Store) {
+	t.Helper()
+	if err := store.DB.Exec("CREATE SEQUENCE fail_release_once_seq").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DB.Exec(`CREATE OR REPLACE FUNCTION fail_release_once_fn() RETURNS trigger AS $$
+		BEGIN
+			IF nextval('fail_release_once_seq') = 1 THEN
+				RAISE EXCEPTION 'forced release failure';
+			END IF;
+			RETURN NEW;
+		END;
+		$$ LANGUAGE plpgsql`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DB.Exec(`CREATE TRIGGER fail_release_once_trigger
+		BEFORE UPDATE ON capacity_reservations
+		FOR EACH ROW WHEN (OLD.state = 'active' AND NEW.state = 'released')
+		EXECUTE FUNCTION fail_release_once_fn()`).Error; err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cleanupCancel()
+		_ = store.DB.WithContext(cleanupCtx).Exec("DROP TRIGGER IF EXISTS fail_release_once_trigger ON capacity_reservations").Error
+		_ = store.DB.WithContext(cleanupCtx).Exec("DROP FUNCTION IF EXISTS fail_release_once_fn()").Error
+		_ = store.DB.WithContext(cleanupCtx).Exec("DROP SEQUENCE IF EXISTS fail_release_once_seq").Error
+	})
+}
+
+func dropReleaseFailureTrigger(t *testing.T, store *database.Store) {
+	t.Helper()
+	if err := store.DB.Exec("DROP TRIGGER IF EXISTS fail_release_once_trigger ON capacity_reservations").Error; err != nil {
+		t.Fatal(err)
+	}
 }
 
 func httpSpec(instance string, projectID uuid.UUID, resource, image string) containers.Spec {

@@ -158,7 +158,11 @@ func (s *Service) Start(ctx context.Context, request StartRequest) (Execution, e
 		if found {
 			return s.adoptExisting(ctx, request, reservation, existing)
 		}
-		return Execution{}, s.releaseAfterFailure(ctx, request.ProjectID, request.ExecutionID, cause)
+		released, releaseErr := s.releaseAfterFailure(ctx, request.ProjectID, request.ExecutionID, cause)
+		if released {
+			return Execution{}, releaseErr
+		}
+		return Execution{Reservation: reservation}, releaseErr
 	}
 
 	updated, err := s.reservations.SetContainerID(ctx, request.ProjectID, request.ExecutionID, createdContainer.ID)
@@ -385,13 +389,13 @@ func checkAdoptedContainer(executionID uuid.UUID, existing containers.Observatio
 	return nil
 }
 
-func (s *Service) releaseAfterFailure(ctx context.Context, projectID, executionID uuid.UUID, cause error) error {
+func (s *Service) releaseAfterFailure(ctx context.Context, projectID, executionID uuid.UUID, cause error) (bool, error) {
 	releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
 	defer cancel()
 	if _, err := s.reservations.Release(releaseCtx, projectID, executionID); err != nil {
-		return errors.Join(cause, fmt.Errorf("释放执行 %s 的容量预留: %w", executionID, err))
+		return false, errors.Join(cause, fmt.Errorf("释放执行 %s 的容量预留: %w", executionID, err))
 	}
-	return cause
+	return true, cause
 }
 
 func (s *Service) cleanupAfterStartFailure(ctx context.Context, request StartRequest, created containers.Container, cause error) error {
@@ -402,6 +406,13 @@ func (s *Service) cleanupAfterStartFailure(ctx context.Context, request StartReq
 	}
 	if err := s.containers.Remove(cleanupCtx, request.Spec.Ownership, created.ID); err != nil && !errors.Is(err, containers.ErrNotFound) {
 		return errors.Join(cause, fmt.Errorf("保留执行 %s 的容量预留: 删除容器 %s 失败: %w", request.ExecutionID, created.ID, err))
+	}
+	observation, found, err := s.containers.Find(cleanupCtx, request.Spec.Ownership)
+	if err != nil {
+		return errors.Join(cause, fmt.Errorf("保留执行 %s 的容量预留: 确认容器清理失败: %w", request.ExecutionID, err))
+	}
+	if found {
+		return errors.Join(cause, fmt.Errorf("保留执行 %s 的容量预留: 容器 %s 仍然存在", request.ExecutionID, observation.ID))
 	}
 	if _, err := s.reservations.Release(cleanupCtx, request.ProjectID, request.ExecutionID); err != nil {
 		return errors.Join(cause, fmt.Errorf("清理容器 %s 后释放执行 %s 的容量预留失败: %w", created.ID, request.ExecutionID, err))

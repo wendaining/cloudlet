@@ -184,6 +184,15 @@ func TestBindingValidate(t *testing.T) {
 	if err := (Binding{}).validate(); err != nil {
 		t.Fatalf("空容器归属应允许: %v", err)
 	}
+	longImage := "registry.example.com/" + strings.Repeat("a", 200) + ":" + strings.Repeat("t", 30) + "@sha256:" + strings.Repeat("f", 64)
+	if len(longImage) <= 255 || len(longImage) > maxImageLength {
+		t.Fatalf("边界镜像长度 %d 不在 256 至 %d 之间", len(longImage), maxImageLength)
+	}
+	longBinding := valid
+	longBinding.Image = longImage
+	if err := longBinding.validate(); err != nil {
+		t.Fatalf("长摘要镜像返回错误: %v", err)
+	}
 	tests := []struct {
 		name   string
 		change func(*Binding)

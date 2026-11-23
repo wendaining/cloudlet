@@ -29,7 +29,8 @@ const (
 
 	maxHostIDLength       = 64
 	maxBindingFieldLength = 48
-	maxImageLength        = 255
+	// maxImageLength matches the image limit enforced by internal/containers.
+	maxImageLength = 512
 )
 
 var (

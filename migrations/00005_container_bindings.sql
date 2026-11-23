@@ -18,7 +18,7 @@ ALTER TABLE capacity_reservations
             AND container_project = btrim(container_project)
             AND char_length(container_resource) BETWEEN 1 AND 48
             AND container_resource = btrim(container_resource)
-            AND char_length(container_image) BETWEEN 1 AND 255)
+            AND char_length(container_image) BETWEEN 1 AND 512)
     ),
     ADD CONSTRAINT capacity_reservations_container_id_check CHECK (
         container_id IS NULL
