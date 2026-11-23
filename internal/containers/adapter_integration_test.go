@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"os"
@@ -279,6 +280,127 @@ func ownershipLabels(ownership containers.Ownership) map[string]string {
 		containers.LabelResource:    ownership.Resource,
 		containers.LabelGeneration:  strconv.FormatUint(ownership.Generation, 10),
 	}
+}
+
+func TestAdapterFind(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
+	defer cancel()
+
+	docker, err := client.New(client.FromEnv, client.WithAPIVersionNegotiation())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = docker.Close() })
+
+	image := httpImage(t)
+	ensureImage(ctx, t, docker, image)
+	adapter, err := containers.New(ctx, docker)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ownership := containers.Ownership{
+		Environment: "integration",
+		Project:     "project-" + rand.Text(),
+		Resource:    "find-" + rand.Text(),
+		Generation:  1,
+	}
+	spec := containers.Spec{
+		Ownership: ownership,
+		Image:     image,
+		User:      "101",
+		Port:      8080,
+		Limits: containers.Limits{
+			CPUMillis:   500,
+			MemoryBytes: 128 << 20,
+			PIDs:        64,
+			OpenFiles:   1024,
+		},
+	}
+
+	if observation, found, err := adapter.Find(ctx, ownership); err != nil || found {
+		t.Fatalf("查找不存在的容器返回 %+v, %t, %v", observation, found, err)
+	}
+
+	created, err := adapter.Create(ctx, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cleanupCancel()
+		if err := adapter.Stop(cleanupCtx, ownership, created.ID); err != nil && !errors.Is(err, containers.ErrNotFound) {
+			t.Errorf("cleanup stop: %v", err)
+		}
+		if err := adapter.Remove(cleanupCtx, ownership, created.ID); err != nil && !errors.Is(err, containers.ErrNotFound) {
+			t.Errorf("cleanup remove: %v", err)
+		}
+		if _, err := docker.ContainerInspect(cleanupCtx, created.ID, client.ContainerInspectOptions{}); err == nil {
+			_, _ = docker.ContainerRemove(cleanupCtx, created.ID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true})
+		}
+	})
+
+	observation, found, err := adapter.Find(ctx, ownership)
+	if err != nil || !found {
+		t.Fatalf("查找已创建容器返回 %+v, %t, %v", observation, found, err)
+	}
+	if observation.ID != created.ID || observation.Name != created.Name || observation.Running ||
+		observation.CPUMillis != spec.Limits.CPUMillis || observation.MemoryBytes != spec.Limits.MemoryBytes ||
+		observation.PIDs != spec.Limits.PIDs || observation.OpenFiles != spec.Limits.OpenFiles {
+		t.Fatalf("已创建容器观测错误: %+v", observation)
+	}
+
+	if _, err := adapter.Start(ctx, ownership, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	observation, found, err = adapter.Find(ctx, ownership)
+	if err != nil || !found || !observation.Running {
+		t.Fatalf("查找运行中容器返回 %+v, %t, %v", observation, found, err)
+	}
+
+	if err := adapter.Stop(ctx, ownership, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := adapter.Remove(ctx, ownership, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	if observation, found, err := adapter.Find(ctx, ownership); err != nil || found {
+		t.Fatalf("查找已删除容器返回 %+v, %t, %v", observation, found, err)
+	}
+
+	impostor, err := docker.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Name: ownershipName(ownership),
+		Config: &container.Config{
+			Image:  image,
+			User:   "101",
+			Labels: map[string]string{containers.LabelManaged: "true"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cleanupCancel()
+		_, _ = docker.ContainerRemove(cleanupCtx, impostor.ID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true})
+	})
+	if observation, found, err := adapter.Find(ctx, ownership); !errors.Is(err, containers.ErrNotOwned) || found {
+		t.Fatalf("查找归属不匹配的容器返回 %+v, %t, %v", observation, found, err)
+	}
+
+	invalid := ownership
+	invalid.Generation = 0
+	if _, _, err := adapter.Find(ctx, invalid); !errors.Is(err, fs.ErrInvalid) {
+		t.Fatalf("查找无效归属返回 %v，要求 fs.ErrInvalid", err)
+	}
+}
+
+func ownershipName(ownership containers.Ownership) string {
+	return fmt.Sprintf("cloudlet-%d-%s-%d-%s-%d-%s-%d",
+		len(ownership.Environment), ownership.Environment,
+		len(ownership.Project), ownership.Project,
+		len(ownership.Resource), ownership.Resource,
+		ownership.Generation)
 }
 
 func waitForPort(t *testing.T, ctx context.Context, adapter *containers.Adapter, ownership containers.Ownership, id string, containerPort uint16) containers.PublishedPort {
