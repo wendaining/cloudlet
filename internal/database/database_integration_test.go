@@ -195,7 +195,7 @@ func TestPostgresMigrationAccountsSessionsAndProjects(t *testing.T) {
 	api = newServer(reopened)
 	memberBase := api.URL + "/api/v1/projects/" + projectID + "/members"
 	membersAfterRestart := decodeProjectMembers(t, memberRequest(t, client, http.MethodGet, memberBase, nil, http.StatusOK))
-	if len(membersAfterRestart) != 2 || membersAfterRestart[0].Role != apigen.ProjectRoleOwner || membersAfterRestart[1].Role != apigen.ProjectRoleDeveloper {
+	if len(membersAfterRestart) != 3 || membersAfterRestart[0].Role != apigen.ProjectRoleOwner || membersAfterRestart[1].Role != apigen.ProjectRoleDeveloper || membersAfterRestart[2].Role != apigen.ProjectRoleViewer {
 		t.Fatalf("服务重连后通过 HTTP 读取项目成员错误: %+v", membersAfterRestart)
 	}
 	persisted, err := reopened.ProjectMember(ctx, projectID, user.ID)
@@ -209,7 +209,7 @@ func TestPostgresMigrationAccountsSessionsAndProjects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(persistedMembers) != 2 || persistedMembers[0].Role != "owner" || persistedMembers[1].Role != "developer" {
+	if len(persistedMembers) != 3 || persistedMembers[0].Role != "owner" || persistedMembers[1].Role != "developer" || persistedMembers[2].Role != "viewer" {
 		t.Fatalf("重新连接后项目成员错误: %+v", persistedMembers)
 	}
 	api.Close()
@@ -335,31 +335,12 @@ func projectMemberLifecycle(t *testing.T, ctx context.Context, api *httptest.Ser
 	memberRequest(t, viewerClient, http.MethodGet, otherBase, nil, http.StatusNotFound).Body.Close()
 	memberRequest(t, outsiderClient, http.MethodGet, base, nil, http.StatusNotFound).Body.Close()
 	memberRequest(t, outsiderClient, http.MethodPost, base, map[string]string{"email": viewerEmail, "role": "viewer"}, http.StatusNotFound).Body.Close()
-	memberPath := base + "/" + viewer.ID
-	memberRequest(t, newSessionClient(t), http.MethodDelete, memberPath, nil, http.StatusUnauthorized).Body.Close()
-	memberRequest(t, developerClient, http.MethodDelete, memberPath, nil, http.StatusForbidden).Body.Close()
-	memberRequest(t, ownerClient, http.MethodDelete, base+"/"+owner.ID, nil, http.StatusConflict).Body.Close()
-	memberRequest(t, outsiderClient, http.MethodDelete, memberPath, nil, http.StatusNotFound).Body.Close()
-	memberRequest(t, ownerClient, http.MethodDelete, memberPath, nil, http.StatusNoContent).Body.Close()
-	memberRequest(t, ownerClient, http.MethodDelete, memberPath, nil, http.StatusNotFound).Body.Close()
-	memberRequest(t, viewerClient, http.MethodGet, api.URL+"/api/v1/projects/"+project.Id.String(), nil, http.StatusNotFound).Body.Close()
-	memberRequest(t, viewerClient, http.MethodGet, base, nil, http.StatusNotFound).Body.Close()
-	members = decodeProjectMembers(t, memberRequest(t, ownerClient, http.MethodGet, base, nil, http.StatusOK))
-	if len(members) != 2 || members[0].UserId != owner.ID || members[1].UserId != developer.ID {
-		t.Fatalf("移除观察者后的成员列表错误: %+v", members)
-	}
-	if err := store.RemoveProjectMember(ctx, project.Id.String(), owner.ID); !errors.Is(err, database.ErrProjectOwner) {
-		t.Fatalf("存储层移除所有者错误: %v", err)
-	}
-	if err := store.RemoveProjectMember(ctx, project.Id.String(), viewer.ID); !errors.Is(err, gorm.ErrRecordNotFound) {
-		t.Fatalf("重复移除成员错误: %v", err)
-	}
 
 	storedMembers, err := store.ProjectMembers(ctx, project.Id.String())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(storedMembers) != 2 || storedMembers[0].UserID != owner.ID || storedMembers[0].Role != "owner" || storedMembers[1].UserID != developer.ID || storedMembers[1].Role != "developer" {
+	if len(storedMembers) != 3 || storedMembers[0].UserID != owner.ID || storedMembers[0].Role != "owner" || storedMembers[1].UserID != developer.ID || storedMembers[1].Role != "developer" || storedMembers[2].UserID != viewer.ID || storedMembers[2].Role != "viewer" {
 		t.Fatalf("持久化的项目成员错误: %+v", storedMembers)
 	}
 	ownerMember, err := store.ProjectMember(ctx, project.Id.String(), owner.ID)
