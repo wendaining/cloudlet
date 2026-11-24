@@ -66,7 +66,7 @@ go test -race -count=1 -tags=integration -v ./internal/workers
 
 ## Worker 构建验证
 
-`runtimes/workers` 提供 TypeScript Worker 构建命令。默认入口为 `src/index.ts`，默认输出为 `dist/index.mjs`。命令先执行 tsc 类型检查，再用 esbuild 打包为单文件 ES Module。
+`runtimes/workers` 提供 TypeScript Worker 构建命令。默认入口为脚本目录下的 `src/index.ts`，默认输出为 `dist/index.mjs`。显式传入的相对路径按调用目录解释。`--entry` 必须属于 `--tsconfig` 的实际程序，未包含时终止构建。命令先执行 tsc 类型检查，再用 esbuild 打包为单文件 ES Module。
 
 ```sh
 npm run check --workspace runtimes/workers
@@ -74,6 +74,8 @@ npm run build --workspace runtimes/workers
 ```
 
 `TestWorkerBuildRunsInWorkerd` 使用同一示例源码构建两次并比较 SHA-256，再用固定 workerd 调用构建结果。`TestWorkerBuildReportsTypeErrors` 修改类型后验证构建返回 TS2322 诊断。
+
+Node 测试验证不同调用目录的产物字节一致，配置外入口在写入产物前被拒绝，参数中的等号完整保留，未知参数和缺少参数值时终止构建。Workers CI 执行这些测试。
 
 ## Browser Run 验证
 

@@ -183,6 +183,7 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci --no-audit
+      - run: npm run check --workspace runtimes/workers
       - run: go test -race -count=1 -tags=integration -v ./internal/workers
   browser:
     name: Browser Run
