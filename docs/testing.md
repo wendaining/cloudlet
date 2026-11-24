@@ -20,6 +20,12 @@ make generate 从 api/openapi.yaml 同时生成 Go 类型、Gin 接口、客户�
 
 ## 开发流程验证
 
+Gateway 域名验收构建并启动实际管理服务，以真实站点文件作为 HTTP 上游。用例验证域名大小写、末尾句点与端口规范化，GET 与 HEAD 正常转发，未知域名返回 404。停止上游后，该域名返回 502 并记录失败域名，其他上游继续可用。
+
+```sh
+go test -race -count=1 -run TestGatewayDomainRoutingAcceptance -v ./internal/server
+```
+
 开发流程测试创建独立配置与随机可用端口，通过与成员相同的开发入口运行 Go、Vite 和 PostgreSQL。测试验证同名控制器拒绝重复启动、错误的 reset 确认不会停止服务、真实 API 登录和 Gateway 转发。
 
 热重载检查在测试期间创建独立 Go 源文件，验证实际后端进程更换、会话保留，以及受管理 PostgreSQL 执行容器保持原始启动时间。随后验证真实编译错误会停止旧后端，修复源码后服务恢复。测试完成后删除该源文件。

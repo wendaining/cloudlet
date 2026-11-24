@@ -73,7 +73,7 @@ func (h *Handler) ReplaceRoutes(routes []config.Route) error {
 				request.SetXForwarded()
 			},
 			ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-				h.logger.Error("proxy request failed", "host", r.Host, "error", err)
+				h.logger.Error("proxy request failed", "host", route.Host, "error", err)
 				http.Error(w, "upstream unavailable", http.StatusBadGateway)
 			},
 		}
