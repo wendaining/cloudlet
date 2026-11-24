@@ -87,10 +87,13 @@ func (a *Adapter) WaitReady(ctx context.Context, ownership Ownership, id string,
 
 // newProbeClient returns the HTTP client used for readiness probes. Probes
 // target loopback endpoints, so environment proxies are disabled and redirects
-// are returned as observed status codes instead of being followed.
+// are returned as observed status codes instead of being followed. Keep-alives
+// are disabled because probes are one-shot and a stopped or replaced container
+// must not leave a stale idle connection in a long-lived adapter.
 func newProbeClient() *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = nil
+	transport.DisableKeepAlives = true
 	transport.MaxResponseHeaderBytes = maxProbeHeaderBytes
 	return &http.Client{
 		Transport: transport,
@@ -134,10 +137,10 @@ func waitForHTTP(ctx context.Context, client *http.Client, probe ReadinessProbe,
 		port, found := observation.publishedPort(probe.Port)
 		if !found {
 			// Docker can report the port binding slightly after start, so a
-			// missing binding is retried until the deadline.
+			// missing binding is retried until the deadline. Keep the last HTTP
+			// status observed before the binding disappeared; it remains part
+			// of the failure observation.
 			result.Endpoint = ""
-			result.StatusCode = 0
-			lastStatus = 0
 			lastErr = fmt.Errorf("container port %d/tcp is not published", probe.Port)
 			if !sleepUntilNextAttempt(ctx, probe.Interval) {
 				result.Elapsed = time.Since(start)

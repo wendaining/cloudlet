@@ -413,6 +413,26 @@ func TestWaitReadyFailsWhenContainerStops(t *testing.T) {
 	}
 }
 
+func TestNewProbeClient(t *testing.T) {
+	client := newProbeClient()
+	transport, ok := client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("Transport = %T, want *http.Transport", client.Transport)
+	}
+	if transport.Proxy != nil {
+		t.Fatal("probe transport must not use an environment proxy")
+	}
+	if !transport.DisableKeepAlives {
+		t.Fatal("probe transport must not keep idle connections to stopped containers")
+	}
+	if transport.MaxResponseHeaderBytes != maxProbeHeaderBytes {
+		t.Fatalf("MaxResponseHeaderBytes = %d, want %d", transport.MaxResponseHeaderBytes, maxProbeHeaderBytes)
+	}
+	if client.CheckRedirect == nil {
+		t.Fatal("probe client must not follow redirects")
+	}
+}
+
 func TestWaitReadyRetriesMissingPortUntilDeadline(t *testing.T) {
 	observation := Observation{
 		ID:      "0123456789ab",
@@ -433,6 +453,51 @@ func TestWaitReadyRetriesMissingPortUntilDeadline(t *testing.T) {
 	}
 	if readiness.Attempts != 0 || readiness.StatusCode != 0 {
 		t.Fatalf("readiness = %+v, want no HTTP attempts", readiness)
+	}
+	if elapsed < probe.Timeout {
+		t.Fatalf("elapsed = %s, want at least %s", elapsed, probe.Timeout)
+	}
+}
+
+func TestWaitReadyPreservesLastStatusWhenPortDisappears(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	withPort := probeObservation(t, server.Listener.Addr().String(), true)
+	withoutPort := Observation{
+		ID:      withPort.ID,
+		Status:  "running",
+		Running: true,
+	}
+	var calls atomic.Int32
+	observe := func(context.Context) (Observation, error) {
+		if calls.Add(1) == 1 {
+			return withPort, nil
+		}
+		return withoutPort, nil
+	}
+	probe := validReadinessProbe()
+	probe.Timeout = 100 * time.Millisecond
+	probe.Interval = 10 * time.Millisecond
+	start := time.Now()
+	readiness, err := waitForHTTP(context.Background(), newProbeClient(), probe, observe)
+	elapsed := time.Since(start)
+	if !errors.Is(err, ErrNotReady) || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("WaitReady() error = %v, want ErrNotReady and DeadlineExceeded", err)
+	}
+	if readiness.Attempts != 1 {
+		t.Fatalf("attempts = %d, want one HTTP attempt", readiness.Attempts)
+	}
+	if readiness.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want the last observed 503", readiness.StatusCode)
+	}
+	if !strings.Contains(err.Error(), "last status 503") {
+		t.Fatalf("WaitReady() error = %v, want last status 503", err)
+	}
+	if !strings.Contains(err.Error(), "is not published") {
+		t.Fatalf("WaitReady() error = %v, want missing-port detail", err)
 	}
 	if elapsed < probe.Timeout {
 		t.Fatalf("elapsed = %s, want at least %s", elapsed, probe.Timeout)
