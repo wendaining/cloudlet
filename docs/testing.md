@@ -8,7 +8,7 @@
 | npm run lint:config | JSON、YAML、Issue 表单与 Actions 约定 |
 | npm run lint:tooling | 脚本语法、ShellCheck、配置文件与真实端口检查 |
 | make test | Go race 测试、真实 HTTP、Gateway 转发与服务停止 |
-| make test-integration | Docker 中的 PostgreSQL 迁移、账号、会话、项目与成员角色、操作记录、项目凭据、容量预留、容器容量准入、就绪检查、workerd 执行和容器创建、启动、观测、停止与删除 |
+| make test-integration | Docker 中的 PostgreSQL 迁移、账号、会话、项目与成员角色、操作记录、项目凭据、路由快照、容量预留、容器容量准入、就绪检查、workerd 执行和容器创建、启动、观测、停止与删除 |
 | make web-check | TypeScript、ESLint、Prettier、Vite 构建与接口生成一致性 |
 | make dev-check | 真实本机进程、数据库、热重载、完整停止、多实例与失败清理 |
 | make test-e2e | 真实 Chromium 在桌面和手机尺寸下完成登录、刷新和退出 |
@@ -59,6 +59,18 @@ go test -race -count=1 -tags=integration -run TestProjectSecrets ./internal/data
 ```
 
 用例保存同一凭据的两个版本，检查元数据接口只返回名称与版本信息，数据库密文不包含明文，日志不包含凭据值。所有者通过值接口读取明文，其他成员收到 403，非成员收到 404。重新连接数据库和重启管理接口后使用同一平台密钥读取版本。交换版本密文后认证失败，非规范项目 UUID 可以规范读取。错误平台密钥阻止写入和服务启动，原版本序列保持不变。不存在或仅属于其他项目的凭据名称与版本返回 404。请求覆盖 ASCII、JSON 转义和多字节字符的 65536 字节边界。并发创建同一凭据的版本时，版本号保持唯一且连续。
+
+## 路由快照验收
+
+项目路由使用真实 PostgreSQL、HTTP 上游和 Gateway 验证。
+
+```sh
+go test -race -count=1 -tags=integration ./internal/routes
+```
+
+用例发布两个项目的路由并分别访问，移除一个项目后另一个继续可用。跨项目在同一域名下发布不同路径前缀时返回冲突，失败发布保留原路由与快照版本。并发申请同一域名时只有一个项目成功，全部路由移除后其他项目可以使用该域名。启动配置域名不能用于动态路由，拒绝后快照版本不变化。新建 Publisher 从数据库恢复路由。并发发布多个项目后全部路由可访问。
+
+进程恢复用例构建并启动实际管理服务，访问两个项目的域名。停止并重启进程后，两条路由继续可用。撤销一个项目的路由后再次启动，另一个项目仍可访问。
 
 ## workerd 集成验证
 

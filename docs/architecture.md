@@ -37,6 +37,7 @@ Cloudlet 在一台 Linux 服务器上管理计算资源。本地开发在成员�
 | internal/apigen | OpenAPI 生成的类型、Gin 接口和客户端 |
 | migrations | 内嵌 SQL 迁移文件与当前版本 |
 | internal/gateway | 按域名选择上游并转发 HTTP 请求 |
+| internal/routes | 持久化项目路由并发布 Gateway 快照 |
 | internal/server | 监听端口与服务生命周期 |
 | internal/version | 构建版本和提交标识 |
 | internal/workers | ES Module 与 Durable Objects 的 workerd 配置、启动参数和镜像引用 |
@@ -47,7 +48,7 @@ Cloudlet 在一台 Linux 服务器上管理计算资源。本地开发在成员�
 | pkg/client | CLI 与其他客户端共享的 API 客户端 |
 | internal/mcpserver | 只读 MCP 项目与操作查询，复用管理 API 会话权限 |
 
-PostgreSQL 当前保存账号、登录会话、项目、操作记录、项目凭据与容量预留。Workers 模块已提供独立的运行配置，资源元数据和生命周期的开发目标见 [开发任务](roadmap.md)。Durable Objects 的存储能力随 workerd 集成验证。
+PostgreSQL 当前保存账号、登录会话、项目、操作记录、项目凭据、项目路由与容量预留。Workers 模块已提供独立的运行配置，资源元数据和生命周期的开发目标见 [开发任务](roadmap.md)。Durable Objects 的存储能力随 workerd 集成验证。
 
 项目拥有稳定的 project_id。创建项目在事务内写入项目和创建者的 owner 成员记录。项目列表和单项目读取同时校验当前会话账号的项目成员关系。项目成员列表对所有成员开放；所有者可以按邮箱把已有账号添加为 developer 或 viewer，或更新已有成员的角色，创建者的 owner 身份保持不变。非成员访问返回 404，成员越权修改返回 403。
 
@@ -78,6 +79,8 @@ PostgreSQL 当前保存账号、登录会话、项目、操作记录、项目凭
 Gateway 使用配置中的 `host` 匹配请求域名，匹配时忽略大小写、末尾句点和请求端口。同域路由按 `path_prefix` 匹配最长的完整路径段前缀，省略前缀等同于 `/`。域名存在路径前缀路由时，包含 `.` 或 `..` 段的请求路径返回 400。前缀使用绝对路径，非根前缀省略末尾斜杠。`target` 支持 HTTP 与 HTTPS，转发时保留匹配的请求路径和查询参数。没有匹配路由时返回 404，上游连接失败时返回 502。
 
 启动配置独占其中声明的域名。由运维通过配置文件为这些域名设置根路由和路径前缀。部署控制器等内部调用方可以通过 Gateway 的 Go 接口 `ReplaceRoutes` 为其他域名整体替换动态路由。同一域名和路径前缀仅允许配置一次。新路由通过校验后才整体生效。每个请求使用开始转发时选定的上游，在途响应继续传输。
+
+`internal/routes.Publisher` 按项目整体替换路由集合。PostgreSQL 使用 `route_snapshot` 版本行和 `project_routes` 表保存项目、资源、域名、路径与上游。发布事务先锁定版本行并检查域名归属，同一域名仅允许一个项目使用。移除该域名的全部路由后，其他项目可以使用。事务按 READ COMMITTED 执行，删除项目旧路由、写入新路由并递增快照版本。提交后读取一致快照并整体替换 Gateway 动态路由。启动时从数据库恢复。提交成功但应用失败时返回 `SyncError`，调用方可以再次执行 `Sync`。启动配置声明的域名不能用于动态路由。
 
 `internal/sitehttp` 可通过 HTTP 提供已验证的只读站点文件系统，支持 GET、HEAD 和目录首页。缺少首页的目录返回 404。处理器可以独立使用，域名绑定和版本切换由发布流程接入。
 

@@ -15,6 +15,7 @@ import (
 	"github.com/wendaining/cloudlet/internal/controlplane"
 	"github.com/wendaining/cloudlet/internal/database"
 	"github.com/wendaining/cloudlet/internal/gateway"
+	"github.com/wendaining/cloudlet/internal/routes"
 )
 
 func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
@@ -39,6 +40,15 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	proxy, err := gateway.NewHandler(cfg, logger)
 	if err != nil {
 		return err
+	}
+	if store != nil {
+		publisher, err := routes.NewPublisher(store, proxy)
+		if err != nil {
+			return err
+		}
+		if _, err := publisher.Sync(ctx); err != nil {
+			return fmt.Errorf("restore Gateway routes: %w", err)
+		}
 	}
 	apiListener, err := net.Listen("tcp", cfg.APIAddress)
 	if err != nil {
