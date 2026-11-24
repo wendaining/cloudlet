@@ -24,7 +24,7 @@ workerd、用户容器和浏览器由 Docker Engine 持有，与 Go 管理进程
 
 调用方将返回的 `Config` 与 `Module` 分别放到容器内的 `ConfigPath` 和 `ModulePath`，使用 `RuntimeImage` 和 `ServeArgs()` 启动。配置提供一个 HTTP 监听，端口为 `HTTPPort`。`ghcr.io/ryanhecht/workerd` 镜像封装 Cloudflare 发布的 workerd 二进制文件，使用版本和多架构镜像摘要固定来源。实际命令及验证结果见 [workerd 集成验证](testing.md#workerd-集成验证)。
 
-部署清单固定运行时版本及摘要、ES Module 入口、模块内容、compatibility date、flags 和绑定。TypeScript 经 tsc 检查并通过 esbuild 生成部署包，运行时执行已验证产物。
+部署清单固定运行时版本及摘要、ES Module 入口、模块内容、compatibility date、flags 和绑定。TypeScript 经 tsc 检查并通过 esbuild 生成部署包，运行时执行已验证产物。构建命令位于 `runtimes/workers/build.mjs`，默认入口为该目录下的 `src/index.ts`，默认输出为 `dist/index.mjs`，TypeScript 与 esbuild 使用锁定版本。入口必须属于所选 TypeScript 配置的实际程序，验证成功后才打包。默认路径和打包目录固定在脚本目录，相同入口的产物字节不受调用目录影响。
 
 项目的运行配置包含各 Worker 的活动版本和 DO 命名空间归属。更改代码产生新的 Deployment，更换进程产生新的 Execution。发布、版本激活和运行时重启分别记录。
 

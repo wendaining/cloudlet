@@ -64,6 +64,9 @@ database:
 workers:
   - 'internal/workers/**'
   - 'internal/durableobjects/**'
+  - 'runtimes/workers/**'
+  - 'package.json'
+  - 'package-lock.json'
   - 'go.mod'
   - 'go.sum'
   - '.github/workflows/ci.yml'
@@ -199,6 +202,7 @@ unclassified:
   - '!api/**'
   - '!web/**'
   - '!runtimes/browser/**'
+  - '!runtimes/workers/**'
   - '!tests/development.test.mjs'
   - '!tests/development/**'
   - '!tests/web.test.mjs'
