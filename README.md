@@ -19,7 +19,8 @@ Cloudlet 是一台服务器就能运行的 **Agentic Serverless 平台**。项�
 | CLI | 查询客户端版本、检查 API 健康状态、列出和查看可访问项目 |
 | Containers | Docker Engine 镜像摘要准备与容器生命周期适配器，按归属标签创建、启动、观测、停止和删除容器 |
 | 容量预留 | 主机与项目额度事务预留、执行标识与容器归属及容器 ID 绑定、确认释放与占用查询 |
-| Workers、Durable Objects、Browser Run | 已定义模块边界与开发任务 |
+| Workers | 通过管理 API 发布首个无状态 Worker，保存不可变版本并经 Gateway 访问 |
+| Durable Objects、Browser Run | 原生 SQLite 绑定与独立浏览器执行服务，管理生命周期由关联任务接入 |
 | 协作与交付 | Issue 表单、标签、PR 检查、Agent 交接、CI、镜像交付与版本发布 |
 
 ## 本地运行
@@ -47,6 +48,8 @@ make check
 ```
 
 完整检查使用真实 PostgreSQL、HTTP 和 Chromium。容器构建检查使用 make container-check，具体范围见 [测试说明](docs/testing.md)。
+
+Worker 的配置、发布接口与验收步骤见 [Worker 发布](docs/workers.md)。
 
 ## 参与开发
 

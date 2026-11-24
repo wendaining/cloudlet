@@ -115,5 +115,11 @@ export async function writeServerConfig(config) {
     api_address: `127.0.0.1:${config.env.CLOUDLET_API_PORT}`,
     gateway_address: `127.0.0.1:${config.env.CLOUDLET_GATEWAY_PORT}`,
     routes: [{ host: 'demo.localhost', target: config.api }],
+    workers: {
+      directory: path.join(config.directory, 'workers'),
+      host_id: config.instance,
+      host_budget: { cpu_millis: 4000, memory_bytes: 4294967296, instances: 4 },
+      project_quota: { cpu_millis: 4000, memory_bytes: 4294967296, instances: 4 },
+    },
   }, null, 2) + '\n', { mode: 0o600 });
 }

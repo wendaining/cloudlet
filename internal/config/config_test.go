@@ -108,3 +108,27 @@ func TestValidateRoutesUpstreamPort(t *testing.T) {
 		})
 	}
 }
+
+func TestWorkerRuntimeConfiguration(t *testing.T) {
+	valid := config.WorkerRuntime{Directory: t.TempDir(), HostID: "host-1", HostBudget: config.ResourceBudget{CPUMillis: 4000, MemoryBytes: 4 << 30, Instances: 4}, ProjectQuota: config.ResourceBudget{CPUMillis: 1000, MemoryBytes: 256 << 20, Instances: 1}}
+	if err := valid.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for _, change := range []func(*config.WorkerRuntime){
+		func(w *config.WorkerRuntime) { w.Directory = "relative" },
+		func(w *config.WorkerRuntime) { w.HostID = "" },
+		func(w *config.WorkerRuntime) { w.HostBudget.CPUMillis = 999 },
+		func(w *config.WorkerRuntime) { w.ProjectQuota.MemoryBytes = (256 << 20) - 1 },
+		func(w *config.WorkerRuntime) { w.ProjectQuota.Instances = 0 },
+	} {
+		invalid := valid
+		change(&invalid)
+		if err := invalid.Validate(); err == nil {
+			t.Fatalf("invalid configuration accepted: %+v", invalid)
+		}
+	}
+	cfg := config.Config{APIAddress: "127.0.0.1:0", GatewayAddress: "127.0.0.1:0", Workers: &valid}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Worker runtime accepted without management dependencies")
+	}
+}

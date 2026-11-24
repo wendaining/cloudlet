@@ -77,6 +77,16 @@ routes:
 
 workers:
   - 'internal/workers/**'
+  - 'internal/workerpublish/**'
+  - 'internal/controlplane/**'
+  - 'internal/database/**'
+  - 'internal/containers/**'
+  - 'internal/executions/**'
+  - 'internal/capacity/**'
+  - 'internal/config/**'
+  - 'pkg/client/**'
+  - 'migrations/**'
+  - 'api/**'
   - 'internal/durableobjects/**'
   - 'runtimes/workers/**'
   - 'package.json'

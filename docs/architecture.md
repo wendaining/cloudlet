@@ -41,6 +41,7 @@ Cloudlet 在一台 Linux 服务器上管理计算资源。本地开发在成员�
 | internal/server | 监听端口与服务生命周期 |
 | internal/version | 构建版本和提交标识 |
 | internal/workers | ES Module 与 Durable Objects 的 workerd 配置、启动参数和镜像引用 |
+| internal/workerpublish | 首个无状态 Worker 的产物、预检、容量准入、执行与路由激活 |
 | internal/durableobjects | SQLite 命名空间、类绑定和存储挂载路径 |
 | runtimes/workers | TypeScript Worker 构建命令与示例入口 |
 | internal/containers | Docker Engine 镜像摘要准备、容器生命周期与回环端口观测 |
@@ -48,7 +49,7 @@ Cloudlet 在一台 Linux 服务器上管理计算资源。本地开发在成员�
 | pkg/client | CLI 与其他客户端共享的 API 客户端 |
 | internal/mcpserver | 只读 MCP 项目与操作查询，复用管理 API 会话权限 |
 
-PostgreSQL 当前保存账号、登录会话、项目、操作记录、项目凭据、项目路由与容量预留。Workers 模块已提供独立的运行配置，资源元数据和生命周期的开发目标见 [开发任务](roadmap.md)。Durable Objects 的存储能力随 workerd 集成验证。
+PostgreSQL 当前保存账号、登录会话、项目、操作记录、项目凭据、项目路由、容量预留与 Worker 部署及执行记录。首个无状态 Worker 可以通过管理 API 发布并访问。Durable Objects 的运行配置与存储能力通过独立 workerd 集成验证。
 
 项目拥有稳定的 project_id。创建项目在事务内写入项目和创建者的 owner 成员记录。项目列表和单项目读取同时校验当前会话账号的项目成员关系。项目成员列表对所有成员开放；所有者可以按邮箱把已有账号添加为 developer 或 viewer，或更新已有成员的角色，创建者的 owner 身份保持不变。非成员访问返回 404，成员越权修改返回 403。
 
@@ -72,6 +73,8 @@ PostgreSQL 当前保存账号、登录会话、项目、操作记录、项目凭
 | /api/v1/projects/{projectID}/secrets | GET、POST | 列出项目凭据元数据；所有者追加加密版本 |
 | /api/v1/projects/{projectID}/secrets/{name} | GET | 列出项目凭据的版本元数据 |
 | /api/v1/projects/{projectID}/secrets/{name}/versions/{version}/value | GET | 所有者读取指定版本的值 |
+| /api/v1/projects/{projectID}/workers/{name}/deployments | POST | 所有者或开发者发布首个无状态 Worker，按 Idempotency-Key 复用操作 |
+| /api/v1/projects/{projectID}/worker-deployments/{deploymentID} | GET | 项目成员查询版本、产物摘要、执行与 Operation 结果 |
 | /mcp | MCP Streamable HTTP | 使用当前会话查询可访问项目与项目操作 |
 
 两组监听端口完成初始化后才开始接受请求。管理环境启动前验证数据库连接和迁移版本，就绪接口同时检查数据库连接，数据库不可用时返回 503。
@@ -108,6 +111,10 @@ API 与 Gateway 使用 HTTP 头读取超时和空闲连接超时。收到 SIGTER
 
 ## 执行环境
 
-Workers 集成 workerd，支持原生 Durable Object SQLite 绑定。真实运行时测试验证对象隔离和重启后的持久化。workers.Preflight 使用固定 workerd 在发布前验证模块载入和初始化阶段。容器管理使用 Docker Engine API。internal/containers 按不可变摘要准备镜像，核对本地镜像报告的摘要后才用于创建容器，已缓存且摘要一致的镜像直接复用。适配器提供创建、启动、观测、停止和删除受管理容器的操作，按环境、项目、资源和执行序号写入归属标签与确定性名称，在启动、观测、停止和删除前核对名称和标签，启动后读取实际发布的回环端口，并可按确定性名称查找已有容器。internal/executions 在该适配器之上完成容量准入、失败清理与确认释放。管理 API 与 Gateway 注册由上层任务接入。Browser Run 复用容器生命周期，并通过 Playwright 实现浏览器操作。
+`internal/workerpublish` 以固定 workerd 发布单文件 ES Module，入口为 `index.mjs`。每个执行预留 1000 CPU 毫核、256 MiB 内存与一个实例，容器同时限制为 128 个进程和 1024 个文件句柄。模块与 workerd 配置经过 Artifact 同步写入后登记不可变版本。预留成功后才运行预检，再以非 root 用户启动安装了只读代码文件的容器。真实回环端点的 GET `/` 返回 200 至 399 后，在同一 PostgreSQL 事务内提交活动版本、执行标识和域名路由，保留项目内其他路由。Gateway 快照生效后，Operation 才进入成功终态。
+
+平台通过 `workers` 配置显式设置产物目录、主机预算与项目初始配额，已有配额保持原值。配置或 Docker 依赖不可用时终止启动。PostgreSQL 会话锁约束同一主机的 Worker 控制器，连接失效后取消正在执行的发布、拒绝新发布并报告就绪失败，已有执行继续运行。模块预检或就绪失败时先确认容器删除，再释放容量并记录失败原因。激活提交结果不明时保留执行与容量。活动版本和路由提交后发生快照同步错误时，重复原请求可以完成同步和操作收尾。
+
+Workers 集成 workerd，支持原生 Durable Object SQLite 绑定。真实运行时测试验证对象隔离和重启后的持久化。workers.Preflight 使用固定 workerd 在发布前验证模块载入和初始化阶段。容器管理使用 Docker Engine API。internal/containers 按不可变摘要准备镜像，核对本地镜像报告的摘要后才用于创建容器，已缓存且摘要一致的镜像直接复用。适配器提供创建、启动、观测、停止和删除受管理容器的操作，按环境、项目、资源和执行序号写入归属标签与确定性名称，在启动、观测、停止和删除前核对名称和标签，启动后读取实际发布的回环端口，并可按确定性名称查找已有容器。internal/executions 在该适配器之上完成容量准入、失败清理与确认释放。用户容器发布任务接入其管理 API 与 Gateway 路由。Browser Run 复用容器生命周期，并通过 Playwright 实现浏览器操作。
 
 执行单元、配额、隔离、状态恢复与独占交接遵循执行环境设计。对应模块完成时，同步提供 [真实业务验收](testing.md)。

@@ -199,7 +199,7 @@ jobs:
           cache: npm
       - run: npm ci --no-audit
       - run: npm run check --workspace runtimes/workers
-      - run: go test -race -count=1 -tags=integration -v ./internal/workers
+      - run: go test -race -count=1 -tags=integration -v ./internal/workers ./internal/workerpublish
   browser:
     name: Browser Run
     needs: changes

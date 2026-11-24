@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"unicode"
@@ -23,14 +24,41 @@ type Route struct {
 }
 
 type Config struct {
-	Environment    string  `json:"environment,omitempty"`
-	Instance       string  `json:"instance,omitempty"`
-	PublicOrigin   string  `json:"public_origin,omitempty"`
-	DatabaseURL    string  `json:"-"`
-	SecretKey      []byte  `json:"-"`
-	APIAddress     string  `json:"api_address"`
-	GatewayAddress string  `json:"gateway_address"`
-	Routes         []Route `json:"routes"`
+	Environment    string         `json:"environment,omitempty"`
+	Instance       string         `json:"instance,omitempty"`
+	PublicOrigin   string         `json:"public_origin,omitempty"`
+	DatabaseURL    string         `json:"-"`
+	SecretKey      []byte         `json:"-"`
+	APIAddress     string         `json:"api_address"`
+	GatewayAddress string         `json:"gateway_address"`
+	Routes         []Route        `json:"routes"`
+	Workers        *WorkerRuntime `json:"workers,omitempty"`
+}
+
+type ResourceBudget struct {
+	CPUMillis   int64 `json:"cpu_millis"`
+	MemoryBytes int64 `json:"memory_bytes"`
+	Instances   int64 `json:"instances"`
+}
+
+// WorkerRuntime explicitly configures runtime storage and admission budgets.
+type WorkerRuntime struct {
+	Directory    string         `json:"directory"`
+	HostID       string         `json:"host_id"`
+	HostBudget   ResourceBudget `json:"host_budget"`
+	ProjectQuota ResourceBudget `json:"project_quota"`
+}
+
+func (w WorkerRuntime) Validate() error {
+	if !filepath.IsAbs(w.Directory) || w.HostID == "" || len(w.HostID) > 64 || strings.TrimSpace(w.HostID) != w.HostID {
+		return errors.New("Worker runtime requires an absolute directory and a host identifier of 1 to 64 bytes")
+	}
+	for _, budget := range []ResourceBudget{w.HostBudget, w.ProjectQuota} {
+		if budget.CPUMillis < 1000 || budget.MemoryBytes < 256<<20 || budget.Instances < 1 {
+			return errors.New("Worker budgets must provide at least 1000 CPU millicores, 256 MiB memory and one instance")
+		}
+	}
+	return nil
 }
 
 func Load(path string) (Config, error) {
@@ -64,6 +92,14 @@ func Load(path string) (Config, error) {
 }
 
 func (cfg Config) Validate() error {
+	if cfg.Workers != nil {
+		if cfg.DatabaseURL == "" || cfg.Instance == "" {
+			return errors.New("Worker runtime requires a management database and instance")
+		}
+		if err := cfg.Workers.Validate(); err != nil {
+			return err
+		}
+	}
 	if cfg.Environment != "" && cfg.Environment != "development" && cfg.Environment != "production" {
 		return errors.New("invalid environment")
 	}
