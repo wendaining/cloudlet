@@ -2,6 +2,7 @@ package database
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -28,20 +29,38 @@ type ProjectRoute struct {
 // ReplaceProjectRoutes atomically replaces one project's complete route set
 // and increments the global snapshot version.
 func (s *Store) ReplaceProjectRoutes(ctx context.Context, projectID string, routes []ProjectRoute) (int64, error) {
-	if _, err := uuid.Parse(projectID); err != nil {
+	parsedID, err := uuid.Parse(projectID)
+	if err != nil {
 		return 0, fmt.Errorf("replace project routes: project ID %q is invalid: %w", projectID, fs.ErrInvalid)
 	}
+	projectID = parsedID.String()
 	records := make([]ProjectRoute, len(routes))
 	copy(records, routes)
+	hosts := make([]string, 0, len(records))
 	for index := range records {
 		record := &records[index]
 		if record.ID == "" {
 			record.ID = uuid.NewString()
 		}
 		record.ProjectID = projectID
+		hosts = append(hosts, record.Host)
 	}
 	var version int64
-	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err = s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// All publishers lock the snapshot before checking host ownership or
+		// changing routes. READ COMMITTED observes the previous owner's commit.
+		if err := tx.Raw(`SELECT version FROM route_snapshot WHERE id = 1 FOR UPDATE`).Row().Scan(&version); err != nil {
+			return fmt.Errorf("lock route snapshot version: %w", err)
+		}
+		if len(hosts) > 0 {
+			var conflict bool
+			if err := tx.Raw(`SELECT EXISTS (SELECT 1 FROM project_routes WHERE host IN ? AND project_id <> ?)`, hosts, projectID).Row().Scan(&conflict); err != nil {
+				return fmt.Errorf("check project %s route host ownership: %w", projectID, err)
+			}
+			if conflict {
+				return fmt.Errorf("replace project %s routes: host belongs to another project: %w", projectID, ErrRouteConflict)
+			}
+		}
 		if err := tx.Exec(`DELETE FROM project_routes WHERE project_id = ?`, projectID).Error; err != nil {
 			return fmt.Errorf("delete project %s routes: %w", projectID, err)
 		}
@@ -54,7 +73,7 @@ func (s *Store) ReplaceProjectRoutes(ctx context.Context, projectID string, rout
 			return fmt.Errorf("advance route snapshot version: %w", err)
 		}
 		return nil
-	})
+	}, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	if err != nil {
 		return 0, err
 	}

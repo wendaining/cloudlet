@@ -55,10 +55,12 @@ go test -race -count=1 -tags=integration ./internal/executions
 项目路由使用真实 PostgreSQL、HTTP 上游和 Gateway 验证。
 
 ```sh
-go test -race -count=1 -tags=integration -run TestProjectRouteSnapshots ./internal/routes
+go test -race -count=1 -tags=integration ./internal/routes
 ```
 
-用例发布两个项目的路由并分别访问，移除一个项目后另一个继续可用。跨项目域名冲突被拒绝，失败发布保留原路由。启动配置域名不能用于动态路由，拒绝后快照版本不变化。新建 Publisher 从数据库恢复路由。并发发布多个项目后全部路由可访问。
+用例发布两个项目的路由并分别访问，移除一个项目后另一个继续可用。跨项目在同一域名下发布不同路径前缀时返回冲突，失败发布保留原路由与快照版本。并发申请同一域名时只有一个项目成功，全部路由移除后其他项目可以使用该域名。启动配置域名不能用于动态路由，拒绝后快照版本不变化。新建 Publisher 从数据库恢复路由。并发发布多个项目后全部路由可访问。
+
+进程恢复用例构建并启动实际管理服务，访问两个项目的域名。停止并重启进程后，两条路由继续可用。撤销一个项目的路由后再次启动，另一个项目仍可访问。
 
 ## workerd 集成验证
 

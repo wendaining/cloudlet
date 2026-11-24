@@ -65,6 +65,8 @@ routes:
   - 'internal/routes/**'
   - 'internal/gateway/**'
   - 'internal/database/**'
+  - 'internal/config/**'
+  - 'internal/server/**'
   - 'migrations/**'
   - 'configs/images.json'
   - 'go.mod'
