@@ -18,6 +18,7 @@ import (
 	"github.com/wendaining/cloudlet/internal/apigen"
 	"github.com/wendaining/cloudlet/internal/config"
 	"github.com/wendaining/cloudlet/internal/database"
+	"github.com/wendaining/cloudlet/internal/mcpserver"
 	"github.com/wendaining/cloudlet/internal/staticdeploy"
 	"github.com/wendaining/cloudlet/internal/version"
 	"github.com/wendaining/cloudlet/migrations"
@@ -33,6 +34,20 @@ type handler struct {
 }
 
 func NewHandler(store *database.Store, sites *staticdeploy.Service, cfg config.Config, logger *slog.Logger) (http.Handler, func()) {
+	return newHandler(store, sites, cfg, logger, nil)
+}
+
+// NewHandlerWithMCP mounts the read-only MCP endpoint on the management API.
+func NewHandlerWithMCP(store *database.Store, sites *staticdeploy.Service, cfg config.Config, logger *slog.Logger, apiEndpoint string) (http.Handler, func(), error) {
+	mcpHandler, err := mcpserver.NewHandler(apiEndpoint)
+	if err != nil {
+		return nil, nil, err
+	}
+	handler, cleanup := newHandler(store, sites, cfg, logger, mcpHandler)
+	return handler, cleanup, nil
+}
+
+func newHandler(store *database.Store, sites *staticdeploy.Service, cfg config.Config, logger *slog.Logger, mcpHandler http.Handler) (http.Handler, func()) {
 	h := &handler{store: store, sites: sites, config: cfg, logger: logger}
 	router := gin.New()
 	router.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
@@ -51,6 +66,9 @@ func NewHandler(store *database.Store, sites *staticdeploy.Service, cfg config.C
 	apigen.RegisterHandlers(router, h)
 	if store == nil {
 		return router, func() {}
+	}
+	if mcpHandler != nil {
+		router.Any("/mcp", gin.WrapH(mcpHandler))
 	}
 	sessionStore := postgresstore.New(store.SQL)
 	h.sessions = scs.New()

@@ -6,6 +6,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -40,8 +41,15 @@ func TestStaticSiteVersionHTTP(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		handler, cleanup := controlplane.NewHandler(db, sites, config.Config{Instance: "integration", PublicOrigin: "http://localhost"}, slog.Default())
-		server := httptest.NewServer(handler)
+		server := httptest.NewUnstartedServer(nil)
+		handler, cleanup, err := controlplane.NewHandlerWithMCP(db, sites,
+			config.Config{Instance: "integration", PublicOrigin: "http://localhost"}, slog.Default(), "http://"+server.Listener.Addr().String())
+		if err != nil {
+			server.Close()
+			t.Fatal(errors.Join(err, sites.Close()))
+		}
+		server.Config.Handler = handler
+		server.Start()
 		return server, sites, func() {
 			server.Close()
 			cleanup()
