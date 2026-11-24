@@ -4,6 +4,7 @@ import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { Octokit } from '@octokit/rest';
 import lint from '@commitlint/lint';
 import load from '@commitlint/load';
+import { dependenciesCompleted, isBlockedTask, isCompleted, labelNames as names } from './issue-dependencies.mjs';
 
 const settings = JSON.parse(await readFile(new URL('../.github/maintainers.json', import.meta.url)));
 const labels = JSON.parse(await readFile(new URL('../.github/labels.json', import.meta.url)));
@@ -20,10 +21,6 @@ function requireNumber() {
   assert(Number.isSafeInteger(number) && number > 0, '需要有效的 Issue 或 PR 编号');
 }
 
-function names(issue) {
-  return issue.labels.map(label => typeof label === 'string' ? label : label.name);
-}
-
 function validateTask(issue) {
   const current = names(issue);
   assert(!issue.pull_request && issue.state === 'open', '任务必须是开放的 Issue');
@@ -33,6 +30,45 @@ function validateTask(issue) {
   const statuses = current.filter(label => label.startsWith('status:'));
   assert.equal(statuses.length, 1, '任务需要一个 status 标签');
   assert(['status:ready', 'status:in-progress'].includes(statuses[0]), '任务必须处于 ready 或 in-progress 状态');
+}
+
+async function unblockIssue(issueNumber) {
+  const parameters = { ...target, issue_number: issueNumber };
+  const { data: issue } = await github.rest.issues.get(parameters);
+  if (!isBlockedTask(issue)) return;
+
+  const dependencies = await github.paginate(
+    'GET /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocked_by',
+    { ...parameters, per_page: 100 },
+  );
+  if (!dependenciesCompleted(dependencies)) return;
+
+  const { data: current } = await github.rest.issues.get(parameters);
+  if (!isBlockedTask(current)) return;
+
+  // Actions token label changes do not trigger another coordination run.
+  // Add the new status first so an interrupted run can finish the transition on retry.
+  if (!names(current).includes('status:ready')) {
+    await github.rest.issues.addLabels({ ...parameters, labels: ['status:ready'] });
+  }
+  try {
+    await github.rest.issues.removeLabel({ ...parameters, name: 'status:blocked' });
+  } catch (error) {
+    if (error.status !== 404) throw error;
+    const { data: refreshed } = await github.rest.issues.get(parameters);
+    if (names(refreshed).includes('status:blocked')) throw error;
+  }
+  console.log(`Issue #${issueNumber} 的前置任务已完成，状态已更新为 ready`);
+}
+
+async function unblockDependents(issue) {
+  const dependents = await github.paginate(
+    'GET /repos/{owner}/{repo}/issues/{issue_number}/dependencies/blocking',
+    { ...target, issue_number: issue.number, per_page: 100 },
+  );
+  for (const dependent of dependents) {
+    if (dependent.repository_url === issue.repository_url) await unblockIssue(dependent.number);
+  }
 }
 
 const commitConfig = await load();
@@ -74,6 +110,7 @@ if (command === 'sync') {
     for (const label of names(issue).filter(label => label.startsWith('status:') || label === 'agent:ready')) {
       await github.rest.issues.removeLabel({ ...target, issue_number: issueNumber, name: label });
     }
+    if (isCompleted(issue)) await unblockDependents(issue);
     process.exit(0);
   }
   const added = event.action === 'labeled' ? event.label.name : undefined;
@@ -92,6 +129,9 @@ if (command === 'sync') {
   if (current.some(label => ['status:ready', 'status:in-progress'].includes(label))) validateTask(issue);
   if (current.includes('agent:ready')) validateTask(issue);
   console.log(`已检查 Issue #${issueNumber} 的标签`);
+} else if (command === 'unblock-issue') {
+  requireNumber();
+  await unblockIssue(number);
 } else if (command === 'check-commits') {
   assert(process.argv.length > 3, '需要至少一个提交标识');
   for (const ref of process.argv.slice(3)) await validateCommit(ref);
@@ -107,5 +147,5 @@ if (command === 'sync') {
   await writeFile('.local/agent-task.md', brief);
   console.log(`已生成 .local/agent-task.md，来源为 ${issue.html_url}`);
 } else {
-  throw new Error('支持的命令：sync、coordinate、check-commits、agent-brief');
+  throw new Error('支持的命令：sync、coordinate、unblock-issue、check-commits、agent-brief');
 }
