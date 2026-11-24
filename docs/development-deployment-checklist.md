@@ -73,6 +73,7 @@ make demo 创建真实 Worker、持久化计数器、HTTP 容器和浏览器截�
 | CLOUDLET_INSTANCE | 默认 default，多实例使用不同名称 |
 | ENV_FILE | 默认 .env.local，显式指定其他实例的配置文件 |
 | CLOUDLET_DATABASE_URL | 本机进程连接 127.0.0.1:15432，部署容器连接 postgres:5432 |
+| CLOUDLET_SECRET_KEY | 64 个十六进制字符的平台密钥，用于加密项目凭据版本 |
 | DOCKER_HOST、DOCKER_CONTEXT | 确定实际 Docker 引擎，CLI、Go SDK 和测试工具保持一致 |
 | CLOUDLET_RUNTIME_ACCESS | 本机采用 published，部署采用 network，由容器模块生成连接地址 |
 | CLOUDLET_RUNTIME_NETWORK | 指定本实例执行容器加入的网络 |

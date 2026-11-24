@@ -8,7 +8,7 @@
 | npm run lint:config | JSON、YAML、Issue 表单与 Actions 约定 |
 | npm run lint:tooling | 脚本语法、ShellCheck、配置文件与真实端口检查 |
 | make test | Go race 测试、真实 HTTP、Gateway 转发与服务停止 |
-| make test-integration | Docker 中的 PostgreSQL 迁移、账号、会话、项目与成员角色、操作记录、容量预留、容器容量准入、就绪检查、workerd 执行和容器创建、启动、观测、停止与删除 |
+| make test-integration | Docker 中的 PostgreSQL 迁移、账号、会话、项目与成员角色、操作记录、项目凭据、容量预留、容器容量准入、就绪检查、workerd 执行和容器创建、启动、观测、停止与删除 |
 | make web-check | TypeScript、ESLint、Prettier、Vite 构建与接口生成一致性 |
 | make dev-check | 真实本机进程、数据库、热重载、完整停止、多实例与失败清理 |
 | make test-e2e | 真实 Chromium 在桌面和手机尺寸下完成登录、刷新和退出 |
@@ -49,6 +49,16 @@ go test -race -count=1 -tags=integration ./internal/executions
 ```
 
 用例在四核四 GiB 主机预算下预占三核三 GiB 与三个实例，再并发提交八个一核一 GiB、单实例的容器启动请求。只有一个请求成功，其余返回容量不足且没有创建容器；成功启动的固定镜像通过实际发布的回环端口返回预期页面。仅停止容器时预留保持活动；停止并删除容器后容量恢复，后续申请可以再次成功。无效镜像导致创建失败时释放预留且不留下容器；无效用户使 Docker 启动失败时清理容器并释放预留。同一执行标识的并发启动只创建一个容器，并只扣减一次容量。同一执行更换归属或镜像、不同执行复用同一归属都会被拒绝；错误容器标识不会释放容量，绑定容器被外部删除后按归属确认清理。尚未记录容器标识的预留可以在确认没有容器后释放；替换容器清理后释放失败时，原 Stop 请求仍可使用原容器标识重试。256 至 512 字节的摘要固定镜像可以通过准入；Docker 创建失败时正常释放预留。生命周期用例使用真实 PostgreSQL 与 Docker，纯逻辑单元测试只覆盖构造与请求校验、绑定映射和复用配置比较。
+
+## 项目凭据验收
+
+项目凭据使用真实 PostgreSQL 和 HTTP 管理接口验证。
+
+```sh
+go test -race -count=1 -tags=integration -run TestProjectSecrets ./internal/database
+```
+
+用例保存同一凭据的两个版本，检查元数据接口只返回名称与版本信息，数据库密文不包含明文，日志不包含凭据值。所有者通过值接口读取明文，其他成员收到 403，非成员收到 404。重新连接数据库和重启管理接口后使用同一平台密钥读取版本。交换版本密文后认证失败，非规范项目 UUID 可以规范读取。错误平台密钥阻止写入和服务启动，原版本序列保持不变。不存在或仅属于其他项目的凭据名称与版本返回 404。请求覆盖 ASCII、JSON 转义和多字节字符的 65536 字节边界。并发创建同一凭据的版本时，版本号保持唯一且连续。
 
 ## workerd 集成验证
 

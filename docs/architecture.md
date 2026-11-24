@@ -47,9 +47,11 @@ Cloudlet 在一台 Linux 服务器上管理计算资源。本地开发在成员�
 | pkg/client | CLI 与其他客户端共享的 API 客户端 |
 | internal/mcpserver | 只读 MCP 项目与操作查询，复用管理 API 会话权限 |
 
-PostgreSQL 当前保存账号、登录会话、项目、操作记录与容量预留。Workers 模块已提供独立的运行配置，资源元数据和生命周期的开发目标见 [开发任务](roadmap.md)。Durable Objects 的存储能力随 workerd 集成验证。
+PostgreSQL 当前保存账号、登录会话、项目、操作记录、项目凭据与容量预留。Workers 模块已提供独立的运行配置，资源元数据和生命周期的开发目标见 [开发任务](roadmap.md)。Durable Objects 的存储能力随 workerd 集成验证。
 
 项目拥有稳定的 project_id。创建项目在事务内写入项目和创建者的 owner 成员记录。项目列表和单项目读取同时校验当前会话账号的项目成员关系。项目成员列表对所有成员开放；所有者可以按邮箱把已有账号添加为 developer 或 viewer，或更新已有成员的角色，创建者的 owner 身份保持不变。非成员访问返回 404，成员越权修改返回 403。
+
+项目凭据按名称保存版本序列。所有者可以追加新版本并读取指定版本的值，项目成员可以查询名称与版本元数据。凭据值使用平台密钥通过 AES-256-GCM 加密后写入 PostgreSQL，关联数据绑定规范项目 UUID、凭据名称、凭据标识、版本标识和版本号。数据库记录平台密钥的 SHA-256 标识及每个版本使用的密钥标识，密钥不匹配时拒绝启动和写入。元数据接口和日志不返回明文。解密读取只在项目范围内执行，跨项目版本按不存在处理。凭据值按 UTF-8 编码限制为 1 至 65536 字节，请求体允许 JSON 转义所需的空间，不存在的凭据名称返回 404。
 
 ## 当前接口
 
@@ -66,6 +68,9 @@ PostgreSQL 当前保存账号、登录会话、项目、操作记录与容量预
 | /api/v1/projects/{projectID} | GET | 读取当前用户可访问的项目 |
 | /api/v1/projects/{projectID}/operations | GET | 按时间升序读取项目内操作 |
 | /api/v1/projects/{projectID}/members | GET、POST | 列出项目成员；所有者添加已有账号或更新 developer/viewer 角色 |
+| /api/v1/projects/{projectID}/secrets | GET、POST | 列出项目凭据元数据；所有者追加加密版本 |
+| /api/v1/projects/{projectID}/secrets/{name} | GET | 列出项目凭据的版本元数据 |
+| /api/v1/projects/{projectID}/secrets/{name}/versions/{version}/value | GET | 所有者读取指定版本的值 |
 | /mcp | MCP Streamable HTTP | 使用当前会话查询可访问项目与项目操作 |
 
 两组监听端口完成初始化后才开始接受请求。管理环境启动前验证数据库连接和迁移版本，就绪接口同时检查数据库连接，数据库不可用时返回 503。

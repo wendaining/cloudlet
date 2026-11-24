@@ -20,6 +20,9 @@ import (
 func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	var store *database.Store
 	if cfg.DatabaseURL != "" {
+		if len(cfg.SecretKey) != 32 {
+			return errors.New("management environment requires a 32-byte secret key")
+		}
 		var err error
 		store, err = database.Open(ctx, cfg.DatabaseURL)
 		if err != nil {
@@ -28,6 +31,9 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		defer store.SQL.Close()
 		if err := store.CheckVersion(ctx); err != nil {
 			return err
+		}
+		if err := store.CheckSecretKey(ctx, cfg.SecretKey); err != nil {
+			return fmt.Errorf("validate platform secret key before startup: %w", err)
 		}
 	}
 	proxy, err := gateway.NewHandler(cfg, logger)
