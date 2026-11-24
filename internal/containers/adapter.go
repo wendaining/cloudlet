@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/http"
 	"net/netip"
 	"slices"
 	"strconv"
@@ -22,8 +23,10 @@ import (
 // adapter is no longer used. Every container operation other than Create
 // inspects the container first and returns ErrNotOwned when its canonical name
 // or ownership labels do not match.
+// WaitReady probes HTTP readiness through the published loopback endpoint.
 type Adapter struct {
-	docker *client.Client
+	docker     *client.Client
+	httpClient *http.Client
 }
 
 // New verifies that the Docker Engine is reachable and provides Linux
@@ -39,7 +42,7 @@ func New(ctx context.Context, docker *client.Client) (*Adapter, error) {
 	if ping.OSType != "linux" {
 		return nil, fmt.Errorf("create container adapter: Docker Engine provides %q containers, want linux: %w", ping.OSType, fs.ErrInvalid)
 	}
-	return &Adapter{docker: docker}, nil
+	return &Adapter{docker: docker, httpClient: newProbeClient()}, nil
 }
 
 // Create creates a stopped container with ownership labels. AccessPublished

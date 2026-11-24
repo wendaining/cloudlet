@@ -20,7 +20,11 @@
 | agent:ready | 维护者已确认可交给 Agent 执行 |
 | agent:assisted | PR 包含 Agent 参与的更改 |
 
-同类 type、priority、status 标签互斥。添加新标签时，Issue coordination 移除同类旧标签。GitHub 的关闭状态表示任务完成，关闭后移除 status 与 agent:ready 标签。
+同类 type、priority、status 标签互斥。添加新标签时，Issue coordination 移除同类旧标签。Issue 关闭后移除 status 与 agent:ready 标签。
+
+将任务的前置依赖登记在 GitHub Issue 的依赖关系中。前置 Issue 标记为已完成并关闭时，Issue coordination 检查本仓库中依赖它的任务。有负责人、标签齐全的开放任务在所有已登记前置均标记为已完成后，从 status:blocked 更新为 status:ready。没有已登记前置的阻塞由维护者处理。维护者仍需确认是否添加 agent:ready。
+
+如前置任务在工作流上线前已全部完成，可在 Actions 的 Issue coordination 中选择 Run workflow，并填写待复查任务的 Issue 编号。
 
 ready、in-progress 和 agent:ready 要求开放 Issue、一个 type、至少一个 area 和一个 priority。检查失败会使对应 Actions 任务失败，维护者需要修正 Issue 元数据。
 
