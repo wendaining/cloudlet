@@ -1,0 +1,16 @@
+{
+  "name": "cloudlet-worker-build",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "check": "node --test build.test.mjs",
+    "build": "node build.mjs"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261123.1",
+    "esbuild": "0.28.2",
+    "typescript": "7.0.2"
+  }
+}
