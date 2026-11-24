@@ -15,6 +15,7 @@ import (
 	"github.com/wendaining/cloudlet/internal/controlplane"
 	"github.com/wendaining/cloudlet/internal/database"
 	"github.com/wendaining/cloudlet/internal/gateway"
+	"github.com/wendaining/cloudlet/internal/routes"
 	"github.com/wendaining/cloudlet/internal/staticdeploy"
 )
 
@@ -22,6 +23,9 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	var store *database.Store
 	var sites *staticdeploy.Service
 	if cfg.DatabaseURL != "" {
+		if len(cfg.SecretKey) != 32 {
+			return errors.New("management environment requires a 32-byte secret key")
+		}
 		var err error
 		store, err = database.Open(ctx, cfg.DatabaseURL)
 		if err != nil {
@@ -30,6 +34,9 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		defer store.SQL.Close()
 		if err := store.CheckVersion(ctx); err != nil {
 			return err
+		}
+		if err := store.CheckSecretKey(ctx, cfg.SecretKey); err != nil {
+			return fmt.Errorf("validate platform secret key before startup: %w", err)
 		}
 		sites, err = staticdeploy.New(store, cfg.SiteStorageDirectory)
 		if err != nil {
@@ -44,6 +51,15 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	proxy, err := gateway.NewHandler(cfg, logger)
 	if err != nil {
 		return err
+	}
+	if store != nil {
+		publisher, err := routes.NewPublisher(store, proxy)
+		if err != nil {
+			return err
+		}
+		if _, err := publisher.Sync(ctx); err != nil {
+			return fmt.Errorf("restore Gateway routes: %w", err)
+		}
 	}
 	apiListener, err := net.Listen("tcp", cfg.APIAddress)
 	if err != nil {

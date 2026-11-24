@@ -65,7 +65,7 @@ func TestPostgresMigrationAccountsSessionsAndProjects(t *testing.T) {
 	}
 
 	newServer := func(serverStore *database.Store) *httptest.Server {
-		handler, cleanup := controlplane.NewHandler(serverStore, nil, config.Config{Instance: "integration", PublicOrigin: "http://localhost"}, slog.Default())
+		handler, cleanup := controlplane.NewHandler(serverStore, config.Config{Instance: "integration", PublicOrigin: "http://localhost"}, slog.Default())
 		t.Cleanup(cleanup)
 		server := httptest.NewServer(handler)
 		t.Cleanup(server.Close)

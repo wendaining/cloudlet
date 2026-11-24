@@ -29,6 +29,9 @@ func TestPrepare(t *testing.T) {
 	if !bytes.Equal(prepared.Module, module) {
 		t.Fatalf("module = %q, want %q", prepared.Module, module)
 	}
+	if prepared.Entry != entry || prepared.CompatibilityDate != compatibilityDate {
+		t.Fatalf("prepared metadata = entry %q, compatibility date %q", prepared.Entry, prepared.CompatibilityDate)
+	}
 	for _, expected := range []string{
 		`name = "dist/hello-world.mjs", esModule = embed "worker.mjs"`,
 		`compatibilityDate = "2026-10-12"`,

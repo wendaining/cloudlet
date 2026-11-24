@@ -84,7 +84,7 @@ func TestPostgresProjectMemberRemoval(t *testing.T) {
 	}
 
 	newServer := func() *httptest.Server {
-		handler, cleanup := controlplane.NewHandler(store, nil, config.Config{Instance: "member-removal", PublicOrigin: "http://localhost"}, slog.Default())
+		handler, cleanup := controlplane.NewHandler(store, config.Config{Instance: "member-removal", PublicOrigin: "http://localhost"}, slog.Default())
 		t.Cleanup(cleanup)
 		server := httptest.NewServer(handler)
 		t.Cleanup(server.Close)

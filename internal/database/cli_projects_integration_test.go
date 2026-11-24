@@ -71,7 +71,7 @@ func TestCLIProjectsUsePostgresManagementAPI(t *testing.T) {
 	if err := store.SeedUser(ctx, otherEmail, otherPassword); err != nil {
 		t.Fatal(err)
 	}
-	handler, cleanup := controlplane.NewHandler(store, nil, config.Config{Instance: "cli-integration", PublicOrigin: "http://localhost"}, slog.Default())
+	handler, cleanup := controlplane.NewHandler(store, config.Config{Instance: "cli-integration", PublicOrigin: "http://localhost"}, slog.Default())
 	t.Cleanup(cleanup)
 	api := httptest.NewServer(handler)
 	t.Cleanup(api.Close)

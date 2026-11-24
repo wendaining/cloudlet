@@ -71,8 +71,11 @@ make dev 检查配置与端口，使用 compose.yaml 和 compose.dev.yaml 启动
 | CLOUDLET_API_PORT、CLOUDLET_GATEWAY_PORT、CLOUDLET_WEB_PORT | 本机服务端口，默认 8080、8081、5173 |
 | CLOUDLET_DEBUG_PORT | Delve 监听端口，默认 2345 |
 | CLOUDLET_DATABASE_URL | PostgreSQL 地址，包含数据库账号、密码与端口 |
+| CLOUDLET_SECRET_KEY | 64 个十六进制字符的平台密钥，用于加密项目凭据版本 |
 | CLOUDLET_DEV_EMAIL、CLOUDLET_DEV_PASSWORD | 首次准备开发账号时使用的凭据 |
 | DOCKER_HOST、DOCKER_CONTEXT | 可选 Docker 连接配置，两项互斥 |
+
+数据库保存平台密钥的 SHA-256 标识。已有凭据数据的环境必须继续使用对应密钥，密钥不匹配时服务终止启动。
 
 未指定 Docker 连接时使用当前 Docker context。本地开发支持 unix:// 连接，Go SDK 和 Testcontainers 使用同一引擎。数据库镜像版本与 digest 锁定在 configs/images.json。数据库端口和应用监听端口均绑定回环地址。
 

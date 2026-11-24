@@ -33,3 +33,25 @@ test('占用真实端口时返回错误', async t => {
   t.after(() => new Promise(resolve => listener.close(resolve)));
   await assert.rejects(assertPortsFree([listener.address().port]), /不可用/u);
 });
+
+test('已有配置缺少平台密钥时补充密钥', async t => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'cloudlet-config-'));
+  t.after(() => rm(directory, { recursive: true }));
+  const filename = path.join(directory, '.env.local');
+  await writeFile(filename, [
+    'CLOUDLET_ENV=development',
+    'CLOUDLET_INSTANCE=default',
+    'CLOUDLET_API_PORT=8080',
+    'CLOUDLET_GATEWAY_PORT=8081',
+    'CLOUDLET_WEB_PORT=5173',
+    'CLOUDLET_DEBUG_PORT=2345',
+    'CLOUDLET_DATABASE_URL=postgres://cloudlet:database-password@127.0.0.1:15432/cloudlet?sslmode=disable',
+    'CLOUDLET_DEV_EMAIL=developer@cloudlet.local',
+    'CLOUDLET_DEV_PASSWORD=account-password-1234',
+    '',
+  ].join('\n'));
+  await initialize(filename);
+  const content = await readFile(filename, 'utf8');
+  assert.match(content, /^CLOUDLET_SECRET_KEY=[0-9a-f]{64}$/mu);
+  await loadConfig(filename);
+});

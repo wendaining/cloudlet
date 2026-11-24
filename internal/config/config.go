@@ -2,6 +2,7 @@ package config
 
 import (
 	"cmp"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,6 +27,7 @@ type Config struct {
 	Environment          string  `json:"environment,omitempty"`
 	Instance             string  `json:"instance,omitempty"`
 	PublicOrigin         string  `json:"public_origin,omitempty"`
+	SecretKey            []byte  `json:"-"`
 	DatabaseURL          string  `json:"-"`
 	SiteStorageDirectory string  `json:"site_storage_directory,omitempty"`
 	APIAddress           string  `json:"api_address"`
@@ -50,6 +52,13 @@ func Load(path string) (Config, error) {
 		return Config{}, errors.New("configuration must contain one JSON object")
 	}
 	cfg.DatabaseURL = os.Getenv("CLOUDLET_DATABASE_URL")
+	if value := os.Getenv("CLOUDLET_SECRET_KEY"); value != "" {
+		key, err := hex.DecodeString(value)
+		if err != nil || len(key) != 32 {
+			return Config{}, errors.New("CLOUDLET_SECRET_KEY must contain 64 hexadecimal characters")
+		}
+		cfg.SecretKey = key
+	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
@@ -66,6 +75,9 @@ func (cfg Config) Validate() error {
 	if cfg.Environment != "" {
 		if cfg.DatabaseURL == "" || cfg.Instance == "" {
 			return errors.New("management environment requires database URL and instance")
+		}
+		if len(cfg.SecretKey) != 32 {
+			return errors.New("management environment requires a 32-byte secret key")
 		}
 		origin, err := url.Parse(cfg.PublicOrigin)
 		if err != nil || origin.Hostname() == "" || (origin.Scheme != "http" && origin.Scheme != "https") {
