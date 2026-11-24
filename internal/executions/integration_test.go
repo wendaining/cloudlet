@@ -806,6 +806,7 @@ func dropReleaseFailureTrigger(t *testing.T, store *database.Store) {
 
 func httpSpec(instance string, projectID uuid.UUID, resource, image string) containers.Spec {
 	return containers.Spec{
+		Access: containers.AccessPublished,
 		Ownership: containers.Ownership{
 			Environment: instance,
 			Project:     projectID.String(),

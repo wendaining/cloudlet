@@ -3,13 +3,19 @@ name: Issue coordination
 on:
   issues:
     types: [opened, reopened, labeled, assigned, unassigned, closed]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Issue number to recheck for completed dependencies
+        required: true
+        type: number
 
 permissions:
   contents: read
   issues: write
 
 concurrency:
-  group: issue-${{ github.event.issue.number }}
+  group: issue-${{ github.event.issue.number || inputs.issue_number }}
   cancel-in-progress: false
 
 jobs:
@@ -27,5 +33,11 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run issue:coordinate
+        if: github.event_name == 'issues'
         env:
           GH_TOKEN: ${{ github.token }}
+      - run: node scripts/github.mjs unblock-issue
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}

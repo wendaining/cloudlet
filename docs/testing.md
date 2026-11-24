@@ -8,7 +8,7 @@
 | npm run lint:config | JSON、YAML、Issue 表单与 Actions 约定 |
 | npm run lint:tooling | 脚本语法、ShellCheck、配置文件与真实端口检查 |
 | make test | Go race 测试、真实 HTTP、Gateway 转发与服务停止 |
-| make test-integration | Docker 中的 PostgreSQL 迁移、账号、会话、项目与成员角色、操作记录、项目凭据、路由快照、容量预留、容器容量准入、项目容量查询、就绪检查、workerd 执行和容器创建、启动、观测、停止与删除 |
+| make test-integration | Docker 中的 PostgreSQL 迁移、账号、会话、项目与成员角色、操作记录、项目凭据、路由快照、容量预留、容器容量准入、项目容量查询、就绪检查、workerd 执行和容器创建、启动、观测、HTTP 就绪探测、停止与删除 |
 | make web-check | TypeScript、ESLint、Prettier、Vite 构建与接口生成一致性 |
 | make dev-check | 真实本机进程、数据库、热重载、完整停止、多实例与失败清理 |
 | make test-e2e | 真实 Chromium 在桌面和手机尺寸下完成登录、刷新和退出 |
@@ -134,16 +134,24 @@ npm --prefix runtimes/browser run test:integration
 
 ## 容器执行适配器验收
 
-使用真实 Docker 启动 configs/images.json 中的固定镜像，读取适配器观测到的回环端口并请求预期响应。名称或归属标签不匹配的容器不会被启动、观测、停止或删除。停止和删除后容器与端口释放。
+使用真实 Docker 启动 configs/images.json 中的固定镜像，读取适配器观测到的回环端口并请求预期响应。network 模式创建独立的用户定义 bridge 网络，核对容器没有发布主机端口，读取容器在该网络中的实际地址与稳定别名，并从同一网络的客户端容器通过 IP 与 DNS 名称分别发起真实 HTTP 请求。Docker Desktop 与 WSL2 中宿主机不能直接访问用户定义网络的容器地址，因此内部端点由同网络客户端验证。网络在创建与启动之间被删除时，启动返回 `ErrNetworkNotFound` 且容器保持 `created`；Docker 把网络 ID 前缀解析为其他网络时同样归类为 `ErrNetworkNotFound`。名称或归属标签不匹配的容器不会被启动、观测、停止或删除。停止和删除后容器、网络端点与端口释放。
 
 镜像准备使用真实 Docker Engine 和本地 registry。测试从空缓存按摘要拉取导入的测试镜像，核对返回的镜像标识与摘要；停止 registry 后再次准备，确认直接复用已核对摘要的本地镜像；再以不存在的摘要请求拉取，确认返回包含具体镜像引用的拉取失败。registry 镜像按 digest 固定，缺失时由 Docker Engine 拉取。
+
+HTTP 就绪探测使用真实 Docker 启动延迟就绪、持续返回 503 和启动后退出的服务。延迟服务在探测期间连接失败，随后返回 200；持续 503 的服务在截止时间后返回 `ErrNotReady` 并保留最后状态；启动后退出的容器在截止时间前快速失败并报告退出码。未发布端口与不匹配归属分别返回明确错误；端口在探测期间暂时消失时，保留最近一次 HTTP 状态并继续报告端口缺失原因。单元测试还覆盖状态码已返回但响应体保持打开的流式服务，确认收到状态码后立即结束本次尝试，不等待响应体；100–199 的 1xx 状态码在访问 Docker 前被拒绝，避免配置后等待到超时。
 
 ```sh
 make test-integration
 # 只运行容器适配器
 go test -race -count=1 -tags=integration ./internal/containers
+# 只运行内部网络端点
+go test -race -count=1 -tags=integration -run TestAdapterNetworkAccess ./internal/containers
+# 只运行启动时的网络缺失与网络 ID 前缀回归
+go test -race -count=1 -tags=integration -run 'TestAdapterStartReportsMissingNetwork|TestAdapterCreateRejectsNetworkIDPrefix' ./internal/containers
 # 只运行镜像准备
 go test -race -count=1 -tags=integration -run TestAdapterPrepareImage ./internal/containers
+# 只运行 HTTP 就绪探测
+go test -race -count=1 -tags=integration -run TestAdapterWaitReady ./internal/containers
 ```
 
 测试结束清理所属容器、本地 registry 与拉取的测试镜像。
