@@ -48,6 +48,29 @@ func TestWorkerPreflightReportsRuntimePhase(t *testing.T) {
 			failed:      true,
 			logContains: "initialization failed",
 		},
+		{
+			name: "ready after large output",
+			module: `console.log("x".repeat(5 * 1024 * 1024));
+export default { fetch() { return new Response("ready") } };`,
+			phase: workers.PreflightReady,
+		},
+		{
+			name: "initialization error after large output",
+			module: `console.log("x".repeat(5 * 1024 * 1024));
+throw new Error("late initialization failure");`,
+			phase: workers.PreflightInitialize, failed: true, logContains: "late initialization failure",
+		},
+		{
+			name: "missing static dependency",
+			module: `import "./missing.mjs";
+export default { fetch() { return new Response("ready") } };`,
+			phase: workers.PreflightLoad, failed: true, logContains: `No such module "missing.mjs"`,
+		},
+		{
+			name:   "initialization SyntaxError",
+			module: `throw new SyntaxError("top-level syntax exception");`,
+			phase:  workers.PreflightInitialize, failed: true, logContains: "top-level syntax exception",
+		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			entry := "dist/index.mjs"

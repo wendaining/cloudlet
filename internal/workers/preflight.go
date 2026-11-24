@@ -20,9 +20,8 @@ import (
 )
 
 const (
-	preflightTimeout    = 30 * time.Second
-	maxPreflightCapture = 4 << 20
-	maxPreflightLog     = 16 << 10
+	preflightTimeout = 30 * time.Second
+	maxPreflightLog  = 16 << 10
 )
 
 // PreflightPhase identifies the runtime stage reached by a Worker module.
@@ -149,9 +148,9 @@ func Preflight(ctx context.Context, docker *client.Client, prepared RuntimeConfi
 		if logErr != nil {
 			return PreflightResult{}, fmt.Errorf("preflight Worker %q: container %s did not finish and its logs are unavailable: %w", prepared.Entry, created.ID, errors.Join(ctx.Err(), logErr))
 		}
-		return PreflightResult{Phase: PreflightInitialize, Logs: truncatePreflightLog(logs)}, &PreflightError{
+		return PreflightResult{Phase: PreflightInitialize, Logs: logs.diagnostics()}, &PreflightError{
 			Phase: PreflightInitialize,
-			Logs:  truncatePreflightLog(logs),
+			Logs:  logs.diagnostics(),
 			Err:   fmt.Errorf("container %s did not finish: %w", created.ID, ctx.Err()),
 		}
 	}
@@ -160,7 +159,7 @@ func Preflight(ctx context.Context, docker *client.Client, prepared RuntimeConfi
 	if err != nil {
 		return PreflightResult{}, fmt.Errorf("preflight Worker %q: read container %s logs: %w", prepared.Entry, created.ID, err)
 	}
-	result = classifyPreflight(logs, status)
+	result = logs.result(status)
 	if result.Phase != PreflightReady {
 		return result, &PreflightError{
 			Phase: result.Phase,
@@ -171,40 +170,79 @@ func Preflight(ctx context.Context, docker *client.Client, prepared RuntimeConfi
 	return result, nil
 }
 
-func readPreflightLogs(ctx context.Context, docker *client.Client, id string) (string, error) {
+func readPreflightLogs(ctx context.Context, docker *client.Client, id string) (*preflightLogCapture, error) {
 	logs, err := docker.ContainerLogs(ctx, id, client.ContainerLogsOptions{
 		ShowStdout: true,
 		ShowStderr: true,
 	})
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer logs.Close()
-	content, err := io.ReadAll(io.LimitReader(logs, maxPreflightCapture))
-	if err != nil {
-		return "", err
+	capture := &preflightLogCapture{}
+	if _, err := io.Copy(capture, logs); err != nil {
+		return nil, err
 	}
-	return string(content), nil
+	return capture, nil
 }
 
-func classifyPreflight(logs string, status int64) PreflightResult {
-	result := PreflightResult{Phase: PreflightLoad, Logs: truncatePreflightLog(logs)}
-	switch {
-	case strings.Contains(logs, "cloudlet-preflight:initialize:"):
-		result.Phase = PreflightInitialize
-	case strings.Contains(logs, "cloudlet-preflight:ready") && status == 0:
-		result.Phase = PreflightReady
-	case strings.Contains(logs, "cloudlet-preflight:ready"):
-		result.Phase = PreflightInitialize
-	}
-	return result
+// preflightLogCapture tracks markers across every read while retaining only
+// the diagnostic tail. A marker may span two reads or precede discarded logs.
+type preflightLogCapture struct {
+	phase     PreflightPhase
+	window    string
+	tail      []byte
+	truncated bool
 }
 
-func truncatePreflightLog(logs string) string {
-	if len(logs) <= maxPreflightLog {
-		return logs
+func (c *preflightLogCapture) Write(data []byte) (int, error) {
+	window := c.window + string(data)
+	last := -1
+	for _, marker := range []struct {
+		text  string
+		phase PreflightPhase
+	}{
+		{"cloudlet-preflight:load:", PreflightLoad},
+		{"cloudlet-preflight:initialize:", PreflightInitialize},
+		{"cloudlet-preflight:ready", PreflightReady},
+	} {
+		if index := strings.LastIndex(window, marker.text); index > last {
+			last = index
+			c.phase = marker.phase
+		}
 	}
-	return "[earlier output truncated]\n" + logs[len(logs)-maxPreflightLog:]
+	const overlap = len("cloudlet-preflight:initialize:") - 1
+	c.window = window[max(0, len(window)-overlap):]
+	if len(c.tail)+len(data) > maxPreflightLog {
+		c.truncated = true
+	}
+	if len(data) >= maxPreflightLog {
+		c.tail = append(c.tail[:0], data[len(data)-maxPreflightLog:]...)
+	} else {
+		overflow := max(0, len(c.tail)+len(data)-maxPreflightLog)
+		copy(c.tail, c.tail[overflow:])
+		c.tail = append(c.tail[:len(c.tail)-overflow], data...)
+	}
+	return len(data), nil
+}
+
+func (c *preflightLogCapture) result(status int64) PreflightResult {
+	phase := c.phase
+	if status == 0 {
+		phase = PreflightReady
+	} else if phase == PreflightReady {
+		phase = PreflightInitialize
+	} else if phase == "" {
+		phase = PreflightLoad
+	}
+	return PreflightResult{Phase: phase, Logs: c.diagnostics()}
+}
+
+func (c *preflightLogCapture) diagnostics() string {
+	if c.truncated {
+		return "[earlier output truncated]\n" + string(c.tail)
+	}
+	return string(c.tail)
 }
 
 func preflightConfig(compatibilityDate string) []byte {
@@ -249,7 +287,9 @@ const preflightWrapper = `export default {
     try {
       await import("./user.mjs");
     } catch (error) {
-      console.error("cloudlet-preflight:initialize:" + (error?.stack ?? error));
+      const phase = typeof error?.message === "string" && error.message.startsWith('No such module "')
+        ? "load" : "initialize";
+      console.error("cloudlet-preflight:" + phase + ":" + (error?.stack ?? error));
       throw error;
     }
     console.error("cloudlet-preflight:ready");

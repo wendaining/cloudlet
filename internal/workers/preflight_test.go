@@ -75,9 +75,15 @@ func TestClassifyPreflight(t *testing.T) {
 		{"ready then failed", "cloudlet-preflight:ready\n", 1, PreflightInitialize},
 		{"syntax", "service worker: Uncaught SyntaxError: Unexpected token '}'\n", 1, PreflightLoad},
 		{"missing module", "error: /worker/config.capnp: No such file.\n", 1, PreflightLoad},
+		{"successful exit", "[ PASS ] worker\n", 0, PreflightReady},
+		{"missing dependency", "cloudlet-preflight:load:No such module\n", 1, PreflightLoad},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			result := classifyPreflight(tt.logs, tt.status)
+			capture := &preflightLogCapture{}
+			if _, err := io.WriteString(capture, tt.logs); err != nil {
+				t.Fatal(err)
+			}
+			result := capture.result(tt.status)
 			if result.Phase != tt.want {
 				t.Fatalf("phase = %s, want %s", result.Phase, tt.want)
 			}
@@ -87,7 +93,11 @@ func TestClassifyPreflight(t *testing.T) {
 
 func TestTruncatePreflightLogKeepsTail(t *testing.T) {
 	logs := strings.Repeat("a", maxPreflightLog) + "tail"
-	truncated := truncatePreflightLog(logs)
+	capture := &preflightLogCapture{}
+	if _, err := io.WriteString(capture, logs); err != nil {
+		t.Fatal(err)
+	}
+	truncated := capture.diagnostics()
 	if !strings.HasPrefix(truncated, "[earlier output truncated]\n") || !strings.HasSuffix(truncated, "tail") {
 		t.Fatalf("truncated log = %q", truncated)
 	}
@@ -98,12 +108,46 @@ func TestTruncatePreflightLogKeepsTail(t *testing.T) {
 
 func TestClassifyPreflightKeepsMarkersBeforeTruncation(t *testing.T) {
 	logs := "cloudlet-preflight:ready\n" + strings.Repeat("a", maxPreflightLog+1)
-	result := classifyPreflight(logs, 0)
+	capture := &preflightLogCapture{}
+	if _, err := io.WriteString(capture, logs); err != nil {
+		t.Fatal(err)
+	}
+	result := capture.result(0)
 	if result.Phase != PreflightReady {
 		t.Fatalf("phase = %s, want %s", result.Phase, PreflightReady)
 	}
 	if !strings.HasPrefix(result.Logs, "[earlier output truncated]\n") {
 		t.Fatalf("logs were not truncated: %q", result.Logs)
+	}
+}
+
+func TestPreflightLogCaptureTracksSplitMarkers(t *testing.T) {
+	for _, phase := range []PreflightPhase{PreflightLoad, PreflightInitialize, PreflightReady} {
+		t.Run(string(phase), func(t *testing.T) {
+			capture := &preflightLogCapture{}
+			if _, err := io.WriteString(capture, strings.Repeat("a", 5<<20)); err != nil {
+				t.Fatal(err)
+			}
+			for _, part := range []string{"cloudlet-pre", "flight:", string(phase), ":\n"} {
+				if _, err := io.WriteString(capture, part); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := io.WriteString(capture, strings.Repeat("b", maxPreflightLog+1)); err != nil {
+				t.Fatal(err)
+			}
+			status := int64(1)
+			if phase == PreflightReady {
+				status = 0
+			}
+			result := capture.result(status)
+			if result.Phase != phase {
+				t.Fatalf("phase = %s, want %s", result.Phase, phase)
+			}
+			if len(result.Logs) > maxPreflightLog+len("[earlier output truncated]\n") {
+				t.Fatalf("retained logs = %d bytes", len(result.Logs))
+			}
+		})
 	}
 }
 

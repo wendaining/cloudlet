@@ -26,7 +26,7 @@ workerd、用户容器和浏览器由 Docker Engine 持有，与 Go 管理进程
 
 部署清单固定运行时版本及摘要、ES Module 入口、模块内容、compatibility date、flags 和绑定。TypeScript 经 tsc 检查并通过 esbuild 生成部署包，运行时执行已验证产物。
 
-`workers.Preflight` 使用固定 workerd 的 `test` 命令在独立容器中载入并初始化模块，返回 `load`、`initialize` 或 `ready` 阶段。预检容器不发布端口，不加入网络，结束后删除。模块解析失败归入 `load`，顶层代码执行失败归入 `initialize`。
+`workers.Preflight` 使用固定 workerd 的 `test` 命令在独立容器中载入并初始化模块，返回 `load`、`initialize` 或 `ready` 阶段。预检容器不发布端口，不加入网络，结束后删除。模块解析和依赖解析失败归入 `load`，顶层代码执行失败归入 `initialize`。阶段标记在完整日志流中识别，诊断仅保留末尾 16 KiB，成功退出返回 `ready`。
 
 项目的运行配置包含各 Worker 的活动版本和 DO 命名空间归属。更改代码产生新的 Deployment，更换进程产生新的 Execution。发布、版本激活和运行时重启分别记录。
 

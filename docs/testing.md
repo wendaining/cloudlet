@@ -54,6 +54,8 @@ go test -race -count=1 -tags=integration ./internal/executions
 
 使用当前 Docker 连接单独验证 Worker 运行配置。
 
+预检用例使用真实 workerd 验证模块成功、语法错误、初始化错误和缺失静态依赖。顶层输出超过 5 MiB 后，成功模块仍返回 ready，初始化错误保留对应阶段和末尾诊断。
+
 ```sh
 export DOCKER_HOST="$(docker context inspect --format '{{.Endpoints.docker.Host}}')"
 export TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock
