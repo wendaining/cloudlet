@@ -1,8 +1,10 @@
 // Package containers manages Docker Engine container lifecycles for platform
 // execution units. It prepares images from immutable digest references, creates
 // containers with deterministic names and ownership labels, starts and observes
-// them, and stops or removes only containers that belong to the requested
-// environment, project, resource and execution generation.
+// them, reads the published loopback port, and probes HTTP readiness through
+// that endpoint within a bounded deadline. It stops or removes only containers
+// that belong to the requested environment, project, resource and execution
+// generation.
 //
 // AccessPublished publishes the container port on the host loopback interface
 // for local development. AccessNetwork joins an existing user-defined bridge
