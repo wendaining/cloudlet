@@ -7,12 +7,29 @@ import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import { PNG } from 'pngjs';
+import { readSessionDeadline } from './session-deadline.ts';
 import { readViewport } from './viewport.ts';
 
 const execute = promisify(execFile);
 const directory = fileURLToPath(new URL('.', import.meta.url));
 const seccomp = fileURLToPath(new URL('./seccomp.json', import.meta.url));
 const docker = (args, env = process.env) => execute('docker', args, { cwd: directory, env, timeout: 240000 });
+
+test('validates UTC session deadline and rejects expired or invalid configuration', () => {
+  const now = Date.parse('2030-01-01T00:00:00Z');
+  assert.equal(readSessionDeadline(undefined, now), undefined);
+  assert.equal(readSessionDeadline('2030-01-01T00:00:00.001Z', now), now + 1);
+  assert.equal(readSessionDeadline('2030-01-01T00:00:01Z', now), now + 1000);
+  assert.equal(readSessionDeadline('2030-01-01T00:00:00.5Z', now), now + 500);
+  assert.equal(readSessionDeadline('2030-01-01T00:00:00.12Z', now), now + 120);
+  assert.equal(readSessionDeadline('2030-01-01T00:00:00.123456789Z', now), now + 123);
+  assert.equal(readSessionDeadline('2030-01-01T00:00:01.000000Z', now), now + 1000);
+  assert.throws(() => readSessionDeadline('2030-01-01T00:00:00Z', now), /future/);
+  assert.throws(() => readSessionDeadline('2029-12-31T23:59:59Z', now), /future/);
+  for (const value of ['', '2030-02-30T00:00:00Z', '2030-01-01T00:00:00+00:00', '2030-01-01T00:00:00.1234567890Z']) {
+    assert.throws(() => readSessionDeadline(value, now), /UTC timestamp/);
+  }
+});
 
 test('validates viewport defaults, bounds and scaled pixel budget', () => {
   assert.deepEqual(readViewport({}), { viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 });
@@ -143,6 +160,49 @@ test('non-root Chromium navigates, captures PNG and shuts down', { timeout: 3000
   assert.notEqual(uid.trim(), '0');
   const { stdout: nodeVersion } = await docker(['exec', name, '/usr/local/bin/node', '--version']);
   assert.equal(nodeVersion.trim(), 'v24.22.2');
+
+  const expiring = `${name}-expiry`;
+  const deadline = Date.now() + 6000;
+  await docker([
+    'create', '--name', expiring, '--init', '--cap-drop=ALL', '--shm-size=256m',
+    '--security-opt', 'no-new-privileges', '--security-opt', `seccomp=${seccomp}`,
+    '-p', '127.0.0.1::8080', '-e', 'CLOUDLET_BROWSER_TOKEN',
+    '-e', `CLOUDLET_BROWSER_DEADLINE=${new Date(deadline).toISOString().replace('Z', '123456Z')}`, image,
+  ], { ...process.env, CLOUDLET_BROWSER_TOKEN: token });
+  try {
+    await docker(['start', expiring]);
+    const { stdout: endpoint } = await docker(['port', expiring, '8080/tcp']);
+    const expiringOrigin = `http://${endpoint.trim()}`;
+    let ready = false;
+    while (Date.now() < deadline) {
+      const response = await fetch(`${expiringOrigin}/readyz`, { signal: AbortSignal.timeout(500) }).catch(() => undefined);
+      if (response?.ok) {
+        assert.deepEqual(await response.json(), { status: 'ready' });
+        ready = true;
+        break;
+      }
+      await delay(100);
+    }
+    assert.equal(ready, true, 'Chromium must start before expiry');
+    const { stdout: processors } = await docker(['top', expiring, '-eo', 'pid,args']);
+    assert.match(processors, /chrome/);
+    const { stdout: code } = await execute('docker', ['wait', expiring], { cwd: directory, timeout: 12000 });
+    assert.equal(code.trim(), '0');
+    assert.ok(Date.now() >= deadline);
+    assert.equal((await docker(['inspect', '--format', '{{.State.Running}}', expiring])).stdout.trim(), 'false');
+  } finally {
+    await docker(['rm', '-f', expiring]);
+  }
+
+  await assert.rejects(
+    docker([
+      'run', '--rm', '--init', '--cap-drop=ALL', '--security-opt', `seccomp=${seccomp}`,
+      '-e', 'CLOUDLET_BROWSER_TOKEN',
+      '-e', `CLOUDLET_BROWSER_DEADLINE=${new Date(Date.now() + 30000).toISOString()}`,
+      '-e', 'PLAYWRIGHT_BROWSERS_PATH=/no-browser-installed', image,
+    ], { ...process.env, CLOUDLET_BROWSER_TOKEN: token }),
+    { code: 1, stderr: /Executable doesn't exist/ },
+  );
 
   const url = `http://host.test:${fixture.address().port}`;
   const command = (path, input, key = token) => fetch(`${origin}${path}`, {
