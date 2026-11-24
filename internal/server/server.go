@@ -16,10 +16,12 @@ import (
 	"github.com/wendaining/cloudlet/internal/database"
 	"github.com/wendaining/cloudlet/internal/gateway"
 	"github.com/wendaining/cloudlet/internal/routes"
+	"github.com/wendaining/cloudlet/internal/staticdeploy"
 )
 
 func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	var store *database.Store
+	var sites *staticdeploy.Service
 	if cfg.DatabaseURL != "" {
 		if len(cfg.SecretKey) != 32 {
 			return errors.New("management environment requires a 32-byte secret key")
@@ -36,6 +38,15 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		if err := store.CheckSecretKey(ctx, cfg.SecretKey); err != nil {
 			return fmt.Errorf("validate platform secret key before startup: %w", err)
 		}
+		sites, err = staticdeploy.New(store, cfg.SiteStorageDirectory)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			if err := sites.Close(); err != nil {
+				logger.Error("close static site storage", "error", err)
+			}
+		}()
 	}
 	proxy, err := gateway.NewHandler(cfg, logger)
 	if err != nil {
@@ -64,7 +75,7 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("resolve management API endpoint: %w", err)
 	}
-	management, closeSessions, err := controlplane.NewHandlerWithMCP(store, cfg, logger, endpoint)
+	management, closeSessions, err := controlplane.NewHandlerWithMCP(store, sites, cfg, logger, endpoint)
 	if err != nil {
 		return fmt.Errorf("configure management API: %w", err)
 	}
