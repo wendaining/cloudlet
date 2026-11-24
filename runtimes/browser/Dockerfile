@@ -9,7 +9,7 @@ COPY --from=dependencies /usr/local/bin/node /usr/local/bin/node
 COPY --from=dependencies /usr/local/LICENSE /usr/local/share/licenses/node/LICENSE
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY package.json ./
-COPY server.ts ./
+COPY *.ts ./
 USER pwuser
 EXPOSE 8080
 CMD ["/usr/local/bin/node", "server.ts"]

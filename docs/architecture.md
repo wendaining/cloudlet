@@ -44,6 +44,7 @@ Cloudlet 在一台 Linux 服务器上管理计算资源。本地开发在成员�
 | internal/containers | Docker Engine 镜像摘要准备、容器生命周期与回环端口观测 |
 | internal/browser | 复用容器管理的 Playwright 会话 |
 | pkg/client | CLI 与其他客户端共享的 API 客户端 |
+| internal/mcpserver | 只读 MCP 项目与操作查询，复用管理 API 会话权限 |
 
 PostgreSQL 当前保存账号、登录会话、项目、操作记录、项目凭据与容量预留。Workers 模块已提供独立的运行配置，资源元数据和生命周期的开发目标见 [开发任务](roadmap.md)。Durable Objects 的存储能力随 workerd 集成验证。
 
@@ -69,6 +70,7 @@ PostgreSQL 当前保存账号、登录会话、项目、操作记录、项目凭
 | /api/v1/projects/{projectID}/secrets | GET、POST | 列出项目凭据元数据；所有者追加加密版本 |
 | /api/v1/projects/{projectID}/secrets/{name} | GET | 列出项目凭据的版本元数据 |
 | /api/v1/projects/{projectID}/secrets/{name}/versions/{version}/value | GET | 所有者读取指定版本的值 |
+| /mcp | MCP Streamable HTTP | 使用当前会话查询可访问项目与项目操作 |
 
 两组监听端口完成初始化后才开始接受请求。管理环境启动前验证数据库连接和迁移版本，就绪接口同时检查数据库连接，数据库不可用时返回 503。
 
