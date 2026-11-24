@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -268,7 +269,7 @@ func startRouteServer(t *testing.T, binary, configPath, connection string) (stri
 	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 	t.Cleanup(cancel)
 	command := exec.CommandContext(ctx, binary, "-config", configPath)
-	command.Env = append(os.Environ(), "CLOUDLET_DATABASE_URL="+connection)
+	command.Env = append(os.Environ(), "CLOUDLET_DATABASE_URL="+connection, "CLOUDLET_SECRET_KEY="+strings.Repeat("01", 32))
 	command.Stderr = os.Stderr
 	stdout, err := command.StdoutPipe()
 	if err != nil {

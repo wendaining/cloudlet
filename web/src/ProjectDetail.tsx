@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { project, session } from './client';
 import { ProjectMembers } from './ProjectMembers';
 import styles from './app.module.css';
+import { OperationList } from './OperationList';
 
 export function ProjectDetail() {
   const { projectID } = useParams<{ projectID: string }>();
@@ -47,6 +48,12 @@ export function ProjectDetail() {
     );
   return (
     <main className={styles.detail}>
+      <OperationList
+        projectID={projectID}
+        accountID={account.data?.user.id}
+        sessionPending={account.isPending}
+        sessionError={account.error}
+      />
       <Card
         title={query.data.name}
         extra={<Link to="/projects">返回项目列表</Link>}
