@@ -159,3 +159,24 @@ func TestBindingMapping(t *testing.T) {
 		t.Fatal("不同归属匹配成功")
 	}
 }
+
+func TestAdoptionRequiresThePreparedFileDigest(t *testing.T) {
+	request := validStartRequest()
+	request.Spec.Files = []containers.File{{Path: "worker/worker.mjs", Data: []byte("export default {}")}}
+	digest, err := request.Spec.FilesDigest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	observation := containers.Observation{Image: request.Spec.Image, CPUMillis: request.Spec.Limits.CPUMillis, MemoryBytes: request.Spec.Limits.MemoryBytes, PIDs: request.Spec.Limits.PIDs, OpenFiles: request.Spec.Limits.OpenFiles, FilesDigest: digest}
+	if err := checkAdoptedContainer(request.ExecutionID, observation, request.Spec); err != nil {
+		t.Fatal(err)
+	}
+	request.Spec.Files[0].Data = []byte("changed module")
+	if err := checkAdoptedContainer(request.ExecutionID, observation, request.Spec); !errors.Is(err, ErrExecutionConflict) {
+		t.Fatalf("changed prepared files: %v", err)
+	}
+	request.Spec.Files[0].Path = "../outside"
+	if err := checkAdoptedContainer(request.ExecutionID, observation, request.Spec); !errors.Is(err, fs.ErrInvalid) {
+		t.Fatalf("invalid prepared file: %v", err)
+	}
+}

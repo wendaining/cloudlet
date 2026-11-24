@@ -2,6 +2,7 @@ package containers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net/netip"
@@ -58,7 +59,15 @@ func (a *Adapter) Create(ctx context.Context, spec Spec) (Container, error) {
 	if err := validateContainerID(result.ID); err != nil {
 		return Container{}, fmt.Errorf("create container %s: %w", options.Name, err)
 	}
-	return Container{ID: result.ID, Name: options.Name}, nil
+	created := Container{ID: result.ID, Name: options.Name}
+	if len(spec.Files) > 0 {
+		if err := a.installFiles(ctx, created, spec); err != nil {
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+			defer cancel()
+			return created, errors.Join(err, a.Remove(cleanupCtx, spec.Ownership, created.ID))
+		}
+	}
+	return created, nil
 }
 
 // Find returns the managed container for the ownership's deterministic name.
@@ -219,6 +228,14 @@ func (s Spec) createOptions() (client.ContainerCreateOptions, error) {
 	}
 	hostIP := netip.MustParseAddr(loopbackHost)
 	pids := s.Limits.PIDs
+	labels := s.Ownership.labels()
+	digest, err := filesDigest(s.Files)
+	if err != nil {
+		return client.ContainerCreateOptions{}, err
+	}
+	if digest != "" {
+		labels["io.cloudlet.files-digest"] = digest
+	}
 	seconds := int(stopTimeout / time.Second)
 	return client.ContainerCreateOptions{
 		Name: s.Ownership.containerName(),
@@ -228,7 +245,7 @@ func (s Spec) createOptions() (client.ContainerCreateOptions, error) {
 			Cmd:          slices.Clone(s.Command),
 			Env:          slices.Clone(s.Env),
 			ExposedPorts: network.PortSet{port: {}},
-			Labels:       s.Ownership.labels(),
+			Labels:       labels,
 			StopTimeout:  &seconds,
 		},
 		HostConfig: &container.HostConfig{

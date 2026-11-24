@@ -89,6 +89,7 @@ type Spec struct {
 	Env       []string
 	Port      uint16
 	Limits    Limits
+	Files     []File
 }
 
 // Container identifies a container created by the adapter.
@@ -125,6 +126,7 @@ type Observation struct {
 	PIDs        int64
 	OpenFiles   int64
 	Ports       []PublishedPort
+	FilesDigest string
 }
 
 // Validate reports whether the ownership can identify a managed container.
@@ -230,6 +232,9 @@ func (s Spec) Validate() error {
 }
 
 func (s Spec) validate() error {
+	if _, err := filesDigest(s.Files); err != nil {
+		return err
+	}
 	if err := s.Ownership.validate(); err != nil {
 		return err
 	}
@@ -364,6 +369,7 @@ func observe(info container.InspectResponse) (Observation, error) {
 	}
 	if info.Config != nil {
 		observation.Image = info.Config.Image
+		observation.FilesDigest = info.Config.Labels["io.cloudlet.files-digest"]
 	}
 	if observation.Image == "" {
 		observation.Image = info.Image
