@@ -8,7 +8,7 @@
 | npm run lint:config | JSON、YAML、Issue 表单与 Actions 约定 |
 | npm run lint:tooling | 脚本语法、ShellCheck、配置文件与真实端口检查 |
 | make test | Go race 测试、真实 HTTP、Gateway 转发与服务停止 |
-| make test-integration | Docker 中的 PostgreSQL 迁移、账号、会话、项目与成员角色、操作记录、容量预留、容器容量准入、就绪检查、workerd 执行和容器创建、启动、观测、HTTP 就绪探测、停止与删除 |
+| make test-integration | Docker 中的 PostgreSQL 迁移、账号、会话、项目与成员角色、操作记录、项目凭据、路由快照、容量预留、容器容量准入、就绪检查、workerd 执行和容器创建、启动、观测、HTTP 就绪探测、停止与删除 |
 | make web-check | TypeScript、ESLint、Prettier、Vite 构建与接口生成一致性 |
 | make dev-check | 真实本机进程、数据库、热重载、完整停止、多实例与失败清理 |
 | make test-e2e | 真实 Chromium 在桌面和手机尺寸下完成登录、刷新和退出 |
@@ -19,6 +19,12 @@
 make generate 从 api/openapi.yaml 同时生成 Go 类型、Gin 接口、客户端和前端类型，生成文件随实现提交。Go 和前端的检查分别比较临时生成结果。
 
 ## 开发流程验证
+
+Gateway 域名验收构建并启动实际管理服务，以真实站点文件作为 HTTP 上游。用例验证域名大小写、末尾句点与端口规范化，GET 与 HEAD 正常转发，未知域名返回 404。停止上游后，该域名返回 502 并记录失败域名，其他上游继续可用。
+
+```sh
+go test -race -count=1 -run TestGatewayDomainRoutingAcceptance -v ./internal/server
+```
 
 开发流程测试创建独立配置与随机可用端口，通过与成员相同的开发入口运行 Go、Vite 和 PostgreSQL。测试验证同名控制器拒绝重复启动、错误的 reset 确认不会停止服务、真实 API 登录和 Gateway 转发。
 
@@ -50,9 +56,33 @@ go test -race -count=1 -tags=integration ./internal/executions
 
 用例在四核四 GiB 主机预算下预占三核三 GiB 与三个实例，再并发提交八个一核一 GiB、单实例的容器启动请求。只有一个请求成功，其余返回容量不足且没有创建容器；成功启动的固定镜像通过实际发布的回环端口返回预期页面。仅停止容器时预留保持活动；停止并删除容器后容量恢复，后续申请可以再次成功。无效镜像导致创建失败时释放预留且不留下容器；无效用户使 Docker 启动失败时清理容器并释放预留。同一执行标识的并发启动只创建一个容器，并只扣减一次容量。同一执行更换归属或镜像、不同执行复用同一归属都会被拒绝；错误容器标识不会释放容量，绑定容器被外部删除后按归属确认清理。尚未记录容器标识的预留可以在确认没有容器后释放；替换容器清理后释放失败时，原 Stop 请求仍可使用原容器标识重试。256 至 512 字节的摘要固定镜像可以通过准入；Docker 创建失败时正常释放预留。生命周期用例使用真实 PostgreSQL 与 Docker，纯逻辑单元测试只覆盖构造与请求校验、绑定映射和复用配置比较。
 
+## 项目凭据验收
+
+项目凭据使用真实 PostgreSQL 和 HTTP 管理接口验证。
+
+```sh
+go test -race -count=1 -tags=integration -run TestProjectSecrets ./internal/database
+```
+
+用例保存同一凭据的两个版本，检查元数据接口只返回名称与版本信息，数据库密文不包含明文，日志不包含凭据值。所有者通过值接口读取明文，其他成员收到 403，非成员收到 404。重新连接数据库和重启管理接口后使用同一平台密钥读取版本。交换版本密文后认证失败，非规范项目 UUID 可以规范读取。错误平台密钥阻止写入和服务启动，原版本序列保持不变。不存在或仅属于其他项目的凭据名称与版本返回 404。请求覆盖 ASCII、JSON 转义和多字节字符的 65536 字节边界。并发创建同一凭据的版本时，版本号保持唯一且连续。
+
+## 路由快照验收
+
+项目路由使用真实 PostgreSQL、HTTP 上游和 Gateway 验证。
+
+```sh
+go test -race -count=1 -tags=integration ./internal/routes
+```
+
+用例发布两个项目的路由并分别访问，移除一个项目后另一个继续可用。跨项目在同一域名下发布不同路径前缀时返回冲突，失败发布保留原路由与快照版本。并发申请同一域名时只有一个项目成功，全部路由移除后其他项目可以使用该域名。启动配置域名不能用于动态路由，拒绝后快照版本不变化。新建 Publisher 从数据库恢复路由。并发发布多个项目后全部路由可访问。
+
+进程恢复用例构建并启动实际管理服务，访问两个项目的域名。停止并重启进程后，两条路由继续可用。撤销一个项目的路由后再次启动，另一个项目仍可访问。
+
 ## workerd 集成验证
 
 使用当前 Docker 连接单独验证 Worker 运行配置。
+
+预检用例使用真实 workerd 验证模块成功、语法错误、初始化错误和缺失静态依赖。顶层输出超过 5 MiB 后，成功模块仍返回 ready，初始化错误保留对应阶段和末尾诊断。
 
 ```sh
 export DOCKER_HOST="$(docker context inspect --format '{{.Endpoints.docker.Host}}')"
@@ -63,6 +93,21 @@ go test -race -count=1 -tags=integration -v ./internal/workers
 在 Docker Engine 29.5.2 的 `linux/arm64` 环境中，workerd `1.20261012.1` 执行 `POST /echo`，返回 HTTP 200、`X-Worker: workerd` 和响应正文 `POST /echo cloudlet`。无效兼容日期 `2099-01-01` 使进程以状态码 1 退出，并报告运行时支持的最晚日期 `2026-10-19`。入口用例验证了缺失文件、目录和越界路径的诊断。镜像内的 `linux/arm64` 二进制文件与 Cloudflare 发布文件解压后的 SHA256 一致。
 
 同一入口中的 `TestWorkerdPersistsDurableObjectSQLite` 通过 HTTP 调用名为 `alpha` 和 `beta` 的两个对象。两个对象使用相同的 SQL 表和键保存各自的值。测试停止第一个容器，用原数据卷启动新容器，然后确认两个对象的标识和各自的值都保持不变。
+
+`TestWorkerPreflightReportsRuntimePhase` 使用真实 workerd 分别载入可运行模块、语法错误模块和初始化报错模块，检查返回阶段为 `ready`、`load` 和 `initialize`。
+
+## Worker 构建验证
+
+`runtimes/workers` 提供 TypeScript Worker 构建命令。默认入口为脚本目录下的 `src/index.ts`，默认输出为 `dist/index.mjs`。显式传入的相对路径按调用目录解释。`--entry` 必须属于 `--tsconfig` 的实际程序，未包含时终止构建。命令先执行 tsc 类型检查，再用 esbuild 打包为单文件 ES Module。
+
+```sh
+npm run check --workspace runtimes/workers
+npm run build --workspace runtimes/workers
+```
+
+`TestWorkerBuildRunsInWorkerd` 使用同一示例源码构建两次并比较 SHA-256，再用固定 workerd 调用构建结果。`TestWorkerBuildReportsTypeErrors` 修改类型后验证构建返回 TS2322 诊断。
+
+Node 测试验证不同调用目录的产物字节一致，配置外入口在写入产物前被拒绝，参数中的等号完整保留，未知参数和缺少参数值时终止构建。Workers CI 执行这些测试。
 
 ## Browser Run 验证
 
@@ -75,7 +120,7 @@ docker build -t cloudlet-browser:check runtimes/browser
 npm --prefix runtimes/browser run test:integration
 ```
 
-集成测试自行构建镜像，启动非 root Chromium 容器，并使用测试进程提供的真实 HTTP 页面验证导航地址和标题。测试解码截图并检查 1280 × 720 的尺寸与页面像素，也覆盖无效凭据、没有可截图页面和超出 2 MiB 上限的结果。测试让 Chromium 等待未响应的页面或字体，分别验证导航和截图返回 504 并退出，并检查收到 SIGTERM 后正常退出。容器通过 `host-gateway` 访问测试页面，内部接口只发布至主机回环地址。Docker 主机需支持 Chromium sandbox 使用的用户命名空间。
+集成测试自行构建镜像，启动非 root Chromium 容器，并使用测试进程提供的真实 HTTP 页面验证导航地址和标题。测试解码截图并检查 1280 × 720 的尺寸与页面像素，也覆盖无效凭据、没有可截图页面和超出 2 MiB 上限的结果。测试让 Chromium 等待未响应的页面或字体，分别验证导航和截图返回 504 并退出，并检查收到 SIGTERM 后正常退出。期限用例验证 RFC 3339 时间边界、纳秒格式下容器自行退出以及 Chromium 启动失败时保留实际错误。容器通过 `host-gateway` 访问测试页面，内部接口只发布至主机回环地址。Docker 主机需支持 Chromium sandbox 使用的用户命名空间。
 
 ## 容器执行适配器验收
 

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 
@@ -14,11 +15,15 @@ import (
 	"github.com/wendaining/cloudlet/internal/controlplane"
 	"github.com/wendaining/cloudlet/internal/database"
 	"github.com/wendaining/cloudlet/internal/gateway"
+	"github.com/wendaining/cloudlet/internal/routes"
 )
 
 func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	var store *database.Store
 	if cfg.DatabaseURL != "" {
+		if len(cfg.SecretKey) != 32 {
+			return errors.New("management environment requires a 32-byte secret key")
+		}
 		var err error
 		store, err = database.Open(ctx, cfg.DatabaseURL)
 		if err != nil {
@@ -28,10 +33,22 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		if err := store.CheckVersion(ctx); err != nil {
 			return err
 		}
+		if err := store.CheckSecretKey(ctx, cfg.SecretKey); err != nil {
+			return fmt.Errorf("validate platform secret key before startup: %w", err)
+		}
 	}
 	proxy, err := gateway.NewHandler(cfg, logger)
 	if err != nil {
 		return err
+	}
+	if store != nil {
+		publisher, err := routes.NewPublisher(store, proxy)
+		if err != nil {
+			return err
+		}
+		if _, err := publisher.Sync(ctx); err != nil {
+			return fmt.Errorf("restore Gateway routes: %w", err)
+		}
 	}
 	apiListener, err := net.Listen("tcp", cfg.APIAddress)
 	if err != nil {
@@ -43,7 +60,14 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		return fmt.Errorf("listen gateway: %w", err)
 	}
 	defer gatewayListener.Close()
-	management, closeSessions := controlplane.NewHandler(store, cfg, logger)
+	endpoint, err := managementAPIEndpoint(apiListener.Addr())
+	if err != nil {
+		return fmt.Errorf("resolve management API endpoint: %w", err)
+	}
+	management, closeSessions, err := controlplane.NewHandlerWithMCP(store, cfg, logger, endpoint)
+	if err != nil {
+		return fmt.Errorf("configure management API: %w", err)
+	}
 	defer closeSessions()
 	api := newServer(management)
 	front := newServer(proxy)
@@ -84,4 +108,17 @@ func newServer(handler http.Handler) *http.Server {
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    1 << 20,
 	}
+}
+
+func managementAPIEndpoint(address net.Addr) (string, error) {
+	host, port, err := net.SplitHostPort(address.String())
+	if err != nil {
+		return "", fmt.Errorf("parse listener address %q: %w", address, err)
+	}
+	if host == "" || host == "0.0.0.0" {
+		host = "127.0.0.1"
+	} else if host == "::" {
+		host = "::1"
+	}
+	return (&url.URL{Scheme: "http", Host: net.JoinHostPort(host, port)}).String(), nil
 }

@@ -28,7 +28,7 @@ func (c *Client) GetProject(ctx context.Context, id string) (apigen.Project, err
 	if response.JSON200 != nil {
 		return *response.JSON200, nil
 	}
-	return apigen.Project{}, responseError(fmt.Sprintf("get project %q", id), response.StatusCode(), response.JSON401, response.JSONDefault)
+	return apigen.Project{}, responseError(fmt.Sprintf("get project %q", id), response.StatusCode(), response.JSON401, response.JSON404, response.JSONDefault)
 }
 
 func responseError(operation string, status int, errors ...*apigen.Error) error {
