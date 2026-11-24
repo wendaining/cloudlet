@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/moby/moby/client"
@@ -58,11 +59,17 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		}
 		defer docker.Close()
 		browserCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		browserService, err = browser.NewService(browserCtx, store, docker, cfg.Instance, cfg.BrowserImage, cfg.BrowserSeccomp, cfg.SecretKey)
+		browserService, err = browser.NewService(browserCtx, store, docker, cfg.Instance, cfg.BrowserImage, cfg.BrowserSeccomp,
+			filepath.Join(cfg.SiteStorageDirectory, "browser-screenshots"), cfg.SecretKey)
 		cancel()
 		if err != nil {
 			return fmt.Errorf("configure Browser Run: %w", err)
 		}
+		defer func() {
+			if err := browserService.Close(); err != nil {
+				logger.Error("close browser screenshot storage", "error", err)
+			}
+		}()
 	}
 	proxy, err := gateway.NewHandler(cfg, logger)
 	if err != nil {

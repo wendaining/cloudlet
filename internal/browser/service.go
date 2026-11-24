@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/moby/moby/client"
 	digest "github.com/opencontainers/go-digest"
+	"github.com/wendaining/cloudlet/internal/artifacts"
 	"github.com/wendaining/cloudlet/internal/capacity"
 	"github.com/wendaining/cloudlet/internal/containers"
 	"github.com/wendaining/cloudlet/internal/database"
@@ -34,18 +35,19 @@ const (
 var ErrSessionUnavailable = errors.New("浏览器会话未就绪或已结束")
 
 type Service struct {
-	store      *database.Store
-	capacity   *capacity.Store
-	executions *executions.Service
-	adapter    *containers.Adapter
-	http       *http.Client
-	hostID     string
-	image      string
-	profile    string
-	key        []byte
+	screenshots *artifacts.Store
+	store       *database.Store
+	capacity    *capacity.Store
+	executions  *executions.Service
+	adapter     *containers.Adapter
+	http        *http.Client
+	hostID      string
+	image       string
+	profile     string
+	key         []byte
 }
 
-func NewService(ctx context.Context, store *database.Store, docker *client.Client, hostID, imageID, profilePath string, key []byte) (*Service, error) {
+func NewService(ctx context.Context, store *database.Store, docker *client.Client, hostID, imageID, profilePath, screenshotDirectory string, key []byte) (*Service, error) {
 	if store == nil || docker == nil || len(key) != 32 {
 		return nil, fmt.Errorf("Browser Run requires PostgreSQL, Docker and a 32-byte platform key: %w", fs.ErrInvalid)
 	}
@@ -86,16 +88,22 @@ func NewService(ctx context.Context, store *database.Store, docker *client.Clien
 	if err != nil {
 		return nil, err
 	}
+	screenshots, err := openScreenshotStore(screenshotDirectory)
+	if err != nil {
+		return nil, err
+	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = nil
 	transport.DisableKeepAlives = true
 	transport.MaxResponseHeaderBytes = 64 << 10
 	return &Service{
-		store: store, capacity: reservations, executions: runner, adapter: adapter,
+		store: store, screenshots: screenshots, capacity: reservations, executions: runner, adapter: adapter,
 		http:   &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
 		hostID: hostID, image: imageID, profile: profile.String(), key: bytes.Clone(key),
 	}, nil
 }
+
+func (s *Service) Close() error { return s.screenshots.Close() }
 
 func (s *Service) Create(ctx context.Context, projectID uuid.UUID) (database.BrowserSession, error) {
 	now := time.Now().UTC().Truncate(time.Millisecond)

@@ -132,3 +132,5 @@ make dev
 使用登录会话在项目下向 `POST /api/v1/projects/{projectID}/browser-sessions` 发出请求。收到 201 后，响应的 endpoint 可用于查询会话。向 endpoint 后追加 `/navigate` 并提交 JSON 正文 `{"url":"http://可从容器访问的测试地址/"}`，核对响应中的页面地址和标题。使用另一项目的账号查询同一会话应返回 404。
 
 开发时管理进程需要连接本地 Docker Unix socket。测试页面需要监听容器能访问的接口。Linux 默认 Docker 网桥的网关地址可用 `docker network inspect bridge` 查看。不要把测试页面只绑定到宿主的 127.0.0.1。
+
+导航成功后，向会话 endpoint 后追加 `/screenshots` 发送 POST 请求。响应 201 后，使用项目登录会话请求 `download_url`，把返回内容保存为 PNG。打开图片，用 `sha256sum` 和 `wc -c` 核对响应中的 `artifact_digest` 与 `size_bytes`。使用另一项目账号请求同一下载地址，预期返回 404。
