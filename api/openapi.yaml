@@ -259,6 +259,66 @@ paths:
           $ref: '#/components/responses/Error'
         '409':
           $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/browser-sessions:
+    parameters:
+      - $ref: '#/components/parameters/BrowserProjectID'
+    post:
+      operationId: createBrowserSession
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '201':
+          description: 浏览器会话已就绪
+          headers:
+            Location:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserSession'
+  /api/v1/projects/{projectID}/browser-sessions/{sessionID}:
+    parameters:
+      - $ref: '#/components/parameters/BrowserProjectID'
+      - $ref: '#/components/parameters/BrowserSessionID'
+    get:
+      operationId: getBrowserSession
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 项目浏览器会话
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserSession'
+  /api/v1/projects/{projectID}/browser-sessions/{sessionID}/navigate:
+    parameters:
+      - $ref: '#/components/parameters/BrowserProjectID'
+      - $ref: '#/components/parameters/BrowserSessionID'
+    post:
+      operationId: navigateBrowserSession
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NavigateBrowserSessionRequest'
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 导航后的页面地址和标题
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserNavigation'
   /api/v1/projects/{projectID}/sites/{siteName}/versions:
     parameters:
       - $ref: '#/components/parameters/SiteProjectID'
@@ -449,6 +509,19 @@ paths:
           $ref: '#/components/responses/Error'
 components:
   parameters:
+    BrowserProjectID:
+      name: projectID
+      in: path
+      required: true
+      schema:
+        type: string
+    BrowserSessionID:
+      name: sessionID
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
     SiteProjectID:
       name: projectID
       in: path
@@ -635,6 +708,41 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Project"
+    BrowserSessionStatus:
+      type: string
+      enum: [starting, ready, failed, closed]
+      x-enum-varnames: [BrowserSessionStatusStarting, BrowserSessionStatusReady, BrowserSessionStatusFailed, BrowserSessionStatusClosed]
+    BrowserSession:
+      type: object
+      required: [id, endpoint, expires_at, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        endpoint:
+          type: string
+          description: 需要项目会话凭据的相对管理 API 地址
+        expires_at:
+          type: string
+          format: date-time
+        status:
+          $ref: '#/components/schemas/BrowserSessionStatus'
+    NavigateBrowserSessionRequest:
+      type: object
+      additionalProperties: false
+      required: [url]
+      properties:
+        url:
+          type: string
+          maxLength: 4096
+    BrowserNavigation:
+      type: object
+      required: [url, title]
+      properties:
+        url:
+          type: string
+        title:
+          type: string
     StaticSiteVersion:
       type: object
       required: [id, site_id, artifact_digest, status, created_at]

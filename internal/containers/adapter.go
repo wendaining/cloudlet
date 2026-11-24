@@ -224,7 +224,13 @@ func (a *Adapter) Remove(ctx context.Context, ownership Ownership, id string) er
 		return fmt.Errorf("remove container %s: container is running, stop it first: %w", id, fs.ErrInvalid)
 	}
 	if _, err := a.docker.ContainerRemove(ctx, id, client.ContainerRemoveOptions{RemoveVolumes: false}); err != nil {
-		return dockerOperationError("remove", id, err)
+		if !cerrdefs.IsConflict(err) || info.HostConfig == nil || !info.HostConfig.AutoRemove {
+			return dockerOperationError("remove", id, err)
+		}
+		// Docker may already be removing an auto-remove container after exit.
+		if waitErr := a.waitForRemoval(ctx, id); waitErr != nil {
+			return fmt.Errorf("confirm automatic removal of container %s: %w", id, errors.Join(err, waitErr))
+		}
 	}
 	// Confirm removal so callers can rely on the container and its ports being
 	// released.
@@ -234,6 +240,24 @@ func (a *Adapter) Remove(ctx context.Context, ownership Ownership, id string) er
 		return fmt.Errorf("verify removal of container %s: %w", id, err)
 	}
 	return nil
+}
+
+func (a *Adapter) waitForRemoval(ctx context.Context, id string) error {
+	ctx, cancel := context.WithTimeout(ctx, stopTimeout)
+	defer cancel()
+	wait := a.docker.ContainerWait(ctx, id, client.ContainerWaitOptions{Condition: container.WaitConditionRemoved})
+	select {
+	case result := <-wait.Result:
+		if result.Error != nil && result.Error.Message != "" {
+			return errors.New(result.Error.Message)
+		}
+		return nil
+	case err := <-wait.Error:
+		if cerrdefs.IsNotFound(err) {
+			return nil
+		}
+		return err
+	}
 }
 
 func (a *Adapter) inspectOwned(ctx context.Context, ownership Ownership, id string) (container.InspectResponse, error) {
@@ -314,6 +338,14 @@ func (s Spec) createOptions() (client.ContainerCreateOptions, error) {
 				}},
 			},
 		},
+	}
+	if s.ChromiumSeccompProfile != "" {
+		init := true
+		options.HostConfig.Init = &init
+		options.HostConfig.AutoRemove = true
+		options.HostConfig.CapDrop = []string{"ALL"}
+		options.HostConfig.ShmSize = 256 << 20
+		options.HostConfig.SecurityOpt = []string{"no-new-privileges", "seccomp=" + s.ChromiumSeccompProfile}
 	}
 	switch s.Access {
 	case AccessPublished:

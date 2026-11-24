@@ -118,3 +118,17 @@ Compose 部署已发布的应用镜像和 PostgreSQL，注入该环境的数据�
 发布前验证迁移，部署时执行对应版本的迁移，启动应用后检查就绪状态和业务接口。开发环境与服务器使用相同的 PostgreSQL 版本、运行时版本和迁移文件。
 
 具体技术见 [技术栈](technology-stack.md)，镜像与版本发布流程见 [交付与发布](releases.md)。Docker 的连接与环境配置说明见 [PostgreSQL 指南](https://docs.docker.com/guides/postgresql/) 和 [Compose 部署指南](https://docs.docker.com/compose/how-tos/production/)。
+
+## 本地启用 Browser Run 管理 API
+
+在仓库根目录构建并配置 Chromium 会话镜像，然后启动开发环境：
+
+```sh
+export CLOUDLET_BROWSER_IMAGE="$(docker build --quiet runtimes/browser)"
+export CLOUDLET_BROWSER_SECCOMP="$PWD/runtimes/browser/seccomp.json"
+make dev
+```
+
+使用登录会话在项目下向 `POST /api/v1/projects/{projectID}/browser-sessions` 发出请求。收到 201 后，响应的 endpoint 可用于查询会话。向 endpoint 后追加 `/navigate` 并提交 JSON 正文 `{"url":"http://可从容器访问的测试地址/"}`，核对响应中的页面地址和标题。使用另一项目的账号查询同一会话应返回 404。
+
+开发时管理进程需要连接本地 Docker Unix socket。测试页面需要监听容器能访问的接口。Linux 默认 Docker 网桥的网关地址可用 `docker network inspect bridge` 查看。不要把测试页面只绑定到宿主的 127.0.0.1。

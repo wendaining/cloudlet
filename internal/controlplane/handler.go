@@ -17,6 +17,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/wendaining/cloudlet/internal/apigen"
+	"github.com/wendaining/cloudlet/internal/browser"
 	"github.com/wendaining/cloudlet/internal/config"
 	"github.com/wendaining/cloudlet/internal/database"
 	"github.com/wendaining/cloudlet/internal/mcpserver"
@@ -29,27 +30,28 @@ import (
 type handler struct {
 	store    *database.Store
 	sites    *staticdeploy.Service
+	browser  *browser.Service
 	sessions *scs.SessionManager
 	config   config.Config
 	logger   *slog.Logger
 }
 
 func NewHandler(store *database.Store, cfg config.Config, logger *slog.Logger) (http.Handler, func()) {
-	return newHandler(store, nil, cfg, logger, nil)
+	return newHandler(store, nil, nil, cfg, logger, nil)
 }
 
 // NewHandlerWithMCP mounts the read-only MCP endpoint on the management API.
-func NewHandlerWithMCP(store *database.Store, sites *staticdeploy.Service, cfg config.Config, logger *slog.Logger, apiEndpoint string) (http.Handler, func(), error) {
+func NewHandlerWithMCP(store *database.Store, sites *staticdeploy.Service, browserService *browser.Service, cfg config.Config, logger *slog.Logger, apiEndpoint string) (http.Handler, func(), error) {
 	mcpHandler, err := mcpserver.NewHandler(apiEndpoint)
 	if err != nil {
 		return nil, nil, err
 	}
-	handler, cleanup := newHandler(store, sites, cfg, logger, mcpHandler)
+	handler, cleanup := newHandler(store, sites, browserService, cfg, logger, mcpHandler)
 	return handler, cleanup, nil
 }
 
-func newHandler(store *database.Store, sites *staticdeploy.Service, cfg config.Config, logger *slog.Logger, mcpHandler http.Handler) (http.Handler, func()) {
-	h := &handler{store: store, sites: sites, config: cfg, logger: logger}
+func newHandler(store *database.Store, sites *staticdeploy.Service, browserService *browser.Service, cfg config.Config, logger *slog.Logger, mcpHandler http.Handler) (http.Handler, func()) {
+	h := &handler{store: store, sites: sites, browser: browserService, config: cfg, logger: logger}
 	router := gin.New()
 	router.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 	router.GET("/readyz", func(c *gin.Context) {
