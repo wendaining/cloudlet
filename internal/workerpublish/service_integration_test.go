@@ -6,7 +6,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -34,6 +36,7 @@ import (
 	"github.com/wendaining/cloudlet/internal/database"
 	"github.com/wendaining/cloudlet/internal/gateway"
 	"github.com/wendaining/cloudlet/internal/operations"
+	"github.com/wendaining/cloudlet/internal/routes"
 	"github.com/wendaining/cloudlet/internal/workerpublish"
 	"github.com/wendaining/cloudlet/internal/workers"
 	sharedclient "github.com/wendaining/cloudlet/pkg/client"
@@ -178,7 +181,7 @@ func TestWorkerPublicationHTTP(t *testing.T) {
 	if err := store.UpsertProjectMember(ctx, project.ID, developerUser.ID, "developer"); err != nil {
 		t.Fatal(err)
 	}
-	request := func(browser *http.Client, method, path, key string, body any, expected int) []byte {
+	requestWithLocation := func(browser *http.Client, method, path, key string, body any, expected int) (string, []byte) {
 		t.Helper()
 		data, err := json.Marshal(body)
 		if err != nil {
@@ -201,6 +204,11 @@ func TestWorkerPublicationHTTP(t *testing.T) {
 		if err != nil || response.StatusCode != expected {
 			t.Fatalf("%s %s: status=%d body=%s error=%v", method, path, response.StatusCode, data, err)
 		}
+		return response.Header.Get("Location"), data
+	}
+	request := func(browser *http.Client, method, path, key string, body any, expected int) []byte {
+		t.Helper()
+		_, data := requestWithLocation(browser, method, path, key, body, expected)
 		return data
 	}
 	decode := func(data []byte) apigen.WorkerDeployment {
@@ -288,7 +296,13 @@ func TestWorkerPublicationHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pendingOperation, _, err := operationStore.Register(ctx, operations.Registration{ProjectID: uuid.MustParse(project.ID), Action: "worker.deploy:pending", IdempotencyKey: "pending-stage", RequestFingerprint: "pending-stage"})
+	pendingRequest := valid
+	pendingRequest.Hostname = "pending.localhost"
+	pendingData, err := json.Marshal(pendingRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pendingOperation, _, err := operationStore.Register(ctx, operations.Registration{ProjectID: uuid.MustParse(project.ID), Action: "worker.deploy:pending", IdempotencyKey: "pending-stage", RequestFingerprint: fmt.Sprintf("%x", sha256.Sum256(pendingData))})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -300,9 +314,19 @@ func TestWorkerPublicationHTTP(t *testing.T) {
 	if _, _, err := store.CreateWorkerDeployment(ctx, "pending", pending); err != nil {
 		t.Fatal(err)
 	}
-	pendingRequest := valid
-	pendingRequest.Hostname = pending.Hostname
-	request(owner, http.MethodPost, deployPath(project.ID, "pending"), "second-pending", pendingRequest, http.StatusConflict)
+	location, _ := requestWithLocation(owner, http.MethodPost, deployPath(project.ID, "pending"), "second-pending", pendingRequest, http.StatusConflict)
+	if location != "" {
+		t.Fatalf("new conflicting operation returned an unregistered deployment URL: %s", location)
+	}
+	location, _ = requestWithLocation(owner, http.MethodPost, deployPath(project.ID, "pending"), "pending-stage", pendingRequest, http.StatusConflict)
+	if want := metadataPath(project.ID, pending.ID); location != want {
+		t.Errorf("pending publication Location = %q, want %q", location, want)
+	} else {
+		pendingMetadata := decode(request(owner, http.MethodGet, location, "", nil, http.StatusOK))
+		if pendingMetadata.Id != pending.ID || pendingMetadata.OperationId != pendingOperation.ID || pendingMetadata.State != "pending" || pendingMetadata.OperationOutcome != "in_progress" {
+			t.Fatalf("pending publication metadata: %+v", pendingMetadata)
+		}
+	}
 	var wg sync.WaitGroup
 	var results [4]apigen.WorkerDeployment
 	var failures [4]error
@@ -380,7 +404,125 @@ func TestWorkerPublicationHTTP(t *testing.T) {
 		t.Fatalf("readiness failure: %+v", unhealthyFailure)
 	}
 	foreign := valid
-	request(outsider, http.MethodPost, deployPath(otherProject.ID, "foreign"), "foreign", foreign, http.StatusConflict)
+	location, _ = requestWithLocation(outsider, http.MethodPost, deployPath(otherProject.ID, "foreign"), "foreign", foreign, http.StatusConflict)
+	if location != "" {
+		t.Fatalf("early route conflict returned a deployment URL: %s", location)
+	}
+	lateConflict := valid
+	lateConflict.Hostname = "late-conflict.localhost"
+	lateConflict.Module = `let readyAt = 0;
+export default {
+  fetch() {
+    if (readyAt === 0) readyAt = Date.now() + 8000;
+    return new Response("delayed Worker", {status: Date.now() < readyAt ? 503 : 200});
+  }
+};`
+	lateData, err := json.Marshal(lateConflict)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lateRequest, err := http.NewRequestWithContext(ctx, http.MethodPost, api.URL+deployPath(project.ID, "late-conflict"), bytes.NewReader(lateData))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lateRequest.Header.Set("Content-Type", "application/json")
+	lateRequest.Header.Set("Idempotency-Key", "late-conflict")
+	type publicationResponse struct {
+		status   int
+		location string
+		body     []byte
+		err      error
+	}
+	publicationDone := make(chan publicationResponse, 1)
+	go func() {
+		response, err := owner.Do(lateRequest)
+		if err != nil {
+			publicationDone <- publicationResponse{err: err}
+			return
+		}
+		data, readErr := io.ReadAll(response.Body)
+		closeErr := response.Body.Close()
+		publicationDone <- publicationResponse{status: response.StatusCode, location: response.Header.Get("Location"), body: data, err: errors.Join(readErr, closeErr)}
+	}()
+	var lateDeploymentID uuid.UUID
+	var lateContainerID string
+	preparingDeadline := time.NewTimer(20 * time.Second)
+	defer preparingDeadline.Stop()
+	preparingTick := time.NewTicker(20 * time.Millisecond)
+	defer preparingTick.Stop()
+preparing:
+	for {
+		select {
+		case <-preparingDeadline.C:
+			t.Fatal("Worker did not reach its actual preparing stage")
+		case response := <-publicationDone:
+			t.Fatalf("Worker publication completed before the route claim: %+v", response)
+		case <-preparingTick.C:
+			err := store.DB.WithContext(ctx).Raw(`SELECT d.id, e.container_id
+FROM worker_deployments d
+JOIN workers w ON w.id = d.worker_id
+JOIN worker_executions e ON e.deployment_id = d.id
+JOIN operations o ON o.id = d.operation_id
+WHERE d.project_id = ? AND w.name = 'late-conflict'
+AND d.state = 'pending' AND o.phase = 'preparing' AND e.container_id <> ''`, project.ID).Row().Scan(&lateDeploymentID, &lateContainerID)
+			if err == nil {
+				break preparing
+			}
+			if !errors.Is(err, sql.ErrNoRows) {
+				t.Fatal(err)
+			}
+		}
+	}
+	opponent, err := routes.NewPublisher(store, front)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := opponent.PublishProject(ctx, otherProject.ID, []routes.Route{{Resource: "management-health", Host: lateConflict.Hostname, Target: api.URL}}); err != nil {
+		t.Fatal(err)
+	}
+	var lateResponse publicationResponse
+	select {
+	case lateResponse = <-publicationDone:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	if lateResponse.err != nil || lateResponse.status != http.StatusConflict {
+		t.Fatalf("activation conflict response: %+v", lateResponse)
+	}
+	if want := metadataPath(project.ID, lateDeploymentID); lateResponse.location != want {
+		t.Errorf("activation conflict Location = %q, want %q", lateResponse.location, want)
+	} else {
+		failedMetadata := decode(request(owner, http.MethodGet, lateResponse.location, "", nil, http.StatusOK))
+		if failedMetadata.Id != lateDeploymentID || failedMetadata.State != "failed" || failedMetadata.OperationPhase != "activating" || failedMetadata.OperationOutcome != "failed" || failedMetadata.ExecutionState != "stopped" || !strings.Contains(failedMetadata.Failure, "route conflict") {
+			t.Fatalf("activation conflict metadata: %+v", failedMetadata)
+		}
+		request(outsider, http.MethodGet, lateResponse.location, "", nil, http.StatusNotFound)
+	}
+	if _, err := docker.ContainerInspect(ctx, lateContainerID, client.ContainerInspectOptions{}); !cerrdefs.IsNotFound(err) {
+		t.Fatalf("activation conflict left its Worker container: %v", err)
+	}
+	capacityStore, err := capacity.NewStore(store.DB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	usageAfterConflict, err := capacityStore.Usage(ctx, configuration.HostID, uuid.MustParse(project.ID))
+	if err != nil || usageAfterConflict.ProjectUsed.CPUMillis != 2000 || usageAfterConflict.ProjectUsed.Instances != 2 {
+		t.Fatalf("activation conflict capacity: %+v %v", usageAfterConflict, err)
+	}
+	healthRequest, err := http.NewRequestWithContext(ctx, http.MethodGet, public.URL+"/healthz", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	healthRequest.Host = lateConflict.Hostname
+	healthResponse, err := owner.Do(healthRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	healthBody, readErr := io.ReadAll(healthResponse.Body)
+	closeErr := healthResponse.Body.Close()
+	if readErr != nil || closeErr != nil || healthResponse.StatusCode != http.StatusOK || !bytes.Contains(healthBody, []byte(`"status":"ok"`)) {
+		t.Fatalf("claimed project route: HTTP %d body=%s error=%v", healthResponse.StatusCode, healthBody, errors.Join(readErr, closeErr))
+	}
 	getPublic()
 	third := valid
 	third.Hostname = "third.localhost"

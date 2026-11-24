@@ -51,6 +51,9 @@ func (h *handler) DeployWorker(c *gin.Context, projectID, name string, params ap
 		return
 	}
 	result, created, err := h.workers.Deploy(c.Request.Context(), uuid.MustParse(normalizedID), name, params.IdempotencyKey, request)
+	if result.Deployment.ID != uuid.Nil {
+		c.Header("Location", deploymentLocation(normalizedID, result.Deployment.ID))
+	}
 	if err != nil {
 		switch {
 		case errors.Is(err, fs.ErrInvalid):
@@ -68,13 +71,9 @@ func (h *handler) DeployWorker(c *gin.Context, projectID, name string, params ap
 				status = http.StatusTooManyRequests
 			}
 			if result.Deployment.ID == uuid.Nil || status == http.StatusInternalServerError {
-				if result.Deployment.ID != uuid.Nil {
-					c.Header("Location", deploymentLocation(normalizedID, result.Deployment.ID))
-				}
 				h.failure(c, err)
 				return
 			}
-			c.Header("Location", deploymentLocation(normalizedID, result.Deployment.ID))
 			c.JSON(status, workerDeploymentResponse(result))
 		}
 		return
@@ -83,7 +82,6 @@ func (h *handler) DeployWorker(c *gin.Context, projectID, name string, params ap
 	if created {
 		status = http.StatusCreated
 	}
-	c.Header("Location", deploymentLocation(normalizedID, result.Deployment.ID))
 	c.JSON(status, workerDeploymentResponse(result))
 }
 

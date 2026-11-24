@@ -420,14 +420,33 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WorkerDeployment"
+          headers:
+            Location:
+              description: 已登记版本的项目内查询地址。版本尚未登记时省略。
+              schema:
+                type: string
         "201":
           description: 新 Worker 发布结果
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/WorkerDeployment"
+          headers:
+            Location:
+              description: 已登记版本的项目内查询地址。版本尚未登记时省略。
+              schema:
+                type: string
         "400":
-          $ref: "#/components/responses/Error"
+          description: Worker 发布请求参数无效
+          headers:
+            Location:
+              description: 已登记版本的项目内查询地址。版本尚未登记时省略。
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "401":
           $ref: "#/components/responses/Error"
         "403":
@@ -435,21 +454,49 @@ paths:
         "404":
           $ref: "#/components/responses/Error"
         "409":
-          $ref: "#/components/responses/Error"
+          description: Worker 发布请求冲突
+          headers:
+            Location:
+              description: 已登记版本的项目内查询地址。版本尚未登记时省略。
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "422":
           description: 运行时预检或就绪检查失败
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/WorkerDeployment"
+          headers:
+            Location:
+              description: 已登记版本的项目内查询地址。版本尚未登记时省略。
+              schema:
+                type: string
         "429":
           description: 容量不足
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/WorkerDeployment"
+          headers:
+            Location:
+              description: 已登记版本的项目内查询地址。版本尚未登记时省略。
+              schema:
+                type: string
         "500":
-          $ref: "#/components/responses/Error"
+          description: Worker 发布步骤失败
+          headers:
+            Location:
+              description: 已登记版本的项目内查询地址。版本尚未登记时省略。
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "503":
           $ref: "#/components/responses/Error"
         default:

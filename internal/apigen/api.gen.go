@@ -2803,6 +2803,41 @@ func (r GetWorkerDeploymentResponse) ContentType() string {
 	return ""
 }
 
+// DeployWorkerResponse200Headers the declared response headers of an HTTP 200 response for DeployWorker
+type DeployWorkerResponse200Headers struct {
+	Location *string
+}
+
+// DeployWorkerResponse201Headers the declared response headers of an HTTP 201 response for DeployWorker
+type DeployWorkerResponse201Headers struct {
+	Location *string
+}
+
+// DeployWorkerResponse400Headers the declared response headers of an HTTP 400 response for DeployWorker
+type DeployWorkerResponse400Headers struct {
+	Location *string
+}
+
+// DeployWorkerResponse409Headers the declared response headers of an HTTP 409 response for DeployWorker
+type DeployWorkerResponse409Headers struct {
+	Location *string
+}
+
+// DeployWorkerResponse422Headers the declared response headers of an HTTP 422 response for DeployWorker
+type DeployWorkerResponse422Headers struct {
+	Location *string
+}
+
+// DeployWorkerResponse429Headers the declared response headers of an HTTP 429 response for DeployWorker
+type DeployWorkerResponse429Headers struct {
+	Location *string
+}
+
+// DeployWorkerResponse500Headers the declared response headers of an HTTP 500 response for DeployWorker
+type DeployWorkerResponse500Headers struct {
+	Location *string
+}
+
 type DeployWorkerResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -2830,6 +2865,20 @@ type DeployWorkerResponse struct {
 	JSON503 *Error
 	// JSONDefault the response for an HTTP default `application/json` response
 	JSONDefault *Error
+	// Headers200 the parsed response headers for an HTTP 200 response
+	Headers200 *DeployWorkerResponse200Headers
+	// Headers201 the parsed response headers for an HTTP 201 response
+	Headers201 *DeployWorkerResponse201Headers
+	// Headers400 the parsed response headers for an HTTP 400 response
+	Headers400 *DeployWorkerResponse400Headers
+	// Headers409 the parsed response headers for an HTTP 409 response
+	Headers409 *DeployWorkerResponse409Headers
+	// Headers422 the parsed response headers for an HTTP 422 response
+	Headers422 *DeployWorkerResponse422Headers
+	// Headers429 the parsed response headers for an HTTP 429 response
+	Headers429 *DeployWorkerResponse429Headers
+	// Headers500 the parsed response headers for an HTTP 500 response
+	Headers500 *DeployWorkerResponse500Headers
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
@@ -4203,6 +4252,79 @@ func ParseDeployWorkerResponse(rsp *http.Response) (*DeployWorkerResponse, error
 		}
 		response.JSONDefault = &dest
 
+	}
+
+	switch {
+	case rsp.StatusCode == 200:
+		var headers DeployWorkerResponse200Headers
+		if values := rsp.Header.Values("Location"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Location", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.Location = &value
+		}
+		response.Headers200 = &headers
+	case rsp.StatusCode == 201:
+		var headers DeployWorkerResponse201Headers
+		if values := rsp.Header.Values("Location"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Location", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.Location = &value
+		}
+		response.Headers201 = &headers
+	case rsp.StatusCode == 400:
+		var headers DeployWorkerResponse400Headers
+		if values := rsp.Header.Values("Location"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Location", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.Location = &value
+		}
+		response.Headers400 = &headers
+	case rsp.StatusCode == 409:
+		var headers DeployWorkerResponse409Headers
+		if values := rsp.Header.Values("Location"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Location", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.Location = &value
+		}
+		response.Headers409 = &headers
+	case rsp.StatusCode == 422:
+		var headers DeployWorkerResponse422Headers
+		if values := rsp.Header.Values("Location"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Location", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.Location = &value
+		}
+		response.Headers422 = &headers
+	case rsp.StatusCode == 429:
+		var headers DeployWorkerResponse429Headers
+		if values := rsp.Header.Values("Location"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Location", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.Location = &value
+		}
+		response.Headers429 = &headers
+	case rsp.StatusCode == 500:
+		var headers DeployWorkerResponse500Headers
+		if values := rsp.Header.Values("Location"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Location", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.Location = &value
+		}
+		response.Headers500 = &headers
 	}
 
 	return response, nil

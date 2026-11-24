@@ -82,7 +82,7 @@ export TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock
 go test -race -count=1 -tags=integration -run TestWorkerPublicationHTTP -v ./internal/workerpublish
 ```
 
-用例通过项目会话发布真实 ES Module，核对公开 HTTP 响应、不可变产物摘要、容器归属与资源限制。验证所有者与开发者发布、查看者只读、跨项目拒绝、共享客户端调用和并发幂等。语法、初始化、就绪、容量与真实存储权限错误保留原始原因，确认失败执行停止后释放容量。重建控制器后查询原版本并访问原执行。真实终止 PostgreSQL 控制连接后，新发布被拒绝，已有 Worker 继续响应。
+用例通过项目会话发布真实 ES Module，核对公开 HTTP 响应、不可变产物摘要、容器归属与资源限制。验证所有者与开发者发布、查看者只读、跨项目拒绝、共享客户端调用和并发幂等。未完成发布的 409 响应提供已登记版本的 `Location`。另一项目在候选 Worker 准备期间实际发布同域路由，验证激活冲突的 409 响应可通过 `Location` 查询失败版本，容器与容量已经释放，已发布的项目路由继续响应。版本登记前的冲突省略查询地址。语法、初始化、就绪、容量与真实存储权限错误保留原始原因，确认失败执行停止后释放容量。重建控制器后查询原版本并访问原执行。真实终止 PostgreSQL 控制连接后，新发布被拒绝，已有 Worker 继续响应。
 
 使用当前 Docker 连接单独验证 Worker 运行配置。
 

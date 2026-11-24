@@ -325,7 +325,7 @@ func (s *Service) Deploy(ctx context.Context, projectID uuid.UUID, name, key str
 	if err != nil {
 		return result, true, err
 	}
-	result.Deployment, result.Execution, err = s.store.CreateWorkerDeployment(ctx, name, database.WorkerDeployment{
+	deployment, workerExecution, err := s.store.CreateWorkerDeployment(ctx, name, database.WorkerDeployment{
 		ID: uuid.New(), ProjectID: projectID, OperationID: op.ID, ArtifactDigest: moduleDigest, ConfigDigest: configDigest,
 		Entry: prepared.Entry, CompatibilityDate: prepared.CompatibilityDate, RuntimeVersion: workers.RuntimeVersion, RuntimeImage: s.image,
 		Hostname: request.Hostname, CPUMillis: 1000, MemoryBytes: 256 << 20, State: "pending",
@@ -333,6 +333,7 @@ func (s *Service) Deploy(ctx context.Context, projectID uuid.UUID, name, key str
 	if err != nil {
 		return result, true, err
 	}
+	result.Deployment, result.Execution = deployment, workerExecution
 	recorded = true
 	quota := s.configuration.ProjectQuota
 	if err = s.store.DB.WithContext(ctx).Exec("INSERT INTO capacity_project_quotas (project_id, cpu_millis, memory_bytes, instances) VALUES (?, ?, ?, ?) ON CONFLICT (project_id) DO NOTHING", projectID, quota.CPUMillis, quota.MemoryBytes, quota.Instances).Error; err != nil {

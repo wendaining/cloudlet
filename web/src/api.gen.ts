@@ -887,6 +887,8 @@ export interface operations {
             /** @description 已存在的发布结果 */
             200: {
                 headers: {
+                    /** @description 已登记版本的项目内查询地址。版本尚未登记时省略。 */
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -896,20 +898,44 @@ export interface operations {
             /** @description 新 Worker 发布结果 */
             201: {
                 headers: {
+                    /** @description 已登记版本的项目内查询地址。版本尚未登记时省略。 */
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["WorkerDeployment"];
                 };
             };
-            400: components["responses"]["Error"];
+            /** @description Worker 发布请求参数无效 */
+            400: {
+                headers: {
+                    /** @description 已登记版本的项目内查询地址。版本尚未登记时省略。 */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
-            409: components["responses"]["Error"];
+            /** @description Worker 发布请求冲突 */
+            409: {
+                headers: {
+                    /** @description 已登记版本的项目内查询地址。版本尚未登记时省略。 */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             /** @description 运行时预检或就绪检查失败 */
             422: {
                 headers: {
+                    /** @description 已登记版本的项目内查询地址。版本尚未登记时省略。 */
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
@@ -919,13 +945,25 @@ export interface operations {
             /** @description 容量不足 */
             429: {
                 headers: {
+                    /** @description 已登记版本的项目内查询地址。版本尚未登记时省略。 */
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["WorkerDeployment"];
                 };
             };
-            500: components["responses"]["Error"];
+            /** @description Worker 发布步骤失败 */
+            500: {
+                headers: {
+                    /** @description 已登记版本的项目内查询地址。版本尚未登记时省略。 */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
             503: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
