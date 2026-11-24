@@ -76,6 +76,8 @@ go test -race -count=1 -tags=integration ./internal/routes
 
 使用当前 Docker 连接单独验证 Worker 运行配置。
 
+预检用例使用真实 workerd 验证模块成功、语法错误、初始化错误和缺失静态依赖。顶层输出超过 5 MiB 后，成功模块仍返回 ready，初始化错误保留对应阶段和末尾诊断。
+
 ```sh
 export DOCKER_HOST="$(docker context inspect --format '{{.Endpoints.docker.Host}}')"
 export TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock
@@ -85,6 +87,8 @@ go test -race -count=1 -tags=integration -v ./internal/workers
 在 Docker Engine 29.5.2 的 `linux/arm64` 环境中，workerd `1.20261012.1` 执行 `POST /echo`，返回 HTTP 200、`X-Worker: workerd` 和响应正文 `POST /echo cloudlet`。无效兼容日期 `2099-01-01` 使进程以状态码 1 退出，并报告运行时支持的最晚日期 `2026-10-19`。入口用例验证了缺失文件、目录和越界路径的诊断。镜像内的 `linux/arm64` 二进制文件与 Cloudflare 发布文件解压后的 SHA256 一致。
 
 同一入口中的 `TestWorkerdPersistsDurableObjectSQLite` 通过 HTTP 调用名为 `alpha` 和 `beta` 的两个对象。两个对象使用相同的 SQL 表和键保存各自的值。测试停止第一个容器，用原数据卷启动新容器，然后确认两个对象的标识和各自的值都保持不变。
+
+`TestWorkerPreflightReportsRuntimePhase` 使用真实 workerd 分别载入可运行模块、语法错误模块和初始化报错模块，检查返回阶段为 `ready`、`load` 和 `initialize`。
 
 ## Worker 构建验证
 

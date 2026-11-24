@@ -108,6 +108,6 @@ API 与 Gateway 使用 HTTP 头读取超时和空闲连接超时。收到 SIGTER
 
 ## 执行环境
 
-Workers 集成 workerd，支持原生 Durable Object SQLite 绑定。真实运行时测试验证对象隔离和重启后的持久化。容器管理使用 Docker Engine API。internal/containers 按不可变摘要准备镜像，核对本地镜像报告的摘要后才用于创建容器，已缓存且摘要一致的镜像直接复用。适配器提供创建、启动、观测、停止和删除受管理容器的操作，按环境、项目、资源和执行序号写入归属标签与确定性名称，在启动、观测、停止和删除前核对名称和标签，启动后读取实际发布的回环端口，并可按确定性名称查找已有容器。internal/executions 在该适配器之上完成容量准入、失败清理与确认释放。管理 API 与 Gateway 注册由上层任务接入。Browser Run 复用容器生命周期，并通过 Playwright 实现浏览器操作。
+Workers 集成 workerd，支持原生 Durable Object SQLite 绑定。真实运行时测试验证对象隔离和重启后的持久化。workers.Preflight 使用固定 workerd 在发布前验证模块载入和初始化阶段。容器管理使用 Docker Engine API。internal/containers 按不可变摘要准备镜像，核对本地镜像报告的摘要后才用于创建容器，已缓存且摘要一致的镜像直接复用。适配器提供创建、启动、观测、停止和删除受管理容器的操作，按环境、项目、资源和执行序号写入归属标签与确定性名称，在启动、观测、停止和删除前核对名称和标签，启动后读取实际发布的回环端口，并可按确定性名称查找已有容器。internal/executions 在该适配器之上完成容量准入、失败清理与确认释放。管理 API 与 Gateway 注册由上层任务接入。Browser Run 复用容器生命周期，并通过 Playwright 实现浏览器操作。
 
 执行单元、配额、隔离、状态恢复与独占交接遵循执行环境设计。对应模块完成时，同步提供 [真实业务验收](testing.md)。

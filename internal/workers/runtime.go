@@ -26,10 +26,13 @@ var maxCompatibilityDate = time.Date(2026, time.October, 19, 0, 0, 0, 0, time.UT
 
 var entryPathPattern = regexp.MustCompile(`^[a-zA-Z0-9._/-]+$`)
 
-// RuntimeConfig contains the files to place at ConfigPath and ModulePath.
+// RuntimeConfig contains the files to place at ConfigPath and ModulePath and
+// the metadata required by runtime preflight.
 type RuntimeConfig struct {
-	Config []byte
-	Module []byte
+	Config            []byte
+	Module            []byte
+	Entry             string
+	CompatibilityDate string
 }
 
 // ServeArgs returns the arguments for the pinned image's entrypoint.
@@ -83,8 +86,10 @@ func prepare(bundleDir, entry, compatibilityDate string, namespaces []durableobj
 	}
 
 	return RuntimeConfig{
-		Config: renderConfig(entry, compatibilityDate, namespaces),
-		Module: module,
+		Config:            renderConfig(entry, compatibilityDate, namespaces),
+		Module:            module,
+		Entry:             entry,
+		CompatibilityDate: compatibilityDate,
 	}, nil
 }
 
