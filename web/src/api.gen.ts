@@ -177,6 +177,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{projectID}/sites/{siteName}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["SiteProjectID"];
+                siteName: components["parameters"]["SiteName"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 项目所有者上传不超过 64 MiB 的 ZIP，站点首次上传时建立项目内的稳定标识。返回已验证的待激活版本。 */
+        post: operations["uploadStaticSiteVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["SiteProjectID"];
+                siteName: components["parameters"]["SiteName"];
+                versionID: string;
+            };
+            cookie?: never;
+        };
+        /** @description 项目成员按标识读取一个静态站点版本。 */
+        get: operations["getStaticSiteVersion"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{projectID}/secrets": {
         parameters: {
             query?: never;
@@ -326,6 +367,20 @@ export interface components {
             user: components["schemas"]["User"];
             projects: components["schemas"]["Project"][];
         };
+        StaticSiteVersion: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            site_id: string;
+            artifact_digest: string;
+            /**
+             * @description 站点文件已通过校验并准备就绪，等待激活。
+             * @enum {string}
+             */
+            status: "ready";
+            /** Format: date-time */
+            created_at: string;
+        };
         Operation: {
             /** Format: uuid */
             id: string;
@@ -342,6 +397,15 @@ export interface components {
         };
     };
     responses: {
+        /** @description 不可变静态站点版本 */
+        StaticSiteVersion: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["StaticSiteVersion"];
+            };
+        };
         /** @description 项目身份 */
         Project: {
             headers: {
@@ -397,7 +461,10 @@ export interface components {
             };
         };
     };
-    parameters: never;
+    parameters: {
+        SiteProjectID: string;
+        SiteName: string;
+    };
     requestBodies: never;
     headers: never;
     pathItems: never;
@@ -677,6 +744,61 @@ export interface operations {
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    uploadStaticSiteVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["SiteProjectID"];
+                siteName: components["parameters"]["SiteName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/zip": string;
+            };
+        };
+        responses: {
+            /** @description 已验证的待激活版本 */
+            201: {
+                headers: {
+                    /** @description 查询新版本的管理 API 路径 */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaticSiteVersion"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            413: components["responses"]["Error"];
+            415: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getStaticSiteVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["SiteProjectID"];
+                siteName: components["parameters"]["SiteName"];
+                versionID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["StaticSiteVersion"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };

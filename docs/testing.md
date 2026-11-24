@@ -124,7 +124,7 @@ npm --prefix runtimes/browser run test:integration
 
 ## 容器执行适配器验收
 
-使用真实 Docker 启动 configs/images.json 中的固定镜像，读取适配器观测到的回环端口并请求预期响应。名称或归属标签不匹配的容器不会被启动、观测、停止或删除。停止和删除后容器与端口释放。
+使用真实 Docker 启动 configs/images.json 中的固定镜像，读取适配器观测到的回环端口并请求预期响应。network 模式创建独立的用户定义 bridge 网络，核对容器没有发布主机端口，读取容器在该网络中的实际地址与稳定别名，并从同一网络的客户端容器通过 IP 与 DNS 名称分别发起真实 HTTP 请求。Docker Desktop 与 WSL2 中宿主机不能直接访问用户定义网络的容器地址，因此内部端点由同网络客户端验证。网络在创建与启动之间被删除时，启动返回 `ErrNetworkNotFound` 且容器保持 `created`；Docker 把网络 ID 前缀解析为其他网络时同样归类为 `ErrNetworkNotFound`。名称或归属标签不匹配的容器不会被启动、观测、停止或删除。停止和删除后容器、网络端点与端口释放。
 
 镜像准备使用真实 Docker Engine 和本地 registry。测试从空缓存按摘要拉取导入的测试镜像，核对返回的镜像标识与摘要；停止 registry 后再次准备，确认直接复用已核对摘要的本地镜像；再以不存在的摘要请求拉取，确认返回包含具体镜像引用的拉取失败。registry 镜像按 digest 固定，缺失时由 Docker Engine 拉取。
 
@@ -134,6 +134,10 @@ HTTP 就绪探测使用真实 Docker 启动延迟就绪、持续返回 503 和�
 make test-integration
 # 只运行容器适配器
 go test -race -count=1 -tags=integration ./internal/containers
+# 只运行内部网络端点
+go test -race -count=1 -tags=integration -run TestAdapterNetworkAccess ./internal/containers
+# 只运行启动时的网络缺失与网络 ID 前缀回归
+go test -race -count=1 -tags=integration -run 'TestAdapterStartReportsMissingNetwork|TestAdapterCreateRejectsNetworkIDPrefix' ./internal/containers
 # 只运行镜像准备
 go test -race -count=1 -tags=integration -run TestAdapterPrepareImage ./internal/containers
 # 只运行 HTTP 就绪探测

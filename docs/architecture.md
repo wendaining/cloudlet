@@ -34,6 +34,7 @@ Cloudlet 在一台 Linux 服务器上管理计算资源。本地开发在成员�
 | internal/operations | 操作记录的幂等登记、按项目查询与阶段推进 |
 | internal/capacity | 主机与项目容量的事务预留、容器绑定、确认释放与占用查询 |
 | internal/executions | 容量准入后的容器启动、绑定校验、失败清理与确认释放 |
+| internal/staticdeploy | 静态站点 ZIP 的保存、解包和不可变版本登记 |
 | internal/apigen | OpenAPI 生成的类型、Gin 接口和客户端 |
 | migrations | 内嵌 SQL 迁移文件与当前版本 |
 | internal/gateway | 按域名选择上游并转发 HTTP 请求 |
@@ -43,12 +44,12 @@ Cloudlet 在一台 Linux 服务器上管理计算资源。本地开发在成员�
 | internal/workers | ES Module 与 Durable Objects 的 workerd 配置、启动参数和镜像引用 |
 | internal/durableobjects | SQLite 命名空间、类绑定和存储挂载路径 |
 | runtimes/workers | TypeScript Worker 构建命令与示例入口 |
-| internal/containers | Docker Engine 镜像摘要准备、容器生命周期与回环端口观测 |
+| internal/containers | Docker Engine 镜像摘要准备、容器生命周期与回环端口或内部网络端点观测 |
 | internal/browser | 复用容器管理的 Playwright 会话 |
 | pkg/client | CLI 与其他客户端共享的 API 客户端 |
 | internal/mcpserver | 只读 MCP 项目与操作查询，复用管理 API 会话权限 |
 
-PostgreSQL 当前保存账号、登录会话、项目、操作记录、项目凭据、项目路由与容量预留。Workers 模块已提供独立的运行配置，资源元数据和生命周期的开发目标见 [开发任务](roadmap.md)。Durable Objects 的存储能力随 workerd 集成验证。
+PostgreSQL 当前保存账号、登录会话、项目、操作记录、项目凭据、项目路由、容量预留与静态站点版本。Workers 模块已提供独立的运行配置，资源元数据和生命周期的开发目标见 [开发任务](roadmap.md)。Durable Objects 的存储能力随 workerd 集成验证。
 
 项目拥有稳定的 project_id。创建项目在事务内写入项目和创建者的 owner 成员记录。项目列表和单项目读取同时校验当前会话账号的项目成员关系。项目成员列表对所有成员开放；所有者可以按邮箱把已有账号添加为 developer 或 viewer，或更新已有成员的角色，创建者的 owner 身份保持不变。非成员访问返回 404，成员越权修改返回 403。
 
@@ -69,6 +70,8 @@ PostgreSQL 当前保存账号、登录会话、项目、操作记录、项目凭
 | /api/v1/projects/{projectID} | GET | 读取当前用户可访问的项目 |
 | /api/v1/projects/{projectID}/operations | GET | 按时间升序读取项目内操作 |
 | /api/v1/projects/{projectID}/members | GET、POST | 列出项目成员；所有者添加已有账号或更新 developer/viewer 角色 |
+| /api/v1/projects/{projectID}/sites/{siteName}/versions | POST | 所有者上传 ZIP 并登记待激活版本 |
+| /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID} | GET | 项目成员查询指定版本及其产物摘要 |
 | /api/v1/projects/{projectID}/secrets | GET、POST | 列出项目凭据元数据；所有者追加加密版本 |
 | /api/v1/projects/{projectID}/secrets/{name} | GET | 列出项目凭据的版本元数据 |
 | /api/v1/projects/{projectID}/secrets/{name}/versions/{version}/value | GET | 所有者读取指定版本的值 |
@@ -85,6 +88,8 @@ Gateway 使用配置中的 `host` 匹配请求域名，匹配时忽略大小写�
 `internal/sitehttp` 可通过 HTTP 提供已验证的只读站点文件系统，支持 GET、HEAD 和目录首页。缺少首页的目录返回 404。处理器可以独立使用，域名绑定和版本切换由发布流程接入。
 
 创建单个站点处理器时可通过 `Options.SPAFallback` 启用导航回退，默认关闭。启用后，接受 `text/html` 的页面导航访问不存在且末段无扩展名的路径时，返回站点根目录的 `index.html`。静态文件请求和已有但缺少首页的目录仍返回 404。回退候选路径通过 `Vary` 声明导航相关请求头。
+
+静态站点以项目和名称确定身份。所有者使用 `Content-Type: application/zip` 上传，服务保存原始 ZIP，再展开并登记版本。上传体上限为 64 MiB，展开上限为 256 MiB，ZIP 中央目录在完整解析前检查 10,000 个成员的上限。解包前拒绝超过 255 字节的路径分量。成功响应返回版本标识、SHA-256 摘要、`ready` 状态和用于查询的 `Location`。`ready` 表示文件已准备就绪，等待后续激活。
 
 管理环境通过 PostgreSQL 保存账号与会话，使用 bcrypt 校验密码，使用 SCS 管理 HttpOnly 会话 Cookie。Cookie 名称包含实例名称，写入请求执行来源检查。开发账号经显式初始化流程创建，重复初始化保留已有密码。
 
@@ -108,6 +113,6 @@ API 与 Gateway 使用 HTTP 头读取超时和空闲连接超时。收到 SIGTER
 
 ## 执行环境
 
-Workers 集成 workerd，支持原生 Durable Object SQLite 绑定。真实运行时测试验证对象隔离和重启后的持久化。workers.Preflight 使用固定 workerd 在发布前验证模块载入和初始化阶段。容器管理使用 Docker Engine API。internal/containers 按不可变摘要准备镜像，核对本地镜像报告的摘要后才用于创建容器，已缓存且摘要一致的镜像直接复用。适配器提供创建、启动、观测、停止和删除受管理容器的操作，按环境、项目、资源和执行序号写入归属标签与确定性名称，在启动、观测、停止和删除前核对名称和标签，启动后读取实际发布的回环端口，并可按确定性名称查找已有容器。适配器可按实际发布的回环端点、接受状态码与截止时间等待 HTTP 就绪。超时、容器退出或端点未发布时返回失败观测。internal/executions 在该适配器之上完成容量准入、失败清理与确认释放。管理 API 与 Gateway 注册由上层任务接入。Browser Run 复用容器生命周期，并通过 Playwright 实现浏览器操作。
+Workers 集成 workerd，支持原生 Durable Object SQLite 绑定。真实运行时测试验证对象隔离和重启后的持久化。workers.Preflight 使用固定 workerd 在发布前验证模块载入和初始化阶段。容器管理使用 Docker Engine API。internal/containers 按不可变摘要准备镜像，核对本地镜像报告的摘要后才用于创建容器，已缓存且摘要一致的镜像直接复用。适配器提供创建、启动、观测、停止和删除受管理容器的操作，按环境、项目、资源和执行序号写入归属标签与确定性名称，在启动、观测、停止和删除前核对名称和标签，并可按确定性名称查找已有容器。published 模式在启动后读取实际发布的回环端口，并可按实际发布的回环端点、接受状态码与截止时间等待 HTTP 就绪。network 模式加入已有的用户定义 bridge 网络，为执行注册稳定的网络别名，并读取容器在该网络中的实际地址与端口。超时、容器退出或端点未发布时返回失败观测。internal/executions 在该适配器之上完成容量准入、失败清理与确认释放。管理 API 与 Gateway 注册由上层任务接入。Browser Run 复用容器生命周期，并通过 Playwright 实现浏览器操作。
 
 执行单元、配额、隔离、状态恢复与独占交接遵循执行环境设计。对应模块完成时，同步提供 [真实业务验收](testing.md)。

@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,7 +40,7 @@ func TestRepositoryConfigurations(t *testing.T) {
 
 func TestLoadSecretKey(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "cloudlet.json")
-	source := `{"environment":"development","instance":"default","public_origin":"http://localhost","api_address":"127.0.0.1:8080","gateway_address":"127.0.0.1:8081"}`
+	source := fmt.Sprintf(`{"environment":"development","instance":"default","public_origin":"http://localhost","api_address":"127.0.0.1:8080","gateway_address":"127.0.0.1:8081","site_storage_directory":%q}`, t.TempDir())
 	if err := os.WriteFile(file, []byte(source), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -106,5 +107,22 @@ func TestValidateRoutesUpstreamPort(t *testing.T) {
 				t.Fatalf("valid = %v, validation returned %v", test.valid, err)
 			}
 		})
+	}
+}
+
+func TestManagementRequiresAbsoluteSiteStorageDirectory(t *testing.T) {
+	cfg := config.Config{
+		Environment: "development", Instance: "test", DatabaseURL: "postgres://example", SecretKey: make([]byte, 32),
+		PublicOrigin: "http://localhost", APIAddress: "127.0.0.1:8080", GatewayAddress: "127.0.0.1:8081",
+	}
+	for _, directory := range []string{"", "relative/storage"} {
+		cfg.SiteStorageDirectory = directory
+		if err := cfg.Validate(); err == nil {
+			t.Fatalf("accepted storage directory %q", directory)
+		}
+	}
+	cfg.SiteStorageDirectory = t.TempDir()
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
 	}
 }

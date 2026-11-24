@@ -245,6 +245,7 @@ func readinessSpec(ownership containers.Ownership, image string, command []strin
 		User:      "101",
 		Command:   command,
 		Port:      8080,
+		Access:    containers.AccessPublished,
 		Limits: containers.Limits{
 			CPUMillis:   500,
 			MemoryBytes: 128 << 20,
