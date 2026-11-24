@@ -9,4 +9,9 @@
 // network and exposes the container port only to peers on that network. The
 // adapter observes the actual published loopback port or the internal network
 // endpoint, including a stable DNS alias for network peers.
+//
+// ProbeHostLimits reads Docker Engine information and reports the host support
+// scope for the CPU, memory, PIDs and open-file limits applied by the adapter.
+// Acceptance tests use bounded workloads to verify the actual trigger and
+// cleanup results.
 package containers

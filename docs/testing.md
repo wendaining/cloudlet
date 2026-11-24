@@ -8,7 +8,7 @@
 | npm run lint:config | JSON、YAML、Issue 表单与 Actions 约定 |
 | npm run lint:tooling | 脚本语法、ShellCheck、配置文件与真实端口检查 |
 | make test | Go race 测试、真实 HTTP、Gateway 转发与服务停止 |
-| make test-integration | Docker 中的 PostgreSQL 迁移、账号、会话、项目与成员角色、操作记录、项目凭据、路由快照、容量预留、容器容量准入、就绪检查、workerd 执行和容器创建、启动、观测、停止与删除 |
+| make test-integration | Docker 中的 PostgreSQL 迁移、账号、会话、项目与成员角色、操作记录、项目凭据、路由快照、容量预留、容器容量准入、就绪检查、workerd 执行和容器创建、启动、观测、配额触发、停止与删除 |
 | make web-check | TypeScript、ESLint、Prettier、Vite 构建与接口生成一致性 |
 | make dev-check | 真实本机进程、数据库、热重载、完整停止、多实例与失败清理 |
 | make test-e2e | 真实 Chromium 在桌面和手机尺寸下完成登录、刷新和退出 |
@@ -141,6 +141,31 @@ go test -race -count=1 -tags=integration -run TestAdapterPrepareImage ./internal
 ```
 
 测试结束清理所属容器、本地 registry 与拉取的测试镜像。
+
+## 容器配额验收
+
+使用真实 Docker 和 configs/images.json 中的固定镜像，在受限容器内运行有限负载，核对 Docker 实际设置与触发结果。负载依赖固定镜像中的 busybox 工具（sh、timeout、head、tr、awk 与 ulimit），镜像工具集变化时需要同步调整。`containers.ProbeHostLimits` 读取 Docker Engine 报告的主机信息，按 CPU CFS 配额与周期、内存限制、PIDs 限制和 Linux nofile ulimit 报告宿主支持范围；不支持的项在验收中跳过并记录 Docker 给出的原因。
+
+```sh
+go test -race -count=1 -tags=integration -run 'TestProbeHostLimits|TestAdapterLimitsAcceptance' -v ./internal/containers
+```
+
+用例先用 docker inspect 核对创建时的 NanoCPUs、Memory、PidsLimit 与 nofile 软硬限制，再观察实际负载。内存负载的分配量超过 Docker 实际设置的 MemorySwap 上限；宿主没有限制内存交换（SwapLimit 为 false 或 MemorySwap 不大于 0）时，该用例跳过并记录原因：
+
+| 限制 | 受限负载 | 预期触发结果 | 对照负载 |
+| --- | --- | --- | --- |
+| CPU | 500 毫核，忙循环约 2.5 秒 | CPU 用量低于单核满负荷，throttled_periods 大于 0 | — |
+| 内存 | 64 MiB，分配并写入 200 MB | 容器被 OOM 终止，State.OOMKilled 为 true 或退出码为 137 | 1 GiB 时完成分配 |
+| 进程 | 16 个 PIDs，循环创建 100 个进程 | 创建失败并以非零状态退出 | 128 个 PIDs 时创建 100 个进程成功 |
+| 打开文件 | 64 个文件句柄，打开 200 个文件 | 打开失败并以非零状态退出，ulimit -n 为 64 | 1024 个句柄时打开 200 个文件成功 |
+
+测试结束停止并删除容器，逐个确认容器不存在，再按本次验收的环境标签确认没有遗留容器。宿主支持范围随测试日志输出，实际结果按环境记录：
+
+| 环境 | Docker Engine | cgroup | CPU | 内存 | PIDs | 打开文件 | 交换限制 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| WSL2 / Docker Desktop 4.99.0 | 29.9.3 linux/amd64 | v2 / cgroupfs | 支持 | 支持 | 支持 | 支持 | 支持 |
+
+CI 的 Containers 任务在标准 Linux Docker 中执行同一用例；其他平台的结果需要单独记录。
 
 ## 执行模块的业务验收
 
