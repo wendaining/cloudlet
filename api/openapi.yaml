@@ -532,7 +532,7 @@ components:
         value:
           type: string
           minLength: 1
-          maxLength: 65536
+          description: UTF-8 编码后包含 1 至 65536 字节。
     UpsertProjectMemberRequest:
       type: object
       additionalProperties: false

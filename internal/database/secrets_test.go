@@ -15,15 +15,16 @@ func TestSecretEncryptionRoundTrip(t *testing.T) {
 	key := randomKey(t)
 	projectID := uuid.NewString()
 	value := "database-password-版本一"
+	version := ProjectSecretVersion{ID: uuid.NewString(), SecretID: uuid.NewString(), Name: "DATABASE_URL", Version: 1}
 
-	nonce, ciphertext, err := encryptSecret(key, projectID, "DATABASE_URL", value)
+	nonce, ciphertext, err := encryptSecret(key, projectID, version, value)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if bytes.Contains(ciphertext, []byte(value)) {
 		t.Fatal("ciphertext contains the plaintext")
 	}
-	decrypted, err := decryptSecret(key, projectID, "DATABASE_URL", nonce, ciphertext)
+	decrypted, err := decryptSecret(key, projectID, version, nonce, ciphertext)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,7 +36,8 @@ func TestSecretEncryptionRoundTrip(t *testing.T) {
 func TestSecretEncryptionRejectsWrongKeyOrContext(t *testing.T) {
 	key := randomKey(t)
 	projectID := uuid.NewString()
-	nonce, ciphertext, err := encryptSecret(key, projectID, "TOKEN", "secret")
+	version := ProjectSecretVersion{ID: uuid.NewString(), SecretID: uuid.NewString(), Name: "TOKEN", Version: 1}
+	nonce, ciphertext, err := encryptSecret(key, projectID, version, "secret")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,7 +56,7 @@ func TestSecretEncryptionRejectsWrongKeyOrContext(t *testing.T) {
 		{"short nonce", key, projectID, "TOKEN", nonce[:4], ciphertext},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := decryptSecret(tt.key, tt.pid, tt.secret, tt.nonce, tt.data); err == nil {
+			if _, err := decryptSecret(tt.key, tt.pid, ProjectSecretVersion{ID: version.ID, SecretID: version.SecretID, Name: tt.secret, Version: version.Version}, tt.nonce, tt.data); err == nil {
 				t.Fatal("invalid ciphertext was accepted")
 			}
 		})
@@ -64,16 +66,43 @@ func TestSecretEncryptionRejectsWrongKeyOrContext(t *testing.T) {
 func TestSecretEncryptionUsesUniqueNonces(t *testing.T) {
 	key := randomKey(t)
 	projectID := uuid.NewString()
-	firstNonce, firstCiphertext, err := encryptSecret(key, projectID, "TOKEN", "same")
+	version := ProjectSecretVersion{ID: uuid.NewString(), SecretID: uuid.NewString(), Name: "TOKEN", Version: 1}
+	firstNonce, firstCiphertext, err := encryptSecret(key, projectID, version, "same")
 	if err != nil {
 		t.Fatal(err)
 	}
-	secondNonce, secondCiphertext, err := encryptSecret(key, projectID, "TOKEN", "same")
+	secondNonce, secondCiphertext, err := encryptSecret(key, projectID, version, "same")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if bytes.Equal(firstNonce, secondNonce) || bytes.Equal(firstCiphertext, secondCiphertext) {
 		t.Fatal("repeated encryption reused nonce or ciphertext")
+	}
+}
+
+func TestSecretEncryptionAuthenticatesVersionIdentity(t *testing.T) {
+	key := randomKey(t)
+	projectID := uuid.NewString()
+	version := ProjectSecretVersion{ID: uuid.NewString(), SecretID: uuid.NewString(), Name: "TOKEN", Version: 1}
+	nonce, ciphertext, err := encryptSecret(key, projectID, version, "value")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"ID", "SecretID", "Version"} {
+		t.Run(field, func(t *testing.T) {
+			other := version
+			switch field {
+			case "ID":
+				other.ID = uuid.NewString()
+			case "SecretID":
+				other.SecretID = uuid.NewString()
+			case "Version":
+				other.Version++
+			}
+			if _, err := decryptSecret(key, projectID, other, nonce, ciphertext); err == nil {
+				t.Fatal("changed version identity authenticated successfully")
+			}
+		})
 	}
 }
 
@@ -94,7 +123,10 @@ func TestSecretValidation(t *testing.T) {
 		{"dash", projectID, "DATABASE-URL", "value", false},
 		{"too long name", projectID, strings.Repeat("A", 129), "value", false},
 		{"empty value", projectID, "TOKEN", "", false},
-		{"value too long", projectID, "TOKEN", strings.Repeat("a", maxSecretValueBytes+1), false},
+		{"byte boundary", projectID, "TOKEN", strings.Repeat("a", MaxSecretValueBytes), true},
+		{"UTF-8 boundary", projectID, "TOKEN", strings.Repeat("汉", 21845) + "a", true},
+		{"UTF-8 over limit", projectID, "TOKEN", strings.Repeat("汉", 21846), false},
+		{"value too long", projectID, "TOKEN", strings.Repeat("a", MaxSecretValueBytes+1), false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			err := validateSecret(tt.project, tt.secret, tt.value)

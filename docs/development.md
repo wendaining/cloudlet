@@ -75,6 +75,8 @@ make dev 检查配置与端口，使用 compose.yaml 和 compose.dev.yaml 启动
 | CLOUDLET_DEV_EMAIL、CLOUDLET_DEV_PASSWORD | 首次准备开发账号时使用的凭据 |
 | DOCKER_HOST、DOCKER_CONTEXT | 可选 Docker 连接配置，两项互斥 |
 
+数据库保存平台密钥的 SHA-256 标识。已有凭据数据的环境必须继续使用对应密钥，密钥不匹配时服务终止启动。
+
 未指定 Docker 连接时使用当前 Docker context。本地开发支持 unix:// 连接，Go SDK 和 Testcontainers 使用同一引擎。数据库镜像版本与 digest 锁定在 configs/images.json。数据库端口和应用监听端口均绑定回环地址。
 
 创建另一个实例时执行 make setup ENV_FILE=.env.feature.local，编辑该文件中的实例名称、数据库端口和四个服务端口，再运行：

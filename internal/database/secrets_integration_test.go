@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/testcontainers/testcontainers-go"
@@ -25,6 +27,7 @@ import (
 	"github.com/wendaining/cloudlet/internal/config"
 	"github.com/wendaining/cloudlet/internal/controlplane"
 	"github.com/wendaining/cloudlet/internal/database"
+	"github.com/wendaining/cloudlet/internal/server"
 	"gorm.io/gorm"
 )
 
@@ -132,6 +135,87 @@ func TestProjectSecretsEncryptAtRestAndExposeMetadataOnly(t *testing.T) {
 	memberRequest(t, ownerClient, http.MethodPost, base, map[string]any{"name": "EMPTY", "value": ""}, http.StatusBadRequest).Body.Close()
 	memberRequest(t, ownerClient, http.MethodPost, base, map[string]any{"name": "UNKNOWN", "value": "value", "typo": true}, http.StatusBadRequest).Body.Close()
 	memberRequest(t, ownerClient, http.MethodGet, base+"/BAD-NAME", nil, http.StatusNotFound).Body.Close()
+	t.Run("missing and foreign credentials", func(t *testing.T) {
+		otherBase := api.URL + "/api/v1/projects/" + otherProject.ID + "/secrets"
+		createSecret(t, outsiderClient, otherBase, "ONLY_OTHER", "other-project-value")
+		for _, name := range []string{"MISSING", "ONLY_OTHER"} {
+			memberRequest(t, ownerClient, http.MethodGet, base+"/"+name, nil, http.StatusNotFound).Body.Close()
+			memberRequest(t, ownerClient, http.MethodGet, base+"/"+name+"/versions/1/value", nil, http.StatusNotFound).Body.Close()
+		}
+		memberRequest(t, outsiderClient, http.MethodGet, otherBase+"/"+firstName+"/versions/1/value", nil, http.StatusNotFound).Body.Close()
+	})
+	t.Run("decoded UTF-8 size boundaries", func(t *testing.T) {
+		for _, tt := range []struct{ name, value string }{
+			{"ASCII_BOUNDARY", strings.Repeat("a", 65536)},
+			{"QUOTES_BOUNDARY", strings.Repeat("\"", 65536)},
+			{"ESCAPED_BOUNDARY", strings.Repeat("<", 65536)},
+			{"UTF8_BOUNDARY", strings.Repeat("汉", 21845) + "a"},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				created := createSecret(t, ownerClient, base, tt.name, tt.value)
+				value := getSecretValue(t, ownerClient, base+"/"+tt.name+"/versions/1/value")
+				if created.Version != 1 || value.Value != tt.value {
+					t.Fatal("boundary value did not round trip")
+				}
+			})
+		}
+		for _, value := range []string{strings.Repeat("a", 65537), strings.Repeat("汉", 21846)} {
+			memberRequest(t, ownerClient, http.MethodPost, base, map[string]string{"name": "OVERSIZE", "value": value}, http.StatusBadRequest).Body.Close()
+		}
+	})
+	t.Run("canonical project identity", func(t *testing.T) {
+		for index, id := range []string{strings.ToUpper(project.ID), "urn:uuid:" + project.ID} {
+			name := fmt.Sprintf("CANONICAL_%d", index)
+			version, err := store.CreateProjectSecretVersion(ctx, id, name, "canonical-value", key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, readID := range []string{project.ID, id} {
+				value, err := store.ProjectSecretValueByName(ctx, readID, name, version.Version, key)
+				if err != nil || value.Value != "canonical-value" {
+					t.Fatalf("canonical read: %v", err)
+				}
+			}
+		}
+	})
+	t.Run("ciphertext is bound to its version", func(t *testing.T) {
+		first, err := store.CreateProjectSecretVersion(ctx, project.ID, "SWAP", "first-value", key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		second, err := store.CreateProjectSecretVersion(ctx, project.ID, "SWAP", "second-value", key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.DB.Exec(`UPDATE project_secret_versions SET (nonce, ciphertext) = (SELECT nonce, ciphertext FROM project_secret_versions WHERE id = ?) WHERE id = ?`, first.ID, second.ID).Error; err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.ProjectSecretValueByName(ctx, project.ID, "SWAP", 2, key); err == nil {
+			t.Fatal("another version's ciphertext was accepted")
+		}
+	})
+	t.Run("wrong platform key rejects writes and startup", func(t *testing.T) {
+		wrongKey := bytes.Repeat([]byte{1}, 32)
+		for _, name := range []string{firstName, "WRONG_KEY"} {
+			if _, err := store.CreateProjectSecretVersion(ctx, project.ID, name, "wrong-key-value", wrongKey); err == nil {
+				t.Fatal("wrong key appended a credential version")
+			}
+		}
+		versions, err := store.ProjectSecretVersions(ctx, project.ID, firstName)
+		if err != nil || len(versions) != 2 {
+			t.Fatalf("wrong key changed versions: count=%d error=%v", len(versions), err)
+		}
+		versions, err = store.ProjectSecretVersions(ctx, project.ID, "WRONG_KEY")
+		if err != nil || len(versions) != 0 {
+			t.Fatalf("wrong key created a credential: count=%d error=%v", len(versions), err)
+		}
+		startupCtx, cancel := context.WithTimeout(ctx, time.Second)
+		defer cancel()
+		err = server.Run(startupCtx, config.Config{DatabaseURL: connection, SecretKey: wrongKey, APIAddress: "127.0.0.1:0", GatewayAddress: "127.0.0.1:0"}, slog.Default())
+		if err == nil || !strings.Contains(err.Error(), "platform secret key") {
+			t.Fatalf("wrong key startup error = %v", err)
+		}
+	})
 
 	var ciphertext []byte
 	if err := store.DB.Raw(`SELECT ciphertext FROM project_secret_versions WHERE id = ?`, first.Id.String()).Row().Scan(&ciphertext); err != nil {
@@ -169,8 +253,8 @@ func TestProjectSecretsEncryptAtRestAndExposeMetadataOnly(t *testing.T) {
 	if value.Value != firstValue || value.Version != 1 || value.Name != firstName {
 		t.Fatalf("decrypted secret = %+v", value)
 	}
-	if _, err := reopened.ProjectSecretValue(ctx, project.ID, first.Id.String(), bytes.Repeat([]byte{1}, 32)); err == nil {
-		t.Fatal("wrong key decrypted the secret")
+	if _, err := reopened.ProjectSecretValue(ctx, project.ID, first.Id.String(), bytes.Repeat([]byte{1}, 32)); !errors.Is(err, database.ErrSecretKeyMismatch) {
+		t.Fatalf("wrong key read error = %v, want key mismatch", err)
 	}
 	if _, err := reopened.ProjectSecretValue(ctx, otherProject.ID, first.Id.String(), key); !errors.Is(err, gorm.ErrRecordNotFound) {
 		t.Fatalf("cross-project read error = %v, want record not found", err)

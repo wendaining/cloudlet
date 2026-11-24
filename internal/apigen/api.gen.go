@@ -66,7 +66,9 @@ type CreateProjectRequest struct {
 
 // CreateProjectSecretRequest defines model for CreateProjectSecretRequest.
 type CreateProjectSecretRequest struct {
-	Name  string `json:"name"`
+	Name string `json:"name"`
+
+	// Value UTF-8 编码后包含 1 至 65536 字节。
 	Value string `json:"value"`
 }
 

@@ -314,6 +314,7 @@ export interface components {
         };
         CreateProjectSecretRequest: {
             name: string;
+            /** @description UTF-8 编码后包含 1 至 65536 字节。 */
             value: string;
         };
         UpsertProjectMemberRequest: {

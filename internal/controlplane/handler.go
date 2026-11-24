@@ -371,7 +371,7 @@ func (h *handler) CreateProjectSecretVersion(c *gin.Context, projectID string) {
 		return
 	}
 	var body apigen.CreateProjectSecretRequest
-	decoder := json.NewDecoder(http.MaxBytesReader(c.Writer, c.Request.Body, (64<<10)+4096))
+	decoder := json.NewDecoder(http.MaxBytesReader(c.Writer, c.Request.Body, 6*database.MaxSecretValueBytes+4096))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&body); err != nil {
 		c.JSON(http.StatusBadRequest, apigen.Error{Message: "凭据请求格式无效"})
@@ -429,6 +429,10 @@ func (h *handler) ListProjectSecretVersions(c *gin.Context, projectID, name stri
 	}
 	if err != nil {
 		h.failure(c, err)
+		return
+	}
+	if len(versions) == 0 {
+		c.JSON(http.StatusNotFound, apigen.Error{Message: "凭据不存在"})
 		return
 	}
 	response := make([]apigen.ProjectSecretVersion, 0, len(versions))

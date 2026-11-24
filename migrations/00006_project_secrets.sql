@@ -1,4 +1,9 @@
 -- +goose Up
+CREATE TABLE secret_encryption_key (
+    id SMALLINT PRIMARY KEY CHECK (id = 1),
+    key_id TEXT NOT NULL UNIQUE CHECK (key_id ~ '^[a-f0-9]{64}$')
+);
+
 CREATE TABLE project_secrets (
     id UUID PRIMARY KEY,
     project_id UUID NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
@@ -14,6 +19,7 @@ CREATE TABLE project_secret_versions (
     id UUID PRIMARY KEY,
     secret_id UUID NOT NULL REFERENCES project_secrets (id) ON DELETE CASCADE,
     version INTEGER NOT NULL CHECK (version > 0),
+    key_id TEXT NOT NULL REFERENCES secret_encryption_key (key_id),
     nonce BYTEA NOT NULL CHECK (octet_length(nonce) = 12),
     ciphertext BYTEA NOT NULL CHECK (octet_length(ciphertext) > 0),
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -23,3 +29,4 @@ CREATE TABLE project_secret_versions (
 -- +goose Down
 DROP TABLE project_secret_versions;
 DROP TABLE project_secrets;
+DROP TABLE secret_encryption_key;

@@ -31,6 +31,9 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		if err := store.CheckVersion(ctx); err != nil {
 			return err
 		}
+		if err := store.CheckSecretKey(ctx, cfg.SecretKey); err != nil {
+			return fmt.Errorf("validate platform secret key before startup: %w", err)
+		}
 	}
 	proxy, err := gateway.NewHandler(cfg, logger)
 	if err != nil {
