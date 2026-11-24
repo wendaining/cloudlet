@@ -53,10 +53,10 @@ func (h *Handler) ReplaceRoutes(routes []config.Route) error {
 	}
 	staticHosts := make(map[string]bool, len(h.staticRoutes))
 	for _, route := range h.staticRoutes {
-		staticHosts[canonicalHost(route.Host)] = true
+		staticHosts[CanonicalHost(route.Host)] = true
 	}
 	for _, route := range routes {
-		if staticHosts[canonicalHost(route.Host)] {
+		if staticHosts[CanonicalHost(route.Host)] {
 			return fmt.Errorf("route host %q is reserved by startup configuration", route.Host)
 		}
 	}
@@ -73,7 +73,7 @@ func (h *Handler) ReplaceRoutes(routes []config.Route) error {
 				request.SetXForwarded()
 			},
 			ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
-				h.logger.Error("proxy request failed", "host", r.Host, "error", err)
+				h.logger.Error("proxy request failed", "host", route.Host, "error", err)
 				http.Error(w, "upstream unavailable", http.StatusBadGateway)
 			},
 		}
@@ -81,7 +81,7 @@ func (h *Handler) ReplaceRoutes(routes []config.Route) error {
 		if route.PathPrefix != "" && route.PathPrefix != "/" {
 			segments = strings.Split(route.PathPrefix[1:], "/")
 		}
-		host := canonicalHost(route.Host)
+		host := CanonicalHost(route.Host)
 		proxies[host] = append(proxies[host], pathRoute{segments: segments, proxy: proxy})
 	}
 	for _, routes := range proxies {
@@ -94,7 +94,7 @@ func (h *Handler) ReplaceRoutes(routes []config.Route) error {
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	routes := (*h.snapshot.Load())[canonicalHost(r.Host)]
+	routes := (*h.snapshot.Load())[CanonicalHost(r.Host)]
 	if len(routes) > 0 {
 		if len(routes[0].segments) == 0 {
 			routes[0].proxy.ServeHTTP(w, r)
@@ -124,7 +124,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	http.NotFound(w, r)
 }
 
-func canonicalHost(host string) string {
+// ReservedHost reports whether a startup route already uses the host.
+func (h *Handler) ReservedHost(host string) bool {
+	host = CanonicalHost(host)
+	for _, route := range h.staticRoutes {
+		if CanonicalHost(route.Host) == host {
+			return true
+		}
+	}
+	return false
+}
+
+// CanonicalHost normalizes a request or route host for matching.
+func CanonicalHost(host string) string {
 	if hostname, _, err := net.SplitHostPort(host); err == nil {
 		host = hostname
 	}

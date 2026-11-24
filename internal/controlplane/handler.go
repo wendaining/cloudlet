@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -20,6 +21,8 @@ import (
 	"github.com/wendaining/cloudlet/internal/capacity"
 	"github.com/wendaining/cloudlet/internal/config"
 	"github.com/wendaining/cloudlet/internal/database"
+	"github.com/wendaining/cloudlet/internal/mcpserver"
+	"github.com/wendaining/cloudlet/internal/staticdeploy"
 	"github.com/wendaining/cloudlet/internal/version"
 	"github.com/wendaining/cloudlet/migrations"
 	"gorm.io/gorm"
@@ -28,13 +31,27 @@ import (
 type handler struct {
 	store    *database.Store
 	capacity *capacity.Store
+	sites    *staticdeploy.Service
 	sessions *scs.SessionManager
 	config   config.Config
 	logger   *slog.Logger
 }
 
 func NewHandler(store *database.Store, cfg config.Config, logger *slog.Logger) (http.Handler, func(), error) {
-	h := &handler{store: store, config: cfg, logger: logger}
+	return newHandler(store, nil, cfg, logger, nil)
+}
+
+// NewHandlerWithMCP mounts the read-only MCP endpoint on the management API.
+func NewHandlerWithMCP(store *database.Store, sites *staticdeploy.Service, cfg config.Config, logger *slog.Logger, apiEndpoint string) (http.Handler, func(), error) {
+	mcpHandler, err := mcpserver.NewHandler(apiEndpoint)
+	if err != nil {
+		return nil, nil, err
+	}
+	return newHandler(store, sites, cfg, logger, mcpHandler)
+}
+
+func newHandler(store *database.Store, sites *staticdeploy.Service, cfg config.Config, logger *slog.Logger, mcpHandler http.Handler) (http.Handler, func(), error) {
+	h := &handler{store: store, sites: sites, config: cfg, logger: logger}
 	if store != nil {
 		capacityStore, err := capacity.NewStore(store.DB)
 		if err != nil {
@@ -59,6 +76,9 @@ func NewHandler(store *database.Store, cfg config.Config, logger *slog.Logger) (
 	apigen.RegisterHandlers(router, h)
 	if store == nil {
 		return router, func() {}, nil
+	}
+	if mcpHandler != nil {
+		router.Any("/mcp", gin.WrapH(mcpHandler))
 	}
 	sessionStore := postgresstore.New(store.SQL)
 	h.sessions = scs.New()
@@ -394,6 +414,115 @@ func (h *handler) RemoveProjectMember(c *gin.Context, projectID, userID string) 
 	c.Status(http.StatusNoContent)
 }
 
+func (h *handler) CreateProjectSecretVersion(c *gin.Context, projectID string) {
+	_, normalizedID, membership, ok := h.projectAccess(c, projectID)
+	if !ok {
+		return
+	}
+	if membership.Role != "owner" {
+		c.JSON(http.StatusForbidden, apigen.Error{Message: "只有项目所有者可以管理项目凭据"})
+		return
+	}
+	var body apigen.CreateProjectSecretRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(c.Writer, c.Request.Body, 6*database.MaxSecretValueBytes+4096))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil {
+		c.JSON(http.StatusBadRequest, apigen.Error{Message: "凭据请求格式无效"})
+		return
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		c.JSON(http.StatusBadRequest, apigen.Error{Message: "凭据请求格式无效"})
+		return
+	}
+	version, err := h.store.CreateProjectSecretVersion(c.Request.Context(), normalizedID, body.Name, body.Value, h.config.SecretKey)
+	if errors.Is(err, fs.ErrInvalid) {
+		c.JSON(http.StatusBadRequest, apigen.Error{Message: err.Error()})
+		return
+	}
+	if err != nil {
+		h.failure(c, err)
+		return
+	}
+	c.JSON(http.StatusCreated, projectSecretVersionResponse(version))
+}
+
+func (h *handler) ListProjectSecrets(c *gin.Context, projectID string) {
+	_, normalizedID, _, ok := h.projectAccess(c, projectID)
+	if !ok {
+		return
+	}
+	secrets, err := h.store.ProjectSecrets(c.Request.Context(), normalizedID)
+	if err != nil {
+		h.failure(c, err)
+		return
+	}
+	response := make([]apigen.ProjectSecret, 0, len(secrets))
+	for _, secret := range secrets {
+		response = append(response, apigen.ProjectSecret{
+			Id:            uuid.MustParse(secret.ID),
+			Name:          secret.Name,
+			LatestVersion: secret.LatestVersion,
+			CreatedAt:     secret.CreatedAt,
+			UpdatedAt:     secret.UpdatedAt,
+		})
+	}
+	c.JSON(http.StatusOK, response)
+}
+
+func (h *handler) ListProjectSecretVersions(c *gin.Context, projectID, name string) {
+	_, normalizedID, _, ok := h.projectAccess(c, projectID)
+	if !ok {
+		return
+	}
+	versions, err := h.store.ProjectSecretVersions(c.Request.Context(), normalizedID, name)
+	if errors.Is(err, fs.ErrInvalid) {
+		c.JSON(http.StatusNotFound, apigen.Error{Message: "凭据不存在"})
+		return
+	}
+	if err != nil {
+		h.failure(c, err)
+		return
+	}
+	if len(versions) == 0 {
+		c.JSON(http.StatusNotFound, apigen.Error{Message: "凭据不存在"})
+		return
+	}
+	response := make([]apigen.ProjectSecretVersion, 0, len(versions))
+	for _, version := range versions {
+		response = append(response, projectSecretVersionResponse(version))
+	}
+	c.JSON(http.StatusOK, response)
+}
+
+func (h *handler) GetProjectSecretValue(c *gin.Context, projectID, name string, version int) {
+	_, normalizedID, membership, ok := h.projectAccess(c, projectID)
+	if !ok {
+		return
+	}
+	if membership.Role != "owner" {
+		c.JSON(http.StatusForbidden, apigen.Error{Message: "只有项目所有者可以读取项目凭据"})
+		return
+	}
+	value, err := h.store.ProjectSecretValueByName(c.Request.Context(), normalizedID, name, version, h.config.SecretKey)
+	if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, fs.ErrInvalid) {
+		c.JSON(http.StatusNotFound, apigen.Error{Message: "凭据版本不存在"})
+		return
+	}
+	if err != nil {
+		h.failure(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, apigen.ProjectSecretValue{
+		Id:        uuid.MustParse(value.ID),
+		SecretId:  uuid.MustParse(value.SecretID),
+		Name:      value.Name,
+		Version:   value.Version,
+		CreatedAt: value.CreatedAt,
+		Value:     value.Value,
+	})
+}
+
 func (h *handler) ListProjectOperations(c *gin.Context, projectID string) {
 	user, ok := h.currentUser(c)
 	if !ok {
@@ -467,6 +596,16 @@ func resourceAmounts(resources capacity.Resources) apigen.ResourceAmounts {
 		CpuMillis:   resources.CPUMillis,
 		MemoryBytes: resources.MemoryBytes,
 		Instances:   resources.Instances,
+	}
+}
+
+func projectSecretVersionResponse(version database.ProjectSecretVersion) apigen.ProjectSecretVersion {
+	return apigen.ProjectSecretVersion{
+		Id:        uuid.MustParse(version.ID),
+		SecretId:  uuid.MustParse(version.SecretID),
+		Name:      version.Name,
+		Version:   version.Version,
+		CreatedAt: version.CreatedAt,
 	}
 }
 

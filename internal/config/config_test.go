@@ -1,8 +1,10 @@
 package config_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/wendaining/cloudlet/internal/config"
@@ -33,6 +35,27 @@ func TestRepositoryConfigurations(t *testing.T) {
 		if _, err := config.Load(filepath.Join("..", "..", "configs", file)); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestLoadSecretKey(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "cloudlet.json")
+	source := fmt.Sprintf(`{"environment":"development","instance":"default","public_origin":"http://localhost","api_address":"127.0.0.1:8080","gateway_address":"127.0.0.1:8081","site_storage_directory":%q}`, t.TempDir())
+	if err := os.WriteFile(file, []byte(source), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CLOUDLET_DATABASE_URL", "postgres://cloudlet:password@127.0.0.1:5432/cloudlet")
+	t.Setenv("CLOUDLET_SECRET_KEY", strings.Repeat("ab", 32))
+	cfg, err := config.Load(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.SecretKey) != 32 || cfg.SecretKey[0] != 0xab {
+		t.Fatalf("secret key = %x", cfg.SecretKey)
+	}
+	t.Setenv("CLOUDLET_SECRET_KEY", "not-a-key")
+	if _, err := config.Load(file); err == nil {
+		t.Fatal("invalid secret key was accepted")
 	}
 }
 
@@ -84,5 +107,22 @@ func TestValidateRoutesUpstreamPort(t *testing.T) {
 				t.Fatalf("valid = %v, validation returned %v", test.valid, err)
 			}
 		})
+	}
+}
+
+func TestManagementRequiresAbsoluteSiteStorageDirectory(t *testing.T) {
+	cfg := config.Config{
+		Environment: "development", Instance: "test", DatabaseURL: "postgres://example", SecretKey: make([]byte, 32),
+		PublicOrigin: "http://localhost", APIAddress: "127.0.0.1:8080", GatewayAddress: "127.0.0.1:8081",
+	}
+	for _, directory := range []string{"", "relative/storage"} {
+		cfg.SiteStorageDirectory = directory
+		if err := cfg.Validate(); err == nil {
+			t.Fatalf("accepted storage directory %q", directory)
+		}
+	}
+	cfg.SiteStorageDirectory = t.TempDir()
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
 	}
 }

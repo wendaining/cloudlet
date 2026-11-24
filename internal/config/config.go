@@ -2,6 +2,7 @@ package config
 
 import (
 	"cmp"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"unicode"
@@ -22,13 +24,15 @@ type Route struct {
 }
 
 type Config struct {
-	Environment    string  `json:"environment,omitempty"`
-	Instance       string  `json:"instance,omitempty"`
-	PublicOrigin   string  `json:"public_origin,omitempty"`
-	DatabaseURL    string  `json:"-"`
-	APIAddress     string  `json:"api_address"`
-	GatewayAddress string  `json:"gateway_address"`
-	Routes         []Route `json:"routes"`
+	Environment          string  `json:"environment,omitempty"`
+	Instance             string  `json:"instance,omitempty"`
+	PublicOrigin         string  `json:"public_origin,omitempty"`
+	SecretKey            []byte  `json:"-"`
+	DatabaseURL          string  `json:"-"`
+	SiteStorageDirectory string  `json:"site_storage_directory,omitempty"`
+	APIAddress           string  `json:"api_address"`
+	GatewayAddress       string  `json:"gateway_address"`
+	Routes               []Route `json:"routes"`
 }
 
 func Load(path string) (Config, error) {
@@ -48,6 +52,13 @@ func Load(path string) (Config, error) {
 		return Config{}, errors.New("configuration must contain one JSON object")
 	}
 	cfg.DatabaseURL = os.Getenv("CLOUDLET_DATABASE_URL")
+	if value := os.Getenv("CLOUDLET_SECRET_KEY"); value != "" {
+		key, err := hex.DecodeString(value)
+		if err != nil || len(key) != 32 {
+			return Config{}, errors.New("CLOUDLET_SECRET_KEY must contain 64 hexadecimal characters")
+		}
+		cfg.SecretKey = key
+	}
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
 	}
@@ -55,12 +66,18 @@ func Load(path string) (Config, error) {
 }
 
 func (cfg Config) Validate() error {
+	if (cfg.DatabaseURL != "" || cfg.SiteStorageDirectory != "") && !filepath.IsAbs(cfg.SiteStorageDirectory) {
+		return errors.New("management site storage requires an absolute site_storage_directory")
+	}
 	if cfg.Environment != "" && cfg.Environment != "development" && cfg.Environment != "production" {
 		return errors.New("invalid environment")
 	}
 	if cfg.Environment != "" {
 		if cfg.DatabaseURL == "" || cfg.Instance == "" {
 			return errors.New("management environment requires database URL and instance")
+		}
+		if len(cfg.SecretKey) != 32 {
+			return errors.New("management environment requires a 32-byte secret key")
 		}
 		origin, err := url.Parse(cfg.PublicOrigin)
 		if err != nil || origin.Hostname() == "" || (origin.Scheme != "http" && origin.Scheme != "https") {

@@ -6,7 +6,7 @@ export ENV_FILE DEBUG CONFIRM
 GO_PACKAGES = ./cmd/... ./internal/... ./pkg/... ./migrations/...
 LDFLAGS = -X github.com/wendaining/cloudlet/internal/version.Version=$(VERSION) -X github.com/wendaining/cloudlet/internal/version.Commit=$(COMMIT)
 
-.PHONY: setup doctor dev dev-stop dev-status dev-logs dev-reset db-migrate db-status web-check dev-check test-e2e fmt format-check lint test test-integration generate generate-check build audit check run container-check repo-sync agent-brief
+.PHONY: setup doctor dev dev-stop dev-status dev-logs dev-reset db-migrate db-status web-check worker-check worker-build dev-check test-e2e fmt format-check lint test test-integration generate generate-check build audit check run container-check repo-sync agent-brief
 
 setup:
 	npm ci
@@ -44,6 +44,12 @@ web-check:
 	npm run test --workspace web
 	npm run build --workspace web
 	node scripts/check-generated.mjs web
+
+worker-check:
+	npm run check --workspace runtimes/workers
+
+worker-build:
+	npm run build --workspace runtimes/workers
 
 dev-check:
 	node --test tests/development.test.mjs
@@ -85,7 +91,7 @@ build:
 audit:
 	go tool govulncheck $(GO_PACKAGES)
 
-check: format-check lint test build audit generate-check web-check test-integration dev-check test-e2e
+check: format-check lint test build audit generate-check web-check worker-check test-integration dev-check test-e2e
 
 run:
 	go run ./cmd/server -config configs/cloudlet.json

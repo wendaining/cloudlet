@@ -284,7 +284,210 @@ paths:
           $ref: '#/components/responses/Error'
         '409':
           $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/sites/{siteName}/versions:
+    parameters:
+      - $ref: '#/components/parameters/SiteProjectID'
+      - $ref: '#/components/parameters/SiteName'
+    post:
+      operationId: uploadStaticSiteVersion
+      description: 项目所有者上传不超过 64 MiB 的 ZIP，站点首次上传时建立项目内的稳定标识。返回已验证的待激活版本。
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/zip:
+            schema:
+              type: string
+              format: binary
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '201':
+          description: 已验证的待激活版本
+          headers:
+            Location:
+              description: 查询新版本的管理 API 路径
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaticSiteVersion'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '413':
+          $ref: '#/components/responses/Error'
+        '415':
+          $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}:
+    parameters:
+      - $ref: '#/components/parameters/SiteProjectID'
+      - $ref: '#/components/parameters/SiteName'
+      - name: versionID
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: getStaticSiteVersion
+      description: 项目成员按标识读取一个静态站点版本。
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          $ref: '#/components/responses/StaticSiteVersion'
+        '401':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/secrets:
+    parameters:
+      - name: projectID
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      operationId: createProjectSecretVersion
+      description: 为项目凭据追加一个加密版本，仅项目所有者可以调用。
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProjectSecretRequest'
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '201':
+          $ref: '#/components/responses/ProjectSecretVersion'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+    get:
+      operationId: listProjectSecrets
+      description: 返回项目凭据的名称与最新版本元数据，项目成员可以读取。
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 项目凭据元数据
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProjectSecret'
+        '401':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/secrets/{name}:
+    parameters:
+      - name: projectID
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: '^[A-Za-z_][A-Za-z0-9_]{0,127}$'
+    get:
+      operationId: listProjectSecretVersions
+      description: 返回指定项目凭据的版本元数据，不含明文。
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 凭据版本元数据，按版本号降序返回
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProjectSecretVersion'
+        '401':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/secrets/{name}/versions/{version}/value:
+    parameters:
+      - name: projectID
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: '^[A-Za-z_][A-Za-z0-9_]{0,127}$'
+      - name: version
+        in: path
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+    get:
+      operationId: getProjectSecretValue
+      description: 返回指定凭据版本的明文，仅项目所有者可以调用。
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 凭据版本明文与元数据
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectSecretValue'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
 components:
+  parameters:
+    SiteProjectID:
+      name: projectID
+      in: path
+      required: true
+      schema:
+        type: string
+    SiteName:
+      name: siteName
+      in: path
+      required: true
+      schema:
+        type: string
+        maxLength: 63
+        pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
   securitySchemes:
     SessionCookie:
       type: apiKey
@@ -378,6 +581,7 @@ components:
           description: 实例数。
     ProjectCapacity:
       type: object
+      description: 项目配额与活动预留快照。used 可能超过 limit；remaining 是按资源钳制后的额度内余量，不表示超用标记。
       required: [project_id, limit, used, remaining]
       properties:
         project_id:
@@ -402,6 +606,71 @@ components:
           type: string
         role:
           $ref: '#/components/schemas/ProjectRole'
+    ProjectSecret:
+      type: object
+      required: [id, name, latest_version, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        latest_version:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ProjectSecretVersion:
+      type: object
+      required: [id, secret_id, name, version, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        secret_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        version:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+    ProjectSecretValue:
+      type: object
+      required: [id, secret_id, name, version, created_at, value]
+      properties:
+        id:
+          type: string
+          format: uuid
+        secret_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        version:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        value:
+          type: string
+    CreateProjectSecretRequest:
+      type: object
+      additionalProperties: false
+      required: [name, value]
+      properties:
+        name:
+          type: string
+          pattern: '^[A-Za-z_][A-Za-z0-9_]{0,127}$'
+        value:
+          type: string
+          minLength: 1
+          description: UTF-8 编码后包含 1 至 65536 字节。
     UpsertProjectMemberRequest:
       type: object
       additionalProperties: false
@@ -424,6 +693,26 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Project"
+    StaticSiteVersion:
+      type: object
+      required: [id, site_id, artifact_digest, status, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        site_id:
+          type: string
+          format: uuid
+        artifact_digest:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+        status:
+          type: string
+          enum: [ready]
+          description: 站点文件已通过校验并准备就绪，等待激活。
+        created_at:
+          type: string
+          format: date-time
     Operation:
       type: object
       required: [id, action, phase, outcome, created_at, updated_at]
@@ -450,6 +739,12 @@ components:
         message:
           type: string
   responses:
+    StaticSiteVersion:
+      description: 不可变静态站点版本
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/StaticSiteVersion'
     Project:
       description: 项目身份
       content:
@@ -462,6 +757,12 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ProjectMember'
+    ProjectSecretVersion:
+      description: 凭据版本元数据，不含明文
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ProjectSecretVersion'
     User:
       description: 当前账号
       content:

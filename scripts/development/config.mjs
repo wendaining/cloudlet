@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { readFile, writeFile, mkdir, realpath } from 'node:fs/promises';
+import { appendFile, readFile, writeFile, mkdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parse } from 'dotenv';
@@ -15,6 +15,7 @@ const schema = z.object({
   CLOUDLET_WEB_PORT: port,
   CLOUDLET_DEBUG_PORT: port,
   CLOUDLET_DATABASE_URL: z.url(),
+  CLOUDLET_SECRET_KEY: z.string().regex(/^[0-9a-f]{64}$/u),
   CLOUDLET_DEV_EMAIL: z.email(),
   CLOUDLET_DEV_PASSWORD: z.string().min(16),
   DOCKER_HOST: z.string().optional(),
@@ -26,12 +27,25 @@ export async function initialize(file = process.env.ENV_FILE ?? '.env.local') {
   const template = await readFile(path.join(root, '.env.example'), 'utf8');
   const source = template
     .replaceAll('GENERATED_DATABASE_PASSWORD', randomBytes(24).toString('hex'))
+    .replaceAll('GENERATED_SECRET_KEY', randomBytes(32).toString('hex'))
     .replaceAll('GENERATED_ACCOUNT_PASSWORD', randomBytes(24).toString('hex'));
   try {
     await writeFile(target, source, { flag: 'wx', mode: 0o600 });
     console.log(`已创建开发配置：${target}`);
   } catch (error) {
     if (error.code !== 'EEXIST') throw error;
+    const existing = await readFile(target, 'utf8');
+    if (!/^CLOUDLET_SECRET_KEY=/mu.test(existing)) {
+      const separator = existing.endsWith('\n') ? '' : '\n';
+      await appendFile(target, `${separator}CLOUDLET_SECRET_KEY=${randomBytes(32).toString('hex')}\n`);
+      console.log(`已补充平台密钥：${target}`);
+    } else if (/^CLOUDLET_SECRET_KEY=GENERATED_SECRET_KEY$/mu.test(existing)) {
+      await writeFile(target, existing.replace(
+        /^CLOUDLET_SECRET_KEY=GENERATED_SECRET_KEY$/mu,
+        `CLOUDLET_SECRET_KEY=${randomBytes(32).toString('hex')}`,
+      ));
+      console.log(`已生成平台密钥：${target}`);
+    }
     console.log(`保留已有开发配置：${target}`);
   }
 }
@@ -47,7 +61,7 @@ export async function loadConfig(file = process.env.ENV_FILE ?? '.env.local') {
   }
   const env = result.data;
   if (env.DOCKER_HOST && env.DOCKER_CONTEXT) throw new Error('DOCKER_HOST 与 DOCKER_CONTEXT 同时设置');
-  if (env.CLOUDLET_DATABASE_URL.includes('GENERATED_') || env.CLOUDLET_DEV_PASSWORD.includes('GENERATED_')) {
+  if (env.CLOUDLET_DATABASE_URL.includes('GENERATED_') || env.CLOUDLET_SECRET_KEY.includes('GENERATED_') || env.CLOUDLET_DEV_PASSWORD.includes('GENERATED_')) {
     throw new Error('请在本地配置中设置实际凭据，或者使用 make setup 生成配置');
   }
   const database = new URL(env.CLOUDLET_DATABASE_URL);
@@ -98,6 +112,7 @@ export async function writeServerConfig(config) {
     environment: 'development',
     instance: config.instance,
     public_origin: config.web,
+    site_storage_directory: path.join(config.directory, 'site-storage'),
     api_address: `127.0.0.1:${config.env.CLOUDLET_API_PORT}`,
     gateway_address: `127.0.0.1:${config.env.CLOUDLET_GATEWAY_PORT}`,
     routes: [{ host: 'demo.localhost', target: config.api }],

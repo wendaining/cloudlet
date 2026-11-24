@@ -24,7 +24,9 @@ workerd、用户容器和浏览器由 Docker Engine 持有，与 Go 管理进程
 
 调用方将返回的 `Config` 与 `Module` 分别放到容器内的 `ConfigPath` 和 `ModulePath`，使用 `RuntimeImage` 和 `ServeArgs()` 启动。配置提供一个 HTTP 监听，端口为 `HTTPPort`。`ghcr.io/ryanhecht/workerd` 镜像封装 Cloudflare 发布的 workerd 二进制文件，使用版本和多架构镜像摘要固定来源。实际命令及验证结果见 [workerd 集成验证](testing.md#workerd-集成验证)。
 
-部署清单固定运行时版本及摘要、ES Module 入口、模块内容、compatibility date、flags 和绑定。TypeScript 经 tsc 检查并通过 esbuild 生成部署包，运行时执行已验证产物。
+部署清单固定运行时版本及摘要、ES Module 入口、模块内容、compatibility date、flags 和绑定。TypeScript 经 tsc 检查并通过 esbuild 生成部署包，运行时执行已验证产物。构建命令位于 `runtimes/workers/build.mjs`，默认入口为该目录下的 `src/index.ts`，默认输出为 `dist/index.mjs`，TypeScript 与 esbuild 使用锁定版本。入口必须属于所选 TypeScript 配置的实际程序，验证成功后才打包。默认路径和打包目录固定在脚本目录，相同入口的产物字节不受调用目录影响。
+
+`workers.Preflight` 使用固定 workerd 的 `test` 命令在独立容器中载入并初始化模块，返回 `load`、`initialize` 或 `ready` 阶段。预检容器不发布端口，不加入网络，结束后删除。模块解析和依赖解析失败归入 `load`，顶层代码执行失败归入 `initialize`。阶段标记在完整日志流中识别，诊断仅保留末尾 16 KiB，成功退出返回 `ready`。
 
 项目的运行配置包含各 Worker 的活动版本和 DO 命名空间归属。更改代码产生新的 Deployment，更换进程产生新的 Execution。发布、版本激活和运行时重启分别记录。
 
@@ -76,13 +78,15 @@ Container 保存镜像 digest、启动参数、端口、资源要求、数据卷
 
 `runtimes/browser` 提供独立容器入口。Chromium 和会话页面启动后，内部 `GET /readyz` 才返回就绪。每个容器配置独立的 `CLOUDLET_BROWSER_TOKEN`，内部命令以 `Authorization: Bearer <token>` 认证，凭据无效返回 401。`POST /navigate` 读取 JSON 中的 `url`，返回跳转后的 `url` 和 `title`。导航仅接受 HTTP(S)，打开页面和读取标题共用同一个截止时间。
 
-`POST /screenshot` 截取最近一次成功导航后仍打开的 HTTP(S) 页面。成功时返回 1280 × 720 的视口截图，响应类型为 `image/png`，大小上限为 2 MiB。没有可截图页面返回 409，超限返回 422。请求体可以为空，也可像导航命令一样在 JSON 中传入 `timeout_ms`。两种命令均默认十秒，最长三十秒，并且在同一会话中串行执行。超时后返回 504 并关闭会话，避免复用可能无响应的 Chromium。执行接口仅供控制器的内部网络使用。
+`POST /screenshot` 截取最近一次成功导航后仍打开的 HTTP(S) 页面。成功时返回当前视口的设备像素 PNG，默认 1280 × 720，大小上限为 2 MiB。没有可截图页面返回 409，超限返回 422。请求体可以为空，也可像导航命令一样在 JSON 中传入 `timeout_ms`。两种命令均默认十秒，最长三十秒。命令在同一会话中串行执行。超时后返回 504 并关闭会话，避免复用可能无响应的 Chromium。执行接口仅供控制器的内部网络使用。
+
+启动时可设置 `CLOUDLET_BROWSER_VIEWPORT_WIDTH`（320–1920 CSS 像素）、`CLOUDLET_BROWSER_VIEWPORT_HEIGHT`（240–1080 CSS 像素）和 `CLOUDLET_BROWSER_DEVICE_SCALE_FACTOR`（1–2）。默认值为 1280、720 和 1。宽高分别乘像素比向上取整后的总面积不得超过 4,194,304 设备像素。无效配置阻止启动。经过同一会话凭据认证的 `GET /viewport` 从 Playwright 的视口状态和会话配置返回 `width`、`height` 和 `device_scale_factor`。
 
 会话镜像以 `pwuser` 运行并要求 Chromium sandbox。`runtimes/browser/seccomp.json` 源于 [Playwright 1.65.1 的 Apache-2.0 seccomp 配置](https://github.com/microsoft/playwright/blob/v1.65.1/utils/docker/seccomp_profile.json)，增加了对 Chromium 在嵌套用户命名空间内调用 `chroot` 的支持，仍由内核校验权限。容器使用独立共享内存、移除 Linux capabilities，并启用 `no-new-privileges`。关闭服务时等待 Chromium 退出。构建与验证命令见 [Browser Run 验证](testing.md#browser-run-验证)。
 
 会话记录包括项目、session_id、Execution、绝对过期时间和最近状态。Go 重启后，只有身份、执行序号与期限均有效的原执行能够重新连接。连接断开与会话关闭分别处理。
 
-浏览器执行服务独立执行会话期限，到期后结束 Chromium 并退出。会话容器启用退出后自动删除，关闭自动重启，由 Docker Engine 完成容器回收。控制器确认原执行结束后，在元数据事务中关闭会话并释放容量。Go 不可用期间容量继续保留，恢复接管时完成状态核对。
+浏览器执行服务通过 `CLOUDLET_BROWSER_DEADLINE` 接收未来的 RFC 3339 UTC 时间。时间以 `Z` 结尾，可带一至九位小数秒（例如 `2030-01-01T00:00:00.123456789Z`），计时精度向下截断至毫秒。在控制器断开后也会在到期时关闭 Chromium 并退出，正在执行的请求会断开。格式无效或期限已过会阻止启动。独立启动时可省略该变量，管理层接入时应传入会话期限。会话容器启用退出后自动删除，关闭自动重启，由 Docker Engine 完成容器回收。控制器确认原执行结束后，在元数据事务中关闭会话并释放容量。Go 不可用期间容量继续保留，恢复接管时完成状态核对。
 
 浏览器进程意外退出后关闭原会话。完成整个本地环境停止后，后续启动通过独立命令创建新会话。
 

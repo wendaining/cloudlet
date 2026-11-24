@@ -71,10 +71,15 @@ make dev 检查配置与端口，使用 compose.yaml 和 compose.dev.yaml 启动
 | CLOUDLET_API_PORT、CLOUDLET_GATEWAY_PORT、CLOUDLET_WEB_PORT | 本机服务端口，默认 8080、8081、5173 |
 | CLOUDLET_DEBUG_PORT | Delve 监听端口，默认 2345 |
 | CLOUDLET_DATABASE_URL | PostgreSQL 地址，包含数据库账号、密码与端口 |
+| CLOUDLET_SECRET_KEY | 64 个十六进制字符的平台密钥，用于加密项目凭据版本 |
 | CLOUDLET_DEV_EMAIL、CLOUDLET_DEV_PASSWORD | 首次准备开发账号时使用的凭据 |
 | DOCKER_HOST、DOCKER_CONTEXT | 可选 Docker 连接配置，两项互斥 |
 
+数据库保存平台密钥的 SHA-256 标识。已有凭据数据的环境必须继续使用对应密钥，密钥不匹配时服务终止启动。
+
 未指定 Docker 连接时使用当前 Docker context。本地开发支持 unix:// 连接，Go SDK 和 Testcontainers 使用同一引擎。数据库镜像版本与 digest 锁定在 configs/images.json。数据库端口和应用监听端口均绑定回环地址。
+
+配置管理数据库时，服务 JSON 需要设置 `site_storage_directory` 为平台独占的可写绝对路径。本地开发入口将其设为 `.local/实例名称/site-storage`。服务器部署需要为该路径提供持久化存储，并与数据库一起保留。目录下的 `archives` 保存原始 ZIP，`versions` 保存已解包文件。
 
 创建另一个实例时执行 make setup ENV_FILE=.env.feature.local，编辑该文件中的实例名称、数据库端口和四个服务端口，再运行：
 
