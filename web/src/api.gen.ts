@@ -272,6 +272,45 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{projectID}/browser-sessions/{sessionID}/screenshots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["captureBrowserScreenshot"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/browser-sessions/{sessionID}/screenshots/{screenshotID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+                screenshotID: string;
+            };
+            cookie?: never;
+        };
+        get: operations["downloadBrowserScreenshot"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{projectID}/sites/{siteName}/versions": {
         parameters: {
             query?: never;
@@ -541,6 +580,18 @@ export interface components {
              * @description 已从会话历史移除的旧记录数
              */
             dropped: number;
+        };
+        BrowserScreenshot: {
+            /** Format: uuid */
+            id: string;
+            /** @description 原始 PNG 的 SHA-256 摘要 */
+            artifact_digest: string;
+            /** Format: int64 */
+            size_bytes: number;
+            /** @description 需要项目会话凭据的相对下载地址 */
+            download_url: string;
+            /** Format: date-time */
+            created_at: string;
         };
         /** @enum {string} */
         BrowserSessionStatus: "starting" | "ready" | "failed" | "closed";
@@ -1132,6 +1183,56 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BrowserConsole"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    captureBrowserScreenshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 截图已保存 */
+            201: {
+                headers: {
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrowserScreenshot"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    downloadBrowserScreenshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+                screenshotID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 原始 PNG 截图 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": string;
                 };
             };
             default: components["responses"]["Error"];
