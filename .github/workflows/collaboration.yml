@@ -3,17 +3,27 @@ name: Issue coordination
 on:
   issues:
     types: [opened, reopened, labeled, assigned, unassigned, closed]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Issue number to inspect for readiness
+        required: true
+        type: number
 
 permissions:
   contents: read
-  issues: write
+  issues: read
 
 concurrency:
-  group: issue-${{ github.event.issue.number }}
+  group: issue-${{ github.event_name }}-${{ github.event.issue.number || inputs.issue_number }}
   cancel-in-progress: false
 
 jobs:
   coordinate:
+    if: github.event_name == 'issues'
+    permissions:
+      contents: read
+      issues: write
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -29,3 +39,21 @@ jobs:
       - run: npm run issue:coordinate
         env:
           GH_TOKEN: ${{ github.token }}
+  inspect:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: node scripts/github.mjs inspect-issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}

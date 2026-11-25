@@ -14,6 +14,8 @@ make agent-brief ISSUE=1
 
 也可以在 Actions 中手动运行 Agent handoff，填写处于 ready 或 in-progress 状态的 Issue 编号。生成的资料保留七天，可以从该次运行的产物下载。
 
+任务资料可在领取前生成。开始开发前按 Skill 确认范围、依赖与负责人并完成领取。接手续做时确认已有负责人、关联 PR 和当前交接情况。
+
 ## 执行任务
 
 在本地 Agent 会话中提供生成的任务资料。Agent 阅读 AGENTS.md 和相关文档，检查当前工作区，实施任务并执行验证。负责人检查更改范围与结果。
