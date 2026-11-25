@@ -40,10 +40,15 @@ func TestBrowserSessionCleanupHTTP(t *testing.T) {
 	defer docker.Close()
 	const instance = "browser-cleanup-integration"
 	const lifetime = 15 * time.Second
-	service, err := browser.NewService(ctx, store, docker, instance, imageID, filepath.Join(runtimeDir, "seccomp.json"), make([]byte, 32))
+	service, err := browser.NewService(ctx, store, docker, instance, imageID, filepath.Join(runtimeDir, "seccomp.json"), t.TempDir(), make([]byte, 32))
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() {
+		if err := service.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
 	limits, err := capacity.NewStore(store.DB)
 	if err != nil {
 		t.Fatal(err)

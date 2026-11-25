@@ -91,13 +91,7 @@ func (s *Service) navigate(ctx context.Context, endpoint string, id uuid.UUID, v
 	if err != nil {
 		return Navigation{}, err
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return Navigation{}, err
-	}
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Authorization", "Bearer "+s.token(id))
-	response, err := s.http.Do(request)
+	response, err := s.postRuntime(ctx, endpoint, id, bytes.NewReader(body))
 	if errors.Is(err, context.DeadlineExceeded) {
 		return Navigation{}, ErrNavigationTimeout
 	}
@@ -132,4 +126,16 @@ func (s *Service) navigate(ctx context.Context, endpoint string, id uuid.UUID, v
 	default:
 		return Navigation{}, fmt.Errorf("%w: runtime HTTP %d", ErrNavigation, response.StatusCode)
 	}
+}
+
+func (s *Service) postRuntime(ctx context.Context, endpoint string, id uuid.UUID, body io.Reader) (*http.Response, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, body)
+	if err != nil {
+		return nil, err
+	}
+	if body != nil {
+		request.Header.Set("Content-Type", "application/json")
+	}
+	request.Header.Set("Authorization", "Bearer "+s.token(id))
+	return s.http.Do(request)
 }
