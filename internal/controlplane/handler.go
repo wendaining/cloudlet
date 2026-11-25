@@ -22,6 +22,7 @@ import (
 	"github.com/wendaining/cloudlet/internal/config"
 	"github.com/wendaining/cloudlet/internal/database"
 	"github.com/wendaining/cloudlet/internal/mcpserver"
+	"github.com/wendaining/cloudlet/internal/routes"
 	"github.com/wendaining/cloudlet/internal/staticdeploy"
 	"github.com/wendaining/cloudlet/internal/version"
 	"github.com/wendaining/cloudlet/internal/workerpublish"
@@ -30,42 +31,43 @@ import (
 )
 
 type handler struct {
-	store    *database.Store
-	sites    *staticdeploy.Service
-	browser  *browser.Service
-	sessions *scs.SessionManager
-	config   config.Config
-	logger   *slog.Logger
-	workers  *workerpublish.Service
+	store      *database.Store
+	sites      *staticdeploy.Service
+	siteRoutes *routes.Publisher
+	browser    *browser.Service
+	sessions   *scs.SessionManager
+	config     config.Config
+	logger     *slog.Logger
+	workers    *workerpublish.Service
 }
 
 func NewHandler(store *database.Store, cfg config.Config, logger *slog.Logger) (http.Handler, func()) {
-	return newHandler(store, nil, nil, cfg, logger, nil, nil)
+	return newHandler(store, nil, nil, cfg, logger, nil, nil, nil)
 }
 
 // NewHandlerWithMCP mounts the read-only MCP endpoint on the management API.
 func NewHandlerWithMCP(store *database.Store, sites *staticdeploy.Service, browserService *browser.Service, cfg config.Config, logger *slog.Logger, apiEndpoint string) (http.Handler, func(), error) {
-	return NewHandlerWithMCPAndWorkers(store, sites, browserService, cfg, logger, apiEndpoint, nil)
+	return NewHandlerWithMCPAndWorkers(store, sites, browserService, cfg, logger, apiEndpoint, nil, nil)
 }
 
-// NewHandlerWithMCPAndWorkers mounts the management API with Worker publication.
-func NewHandlerWithMCPAndWorkers(store *database.Store, sites *staticdeploy.Service, browserService *browser.Service, cfg config.Config, logger *slog.Logger, apiEndpoint string, publication *workerpublish.Service) (http.Handler, func(), error) {
+// NewHandlerWithMCPAndWorkers mounts the management API with Worker and site publication.
+func NewHandlerWithMCPAndWorkers(store *database.Store, sites *staticdeploy.Service, browserService *browser.Service, cfg config.Config, logger *slog.Logger, apiEndpoint string, publication *workerpublish.Service, siteRoutes *routes.Publisher) (http.Handler, func(), error) {
 	mcpHandler, err := mcpserver.NewHandler(apiEndpoint)
 	if err != nil {
 		return nil, nil, err
 	}
-	handler, cleanup := newHandler(store, sites, browserService, cfg, logger, mcpHandler, publication)
+	handler, cleanup := newHandler(store, sites, browserService, cfg, logger, mcpHandler, publication, siteRoutes)
 	return handler, cleanup, nil
 }
 
 // NewHandlerWithWorkers mounts the shared Worker publication API. The caller
 // owns publication and must close it after the HTTP handler stops.
 func NewHandlerWithWorkers(store *database.Store, cfg config.Config, logger *slog.Logger, publication *workerpublish.Service) (http.Handler, func()) {
-	return newHandler(store, nil, nil, cfg, logger, nil, publication)
+	return newHandler(store, nil, nil, cfg, logger, nil, publication, nil)
 }
 
-func newHandler(store *database.Store, sites *staticdeploy.Service, browserService *browser.Service, cfg config.Config, logger *slog.Logger, mcpHandler http.Handler, publication *workerpublish.Service) (http.Handler, func()) {
-	h := &handler{store: store, sites: sites, browser: browserService, config: cfg, logger: logger, workers: publication}
+func newHandler(store *database.Store, sites *staticdeploy.Service, browserService *browser.Service, cfg config.Config, logger *slog.Logger, mcpHandler http.Handler, publication *workerpublish.Service, siteRoutes *routes.Publisher) (http.Handler, func()) {
+	h := &handler{store: store, sites: sites, siteRoutes: siteRoutes, browser: browserService, config: cfg, logger: logger, workers: publication}
 	router := gin.New()
 	router.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 	router.GET("/readyz", func(c *gin.Context) {

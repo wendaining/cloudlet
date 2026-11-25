@@ -154,9 +154,8 @@ func ValidateRoutes(routes []Route) error {
 	type routeKey struct{ host, prefix string }
 	seen := make(map[routeKey]bool)
 	for _, route := range routes {
-		host, err := url.Parse("http://" + route.Host)
-		if err != nil || route.Host == "" || host.Host != route.Host || host.Hostname() != route.Host || host.User != nil || host.Path != "" || host.RawQuery != "" || host.Fragment != "" {
-			return fmt.Errorf("route host must be a hostname without port: %q", route.Host)
+		if err := ValidateRouteHost(route.Host); err != nil {
+			return err
 		}
 		prefix := cmp.Or(route.PathPrefix, "/")
 		if !strings.HasPrefix(prefix, "/") || path.Clean(prefix) != prefix || strings.ContainsAny(prefix, "%?#\\") || strings.ContainsFunc(prefix, unicode.IsControl) {
@@ -180,6 +179,15 @@ func ValidateRoutes(routes []Route) error {
 				return fmt.Errorf("invalid HTTP route target port in %q: port must be between 1 and 65535", route.Target)
 			}
 		}
+	}
+	return nil
+}
+
+// ValidateRouteHost checks the hostname shared by proxy and in-process routes.
+func ValidateRouteHost(name string) error {
+	host, err := url.Parse("http://" + name)
+	if err != nil || name == "" || host.Host != name || host.Hostname() != name || host.User != nil || host.Path != "" || host.RawQuery != "" || host.Fragment != "" {
+		return fmt.Errorf("route host must be a hostname without port: %q", name)
 	}
 	return nil
 }

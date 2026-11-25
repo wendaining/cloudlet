@@ -2,8 +2,10 @@ package routes
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
+	"net/http"
 	"regexp"
 	"sync"
 
@@ -12,6 +14,8 @@ import (
 	"github.com/wendaining/cloudlet/internal/database"
 	"github.com/wendaining/cloudlet/internal/gateway"
 )
+
+var ErrStaticSiteNotReady = errors.New("static site version files are not ready")
 
 var resourcePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
 
@@ -41,16 +45,63 @@ func (e *SyncError) Unwrap() error {
 type Publisher struct {
 	store          *database.Store
 	gateway        *gateway.Handler
+	openSite       func(database.StaticSiteVersion) (http.Handler, error)
 	mu             sync.Mutex
 	applied        bool
 	appliedVersion int64
 }
 
 func NewPublisher(store *database.Store, handler *gateway.Handler) (*Publisher, error) {
+	return NewPublisherWithSites(store, handler, nil)
+}
+
+// NewPublisherWithSites configures resolution of persisted static site routes.
+func NewPublisherWithSites(store *database.Store, handler *gateway.Handler, openSite func(database.StaticSiteVersion) (http.Handler, error)) (*Publisher, error) {
 	if store == nil || handler == nil {
 		return nil, fmt.Errorf("create route publisher: database store and Gateway handler are required: %w", fs.ErrInvalid)
 	}
-	return &Publisher{store: store, gateway: handler}, nil
+	return &Publisher{store: store, gateway: handler, openSite: openSite}, nil
+}
+
+// ReservedHost reports whether startup routes own the host.
+func (p *Publisher) ReservedHost(host string) bool {
+	return p.gateway.ReservedHost(host)
+}
+
+// ActivateStaticSite publishes the first route for a resolved site version.
+func (p *Publisher) ActivateStaticSite(ctx context.Context, projectID string, version database.StaticSiteVersion, hostname string) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.openSite == nil {
+		return fmt.Errorf("activate static site version %s: site handler is unavailable", version.ID)
+	}
+	if err := config.ValidateRouteHost(hostname); err != nil {
+		return fmt.Errorf("activate static site: %w: %w", fs.ErrInvalid, err)
+	}
+	if len(hostname) > 253 || gateway.CanonicalHost(hostname) != hostname {
+		return fmt.Errorf("activate static site: invalid canonical host %q: %w", hostname, fs.ErrInvalid)
+	}
+	if p.ReservedHost(hostname) {
+		return fmt.Errorf("activate static site host %q: reserved by startup configuration: %w", hostname, database.ErrRouteConflict)
+	}
+	handler, err := p.openSite(version)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrInvalid) {
+			err = fmt.Errorf("%w: %w", ErrStaticSiteNotReady, err)
+		}
+		return fmt.Errorf("verify files for static site version %s: %w", version.ID, err)
+	}
+	if handler == nil {
+		return fmt.Errorf("verify files for static site version %s: missing handler", version.ID)
+	}
+	snapshot, err := p.store.ActivateStaticSiteVersion(ctx, projectID, version.SiteID, version.ID, hostname)
+	if err != nil {
+		return err
+	}
+	if _, err := p.syncLocked(ctx, snapshot); err != nil {
+		return &SyncError{Version: snapshot, Err: err}
+	}
+	return nil
 }
 
 // PublishProject replaces one project's complete route set. A successful call
@@ -102,15 +153,27 @@ func (p *Publisher) syncLocked(ctx context.Context, minimumVersion int64) (int64
 	if p.applied && version == p.appliedVersion {
 		return version, nil
 	}
-	routes := make([]config.Route, 0, len(records))
+	proxies := make([]config.Route, 0, len(records))
+	var sites []gateway.SiteRoute
 	for _, record := range records {
-		routes = append(routes, config.Route{
+		if record.StaticSiteVersionID != nil {
+			if p.openSite == nil {
+				return version, fmt.Errorf("restore static site route %q: site handler is unavailable", record.Host)
+			}
+			handler, err := p.openSite(database.StaticSiteVersion{ID: *record.StaticSiteVersionID, Directory: record.StaticSiteDirectory})
+			if err != nil {
+				return version, fmt.Errorf("restore static site version %s for host %q: %w", *record.StaticSiteVersionID, record.Host, err)
+			}
+			sites = append(sites, gateway.SiteRoute{Host: record.Host, Handler: handler})
+			continue
+		}
+		proxies = append(proxies, config.Route{
 			Host:       record.Host,
 			PathPrefix: record.PathPrefix,
 			Target:     record.Target,
 		})
 	}
-	if err := p.gateway.ReplaceRoutes(routes); err != nil {
+	if err := p.gateway.ReplaceRoutesWithSites(proxies, sites); err != nil {
 		return version, fmt.Errorf("apply route snapshot version %d: %w", version, err)
 	}
 	p.applied = true
