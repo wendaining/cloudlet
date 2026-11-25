@@ -362,6 +362,23 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BrowserNavigation'
+  /api/v1/projects/{projectID}/browser-sessions/{sessionID}/console:
+    parameters:
+      - $ref: '#/components/parameters/BrowserProjectID'
+      - $ref: '#/components/parameters/BrowserSessionID'
+    get:
+      operationId: getBrowserConsole
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 会话的最近控制台消息和页面错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserConsole'
   /api/v1/projects/{projectID}/sites/{siteName}/versions:
     parameters:
       - $ref: '#/components/parameters/SiteProjectID'
@@ -784,6 +801,34 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Project"
+    BrowserConsoleEntry:
+      type: object
+      required: [kind, level, message, truncated]
+      properties:
+        kind:
+          type: string
+          description: console 表示控制台消息，page_error 表示未捕获的页面错误
+        level:
+          type: string
+        message:
+          type: string
+          maxLength: 512
+        truncated:
+          type: boolean
+    BrowserConsole:
+      type: object
+      required: [entries, dropped]
+      properties:
+        entries:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/BrowserConsoleEntry'
+        dropped:
+          type: integer
+          format: int64
+          minimum: 0
+          description: 已从会话历史移除的旧记录数
     BrowserSessionStatus:
       type: string
       enum: [starting, ready, failed, closed]

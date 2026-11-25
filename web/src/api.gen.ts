@@ -253,6 +253,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{projectID}/browser-sessions/{sessionID}/console": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        get: operations["getBrowserConsole"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{projectID}/sites/{siteName}/versions": {
         parameters: {
             query?: never;
@@ -467,6 +486,21 @@ export interface components {
         Session: {
             user: components["schemas"]["User"];
             projects: components["schemas"]["Project"][];
+        };
+        BrowserConsoleEntry: {
+            /** @description console 表示控制台消息，page_error 表示未捕获的页面错误 */
+            kind: string;
+            level: string;
+            message: string;
+            truncated: boolean;
+        };
+        BrowserConsole: {
+            entries: components["schemas"]["BrowserConsoleEntry"][];
+            /**
+             * Format: int64
+             * @description 已从会话历史移除的旧记录数
+             */
+            dropped: number;
         };
         /** @enum {string} */
         BrowserSessionStatus: "starting" | "ready" | "failed" | "closed";
@@ -990,6 +1024,30 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BrowserNavigation"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getBrowserConsole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 会话的最近控制台消息和页面错误 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrowserConsole"];
                 };
             };
             default: components["responses"]["Error"];
