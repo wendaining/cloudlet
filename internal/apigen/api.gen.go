@@ -162,6 +162,9 @@ type DeployWorkerRequest struct {
 	// CompatibilityDate 固定 workerd 支持的兼容日期。
 	CompatibilityDate openapi_types.Date `json:"compatibility_date"`
 
+	// Environment 普通文本绑定。名称最多 128 个 ASCII 字符，值可为空，最多 4096 个 UTF-8 字节。所有值合计最多 65536 个字节。
+	Environment *map[string]string `json:"environment,omitempty"`
+
 	// Hostname 无端口的公开域名。
 	Hostname string `json:"hostname"`
 

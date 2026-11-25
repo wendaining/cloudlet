@@ -33,6 +33,7 @@ type RuntimeConfig struct {
 	Module            []byte
 	Entry             string
 	CompatibilityDate string
+	Environment       []EnvironmentBinding
 }
 
 // ServeArgs returns the arguments for the pinned image's entrypoint.
@@ -81,15 +82,24 @@ func prepare(bundleDir, entry, compatibilityDate string, namespaces []durableobj
 	if err != nil {
 		return RuntimeConfig{}, fmt.Errorf("read entry %q in bundle %q: %w", entry, bundleDir, err)
 	}
-	return prepareModule(entry, module, compatibilityDate, namespaces)
+	return prepareModule(entry, module, compatibilityDate, namespaces, nil)
 }
 
 // PrepareModule prepares a bundled ES module already read from an upload.
 func PrepareModule(module []byte, compatibilityDate string) (RuntimeConfig, error) {
-	return prepareModule("index.mjs", module, compatibilityDate, nil)
+	return prepareModule("index.mjs", module, compatibilityDate, nil, nil)
 }
 
-func prepareModule(entry string, module []byte, compatibilityDate string, namespaces []durableobjects.Namespace) (RuntimeConfig, error) {
+// PrepareModuleWithEnvironment snapshots text bindings for a bundled upload.
+func PrepareModuleWithEnvironment(module []byte, compatibilityDate string, values map[string]string) (RuntimeConfig, error) {
+	bindings, err := prepareEnvironment(values)
+	if err != nil {
+		return RuntimeConfig{}, err
+	}
+	return prepareModule("index.mjs", module, compatibilityDate, nil, bindings)
+}
+
+func prepareModule(entry string, module []byte, compatibilityDate string, namespaces []durableobjects.Namespace, environment []EnvironmentBinding) (RuntimeConfig, error) {
 	if err := validateCompatibilityDate(compatibilityDate, time.Now()); err != nil {
 		return RuntimeConfig{}, err
 	}
@@ -98,10 +108,11 @@ func prepareModule(entry string, module []byte, compatibilityDate string, namesp
 	}
 
 	return RuntimeConfig{
-		Config:            renderConfig(entry, compatibilityDate, namespaces),
+		Config:            renderConfig(entry, compatibilityDate, namespaces, environment),
 		Module:            bytes.Clone(module),
 		Entry:             entry,
 		CompatibilityDate: compatibilityDate,
+		Environment:       environment,
 	}, nil
 }
 
@@ -119,22 +130,22 @@ func validateCompatibilityDate(compatibilityDate string, now time.Time) error {
 	return nil
 }
 
-func renderConfig(entry, compatibilityDate string, namespaces []durableobjects.Namespace) []byte {
-	var storageService, workerFields []byte
+func renderConfig(entry, compatibilityDate string, namespaces []durableobjects.Namespace, environment []EnvironmentBinding) []byte {
+	var storageService, workerFields, bindingEntries []byte
 	if len(namespaces) > 0 {
 		storageService = fmt.Appendf(nil, `, (name = "durable-storage", disk = (path = "%s", writable = true))`, durableobjects.StoragePath)
 		workerFields = append(workerFields, "  durableObjectStorage = (localDisk = \"durable-storage\"),\n  durableObjectNamespaces = [\n"...)
 		for _, namespace := range namespaces {
 			workerFields = fmt.Appendf(workerFields, "    (className = \"%s\", uniqueKey = \"%s\", enableSql = true),\n", namespace.ClassName, namespace.ID)
 		}
-		workerFields = append(workerFields, "  ],\n  bindings = [\n"...)
+		workerFields = append(workerFields, "  ],\n"...)
 		for _, namespace := range namespaces {
 			for _, binding := range namespace.Bindings {
-				workerFields = fmt.Appendf(workerFields, "    (name = \"%s\", durableObjectNamespace = \"%s\"),\n", binding, namespace.ClassName)
+				bindingEntries = fmt.Appendf(bindingEntries, "    (name = \"%s\", durableObjectNamespace = \"%s\"),\n", binding, namespace.ClassName)
 			}
 		}
-		workerFields = append(workerFields, "  ],\n"...)
 	}
+	workerFields = append(workerFields, renderBindings(appendEnvironmentBindingEntries(bindingEntries, environment))...)
 	return fmt.Appendf(nil, configTemplate, storageService, HTTPPort, entry, path.Base(ModulePath), compatibilityDate, workerFields)
 }
 

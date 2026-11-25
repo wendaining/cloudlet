@@ -78,12 +78,16 @@ func Preflight(ctx context.Context, docker *client.Client, prepared RuntimeConfi
 
 	ctx, cancel := context.WithTimeout(ctx, preflightTimeout)
 	defer cancel()
-	config := preflightConfig(prepared.CompatibilityDate)
-	archive, err := preflightArchive(map[string][]byte{
+	config := preflightConfig(prepared.CompatibilityDate, prepared.Environment)
+	files := map[string][]byte{
 		"config.capnp": config,
 		"wrapper.mjs":  []byte(preflightWrapper),
 		"user.mjs":     prepared.Module,
-	})
+	}
+	for _, binding := range prepared.Environment {
+		files[binding.FilePath()] = []byte(binding.Value)
+	}
+	archive, err := preflightArchive(files)
 	if err != nil {
 		return PreflightResult{}, fmt.Errorf("preflight Worker %q: build container archive: %w", prepared.Entry, err)
 	}
@@ -245,8 +249,8 @@ func (c *preflightLogCapture) diagnostics() string {
 	return string(c.tail)
 }
 
-func preflightConfig(compatibilityDate string) []byte {
-	return fmt.Appendf(nil, preflightConfigTemplate, compatibilityDate)
+func preflightConfig(compatibilityDate string, environment []EnvironmentBinding) []byte {
+	return fmt.Appendf(nil, preflightConfigTemplate, compatibilityDate, renderBindings(appendEnvironmentBindingEntries(nil, environment)))
 }
 
 func preflightArchive(files map[string][]byte) ([]byte, error) {
@@ -309,5 +313,5 @@ const worker :Workerd.Worker = (
     (name = "user.mjs", esModule = embed "user.mjs"),
   ],
   compatibilityDate = "%s",
-);
+%s);
 `

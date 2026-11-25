@@ -103,7 +103,7 @@ func TestWorkerPublicationHTTP(t *testing.T) {
 			}
 		}
 	})
-	configuration := config.WorkerRuntime{Directory: t.TempDir(), HostID: "publication-" + uuid.NewString(), HostBudget: config.ResourceBudget{CPUMillis: 4000, MemoryBytes: 4 << 30, Instances: 4}, ProjectQuota: config.ResourceBudget{CPUMillis: 3000, MemoryBytes: 1 << 30, Instances: 3}}
+	configuration := config.WorkerRuntime{Directory: t.TempDir(), HostID: "publication-" + uuid.NewString(), HostBudget: config.ResourceBudget{CPUMillis: 5000, MemoryBytes: 4 << 30, Instances: 5}, ProjectQuota: config.ResourceBudget{CPUMillis: 3000, MemoryBytes: 1 << 30, Instances: 3}}
 	newFront := func() *gateway.Handler {
 		front, err := gateway.NewHandler(config.Config{APIAddress: "127.0.0.1:0", GatewayAddress: "127.0.0.1:0"}, slog.Default())
 		if err != nil {
@@ -553,6 +553,69 @@ AND d.state = 'pending' AND o.phase = 'preparing' AND e.container_id <> ''`, pro
 	if usage.ProjectUsed.CPUMillis != 3000 || usage.ProjectUsed.Instances != 3 {
 		t.Fatalf("failed publication leaked capacity: %+v", usage)
 	}
+	t.Run("snapshot Worker text bindings", func(t *testing.T) {
+		const original = "你好, \"Worker\"\value\n下一行\u2028"
+		input := workerpublish.Request{
+			Module: `export default { fetch(request, environment) {
+				return Response.json({message: environment.MESSAGE, empty: environment.EMPTY});
+			} };`,
+			CompatibilityDate: valid.CompatibilityDate,
+			Hostname:          "text-a.localhost",
+			Environment:       map[string]string{"MESSAGE": original, "EMPTY": ""},
+		}
+		invalid := input
+		invalid.Environment = map[string]string{"invalid/name": "x"}
+		path := deployPath(otherProject.ID, "environment-a")
+		request(outsider, http.MethodPost, path, "invalid-name", invalid, http.StatusBadRequest)
+		first := decode(request(outsider, http.MethodPost, path, "text-a", input, http.StatusCreated))
+		read := func(host, message string) {
+			t.Helper()
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, public.URL, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Host = host
+			response, err := outsider.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			var result map[string]string
+			err = json.NewDecoder(response.Body).Decode(&result)
+			if err != nil || response.StatusCode != http.StatusOK || len(result) != 2 || result["message"] != message || result["empty"] != "" {
+				t.Fatalf("text bindings at %s: HTTP %d %+v %v", host, response.StatusCode, result, err)
+			}
+		}
+		read(first.Hostname, original)
+		input.Environment["MESSAGE"] = "updated"
+		request(outsider, http.MethodPost, path, "text-a", input, http.StatusConflict)
+		input.Hostname = "text-b.localhost"
+		second := decode(request(outsider, http.MethodPost, deployPath(otherProject.ID, "environment-b"), "text-b", input, http.StatusCreated))
+		if first.ArtifactDigest != second.ArtifactDigest || first.ConfigDigest == second.ConfigDigest {
+			t.Fatalf("unchanged module and independent configuration expected: %+v / %+v", first, second)
+		}
+		read(second.Hostname, "updated")
+		read(first.Hostname, original)
+		firstStored := decode(request(outsider, http.MethodGet, metadataPath(otherProject.ID, first.Id), "", nil, http.StatusOK))
+		if firstStored.ConfigDigest != first.ConfigDigest {
+			t.Fatalf("initial version configuration changed: %+v", firstStored)
+		}
+		for _, version := range []struct {
+			digest string
+			value  string
+		}{{first.ConfigDigest, original}, {second.ConfigDigest, "updated"}} {
+			digest := fmt.Sprintf("%x", sha256.Sum256([]byte(version.value)))
+			configBytes, err := os.ReadFile(filepath.Join(configuration.Directory, version.digest))
+			if err != nil || !bytes.Contains(configBytes, []byte("environment/MESSAGE-"+digest+".txt")) {
+				t.Fatalf("deployment manifest did not retain its binding: %s %v", configBytes, err)
+			}
+			storedValue, err := os.ReadFile(filepath.Join(configuration.Directory, digest))
+			if err != nil || string(storedValue) != version.value {
+				t.Fatalf("stored value for %s: %q %v", digest, storedValue, err)
+			}
+		}
+		t.Logf("Workers %s and %s retained their own text snapshots", first.Id, second.Id)
+	})
 	if err := os.Chmod(configuration.Directory, 0o500); err != nil {
 		t.Fatal(err)
 	}
