@@ -319,6 +319,31 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BrowserNavigation'
+  /api/v1/projects/{projectID}/browser-sessions/{sessionID}/text:
+    parameters:
+      - $ref: '#/components/parameters/BrowserProjectID'
+      - $ref: '#/components/parameters/BrowserSessionID'
+    get:
+      operationId: getBrowserPageText
+      security:
+        - SessionCookie: []
+      parameters:
+        - name: selector
+          in: query
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 1024
+          description: 可选 CSS 选择器，唯一限定文本范围
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 页面标题及限定范围的可见文本
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserPageText'
   /api/v1/projects/{projectID}/sites/{siteName}/versions:
     parameters:
       - $ref: '#/components/parameters/SiteProjectID'
@@ -708,6 +733,20 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Project"
+    BrowserPageText:
+      type: object
+      required: [title, title_truncated, text, text_truncated]
+      properties:
+        title:
+          type: string
+          maxLength: 512
+        title_truncated:
+          type: boolean
+        text:
+          type: string
+          maxLength: 4096
+        text_truncated:
+          type: boolean
     BrowserSessionStatus:
       type: string
       enum: [starting, ready, failed, closed]

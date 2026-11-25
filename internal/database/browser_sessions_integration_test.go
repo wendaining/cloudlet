@@ -136,6 +136,33 @@ func TestBrowserSessionHTTP(t *testing.T) {
 		t.Fatalf("unexpected Chromium page: %+v", page)
 	}
 	t.Logf("navigation HTTP 200, title=%q, url=%s; cross-project read and navigation HTTP 404", page.Title, page.Url)
+	readText := func(api *apigen.ClientWithResponses, project string, selector *string, want int) *apigen.BrowserPageText {
+		t.Helper()
+		result, err := api.GetBrowserPageTextWithResponse(ctx, project, session.Id, &apigen.GetBrowserPageTextParams{Selector: selector})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.StatusCode() != want {
+			t.Fatalf("text = %d %s, want %d", result.StatusCode(), result.Body, want)
+		}
+		return result.JSON200
+	}
+	readText(otherAPI, owner.ID, nil, http.StatusNotFound)
+	selector := "#visible"
+	scoped := readText(ownerAPI, owner.ID, &selector, http.StatusOK)
+	if scoped == nil || scoped.Title != "Cloudlet Browser Run" || scoped.Text != "Visible marker" || scoped.TextTruncated {
+		t.Fatalf("incorrect scoped page text: %+v", scoped)
+	}
+	whole := readText(ownerAPI, owner.ID, nil, http.StatusOK)
+	if whole == nil || !strings.HasPrefix(whole.Text, "Visible marker") || strings.Contains(whole.Text, "Hidden marker") ||
+		!whole.TextTruncated || len(whole.Text) != 4096 {
+		t.Fatalf("unexpected visible body or truncation: %+v", whole)
+	}
+	selector = "#hidden"
+	readText(ownerAPI, owner.ID, &selector, http.StatusConflict)
+	selector = "["
+	readText(ownerAPI, owner.ID, &selector, http.StatusBadRequest)
+	t.Log("real Chromium returned the page title, omitted hidden text, bounded the response at 4096 units and rejected another project")
 	second, err := ownerAPI.CreateBrowserSessionWithResponse(ctx, owner.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -183,7 +210,7 @@ func chromiumPage(t *testing.T, ctx context.Context, docker *client.Client) stri
 		ReadHeaderTimeout: time.Second,
 		Handler: http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 			writer.Header().Set("Content-Type", "text/html; charset=utf-8")
-			fmt.Fprint(writer, "<!doctype html><title>Cloudlet Browser Run</title>")
+			fmt.Fprint(writer, "<!doctype html><title>Cloudlet Browser Run</title><p id=visible>Visible marker</p><p id=hidden hidden>Hidden marker</p><p>"+strings.Repeat("x", 5000)+"</p>")
 		}),
 	}
 	go server.Serve(listener)

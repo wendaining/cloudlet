@@ -4,6 +4,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { chromium, errors, type Page } from 'playwright';
 import { readSessionDeadline } from './session-deadline.ts';
 import { readViewport } from './viewport.ts';
+import { readPageText } from './page-text.ts';
 
 const token = process.env.CLOUDLET_BROWSER_TOKEN;
 if (!token || !/^[A-Za-z0-9_-]{32,}$/.test(token)) {
@@ -76,7 +77,7 @@ const browser = await chromium.launch({
 });
 let stopping = false;
 let expiryTimer: ReturnType<typeof setTimeout> | undefined;
-let activeCommand: 'navigation' | 'screenshot' | undefined;
+let activeCommand: 'navigation' | 'screenshot' | 'text' | undefined;
 let hasPage = false;
 const server = createServer({ requestTimeout: 15000, headersTimeout: 5000 }, (request, response) => {
   void handle(request, response).catch(() => {
@@ -153,7 +154,8 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
   }
   const screenshot = request.url === '/screenshot';
   const viewport = request.method === 'GET' && request.url === '/viewport';
-  if (!viewport && (request.method !== 'POST' || (!screenshot && request.url !== '/navigate'))) {
+  const text = request.method === 'GET' && (request.url === '/text' || request.url?.startsWith('/text?'));
+  if (!viewport && !text && (request.method !== 'POST' || (!screenshot && request.url !== '/navigate'))) {
     send(response, 404, { error: 'not_found' });
     return;
   }
@@ -164,7 +166,7 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
     send(response, 401, { error: 'unauthorized' });
     return;
   }
-  const command = viewport ? undefined : await readCommand(request, screenshot);
+  const command = viewport || text ? undefined : await readCommand(request, screenshot);
   if (command?.error) {
     if (command.status === 413) {
       response.setHeader('Connection', 'close');
@@ -175,6 +177,43 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
   }
   if (activeCommand) {
     send(response, 409, { error: `${activeCommand}_in_progress` });
+    return;
+  }
+  if (text) {
+    if (!hasPage || page.isClosed() || !isWebURL(page.url())) {
+      send(response, 409, { error: 'no_page' });
+      return;
+    }
+    const selector = new URL(request.url!, 'http://runtime').searchParams.get('selector');
+    if (selector !== null && (!selector.trim() || selector.length > 1024 || /\p{Cc}/u.test(selector))) {
+      send(response, 400, { error: 'invalid_scope' });
+      return;
+    }
+    activeCommand = 'text';
+    const timer = new AbortController();
+    let expired = false;
+    try {
+      const result = await Promise.race([
+        delay(defaultTimeout, undefined, { signal: timer.signal }),
+        readPageText(page, selector),
+      ]);
+      if (!result) {
+        expired = true;
+        if (response.destroyed) {
+          void shutdown(0);
+        } else {
+          response.once('close', () => void shutdown(0));
+          send(response, 504, { error: 'text_timeout' });
+        }
+      } else if (result.error) {
+        send(response, result.error === 'invalid_scope' ? 400 : 409, result);
+      } else {
+        send(response, 200, result);
+      }
+    } finally {
+      timer.abort();
+      if (!expired) activeCommand = undefined;
+    }
     return;
   }
   if (!command) {
