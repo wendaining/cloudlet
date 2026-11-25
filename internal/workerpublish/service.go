@@ -80,7 +80,6 @@ type Service struct {
 	executions     *executions.Service
 	operations     *operations.Store
 	publisher      *routes.Publisher
-	gateway        *gateway.Handler
 	configuration  config.WorkerRuntime
 	instance       string
 	image          string
@@ -93,8 +92,8 @@ type Service struct {
 
 // NewService verifies every configured dependency before enabling publication.
 // A PostgreSQL session lock allows only one Worker controller for the host.
-func NewService(ctx context.Context, store *database.Store, docker *client.Client, front *gateway.Handler, configuration config.WorkerRuntime, instance string) (service *Service, err error) {
-	if store == nil || docker == nil || front == nil {
+func NewService(ctx context.Context, store *database.Store, docker *client.Client, publisher *routes.Publisher, configuration config.WorkerRuntime, instance string) (service *Service, err error) {
+	if store == nil || docker == nil || publisher == nil {
 		return nil, fmt.Errorf("Worker publication requires database, Docker and Gateway: %w", fs.ErrInvalid)
 	}
 	if err := configuration.Validate(); err != nil {
@@ -121,7 +120,7 @@ func NewService(ctx context.Context, store *database.Store, docker *client.Clien
 	if err != nil {
 		return nil, err
 	}
-	s := &Service{store: store, docker: docker, containers: runtime, artifacts: files, configuration: configuration, instance: instance, image: image.Reference, gateway: front}
+	s := &Service{store: store, docker: docker, containers: runtime, artifacts: files, configuration: configuration, instance: instance, image: image.Reference, publisher: publisher}
 	defer func() {
 		if err != nil {
 			err = errors.Join(err, s.Close())
@@ -136,10 +135,6 @@ func NewService(ctx context.Context, store *database.Store, docker *client.Clien
 		return nil, err
 	}
 	s.executions, err = executions.NewService(s.reservations, runtime, configuration.HostID)
-	if err != nil {
-		return nil, err
-	}
-	s.publisher, err = routes.NewPublisher(store, front)
 	if err != nil {
 		return nil, err
 	}
@@ -238,7 +233,7 @@ func (s *Service) Deploy(ctx context.Context, projectID uuid.UUID, name, key str
 	if err != nil {
 		return result, false, err
 	}
-	if projectID == uuid.Nil || s.gateway.ReservedHost(request.Hostname) {
+	if projectID == uuid.Nil || s.publisher.ReservedHost(request.Hostname) {
 		return result, false, fmt.Errorf("Worker project or hostname is unavailable: %w", fs.ErrInvalid)
 	}
 	s.mu.Lock()

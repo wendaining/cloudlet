@@ -69,8 +69,9 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 	if err != nil {
 		return err
 	}
+	var publisher *routes.Publisher
 	if store != nil {
-		publisher, err := routes.NewPublisher(store, proxy)
+		publisher, err = routes.NewPublisherWithSites(store, proxy, sites.Handler)
 		if err != nil {
 			return err
 		}
@@ -86,7 +87,7 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 		}
 		defer func() { runErr = errors.Join(runErr, docker.Close()) }()
 		startupCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
-		publication, err = workerpublish.NewService(startupCtx, store, docker, proxy, *cfg.Workers, cfg.Instance)
+		publication, err = workerpublish.NewService(startupCtx, store, docker, publisher, *cfg.Workers, cfg.Instance)
 		cancel()
 		if err != nil {
 			return fmt.Errorf("configure Worker publication: %w", err)
@@ -107,7 +108,8 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 	if err != nil {
 		return fmt.Errorf("resolve management API endpoint: %w", err)
 	}
-	management, closeSessions, err := controlplane.NewHandlerWithMCPAndWorkers(store, sites, browserService, cfg, logger, endpoint, publication)
+	cfg.GatewayAddress = gatewayListener.Addr().String()
+	management, closeSessions, err := controlplane.NewHandlerWithMCPAndWorkers(store, sites, browserService, cfg, logger, endpoint, publication, publisher)
 	if err != nil {
 		return fmt.Errorf("configure management API: %w", err)
 	}
