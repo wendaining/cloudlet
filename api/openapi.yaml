@@ -379,6 +379,51 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BrowserConsole'
+  /api/v1/projects/{projectID}/browser-sessions/{sessionID}/screenshots:
+    parameters:
+      - $ref: '#/components/parameters/BrowserProjectID'
+      - $ref: '#/components/parameters/BrowserSessionID'
+    post:
+      operationId: captureBrowserScreenshot
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '201':
+          description: 截图已保存
+          headers:
+            Location:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserScreenshot'
+  /api/v1/projects/{projectID}/browser-sessions/{sessionID}/screenshots/{screenshotID}:
+    parameters:
+      - $ref: '#/components/parameters/BrowserProjectID'
+      - $ref: '#/components/parameters/BrowserSessionID'
+      - name: screenshotID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: downloadBrowserScreenshot
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 原始 PNG 截图
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
   /api/v1/projects/{projectID}/sites/{siteName}/versions:
     parameters:
       - $ref: '#/components/parameters/SiteProjectID'
@@ -443,6 +488,47 @@ paths:
         '401':
           $ref: '#/components/responses/Error'
         '404':
+          $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/publish:
+    parameters:
+      - $ref: '#/components/parameters/SiteProjectID'
+      - $ref: '#/components/parameters/SiteName'
+      - name: versionID
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      operationId: publishStaticSiteVersion
+      description: 项目所有者绑定域名并激活站点的首个就绪版本。重复相同请求返回同一发布结果。
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StaticSitePublicationRequest'
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 已生效的首个站点发布及其 Gateway 地址
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaticSitePublication'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+        '503':
           $ref: '#/components/responses/Error'
   /api/v1/projects/{projectID}/secrets:
     parameters:
@@ -1103,6 +1189,28 @@ components:
           format: int64
           minimum: 0
           description: 已从会话历史移除的旧记录数
+    BrowserScreenshot:
+      type: object
+      required: [id, artifact_digest, size_bytes, download_url, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        artifact_digest:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+          description: 原始 PNG 的 SHA-256 摘要
+        size_bytes:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 2097152
+        download_url:
+          type: string
+          description: 需要项目会话凭据的相对下载地址
+        created_at:
+          type: string
+          format: date-time
     BrowserSessionStatus:
       type: string
       enum: [starting, ready, failed, closed]
@@ -1138,6 +1246,31 @@ components:
           type: string
         title:
           type: string
+    StaticSitePublicationRequest:
+      type: object
+      additionalProperties: false
+      required: [hostname]
+      properties:
+        hostname:
+          type: string
+          description: 不带端口的域名，国际化域名使用 ASCII 形式。
+          minLength: 1
+          maxLength: 254
+    StaticSitePublication:
+      type: object
+      required: [site_id, version_id, hostname, url]
+      properties:
+        site_id:
+          type: string
+          format: uuid
+        version_id:
+          type: string
+          format: uuid
+        hostname:
+          type: string
+        url:
+          type: string
+          format: uri
     StaticSiteVersion:
       type: object
       required: [id, site_id, artifact_digest, status, created_at]

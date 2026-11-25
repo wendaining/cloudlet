@@ -16,14 +16,16 @@ import (
 var ErrRouteConflict = errors.New("route conflict")
 
 type ProjectRoute struct {
-	ID         string
-	ProjectID  string
-	Resource   string
-	Host       string
-	PathPrefix string
-	Target     string
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	ID                  string
+	ProjectID           string
+	Resource            string
+	Host                string
+	PathPrefix          string
+	Target              string
+	StaticSiteVersionID *uuid.UUID
+	StaticSiteDirectory string `gorm:"->"`
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 // ReplaceProjectRoutes atomically replaces one project's complete route set
@@ -88,9 +90,10 @@ func (s *Store) RouteSnapshot(ctx context.Context) (int64, []ProjectRoute, error
 		if err := tx.Raw(`SELECT version FROM route_snapshot WHERE id = 1 FOR SHARE`).Row().Scan(&version); err != nil {
 			return fmt.Errorf("read route snapshot version: %w", err)
 		}
-		if err := tx.Table("project_routes").
-			Select("id, project_id, resource, host, path_prefix, target, created_at, updated_at").
-			Order("host, path_prefix, project_id").
+		if err := tx.Table("project_routes AS routes").
+			Select("routes.*, COALESCE(versions.directory, '') AS static_site_directory").
+			Joins("LEFT JOIN static_site_versions AS versions ON versions.id = routes.static_site_version_id").
+			Order("routes.host, routes.path_prefix, routes.project_id").
 			Find(&routes).Error; err != nil {
 			return fmt.Errorf("read project routes: %w", err)
 		}
