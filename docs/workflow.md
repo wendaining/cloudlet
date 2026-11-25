@@ -73,7 +73,7 @@ gh api repos/wendaining/cloudlet/labels/agent%3Aready --jq .name &&
     --jq '.[] | select(.pull_request == null and all(.labels[]; .name != "agent:ready")) | .html_url'
 ```
 
-1. 逐项核对清单。只将当前开放、标记为 `status:ready` 且缺少旧 `agent:ready` 的 Issue 改为 `status:triage`。用同一次 Issue 编辑增删状态标签，并复读确认状态。若任务已有开放 PR、正在实施或状态已发生变化，由负责人先核对实际情况。旧标签仍在的任务保留当前状态。
+1. 逐项核对清单。只将当前开放、标记为 `status:ready` 且缺少旧 `agent:ready` 的 Issue 改为 `status:triage`。运行 `node scripts/github.mjs issue-status 编号 ready triage`，由命令复读确认结果。若任务已有开放 PR、正在实施或状态已发生变化，由负责人先核对实际情况。旧标签仍在的任务保留当前状态。
 2. 对回退的 Issue 手动运行 Issue coordination，检查报告中的标签和前置。维护者核对范围、验收条件和其他阻塞。完成回退前不恢复自主领取，也不将已回退项重新标记为 ready。
 3. 按清单核对回退结果，确认例外已处理后，由维护者在仓库标签页面删除 `agent:ready`，并确认标签已消失。此后可恢复自主领取。完成复查且符合新规则的任务由维护者设为 `status:ready`。
 

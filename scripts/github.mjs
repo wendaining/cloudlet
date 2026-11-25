@@ -4,7 +4,7 @@ import { appendFile, readFile, mkdir, writeFile } from 'node:fs/promises';
 import { Octokit } from '@octokit/rest';
 import lint from '@commitlint/lint';
 import load from '@commitlint/load';
-import { inspectTaskReadiness, labelNames as names, validateTask } from './issue-task.mjs';
+import { inspectTaskReadiness, labelNames as names, planIssueStatusUpdate, validateTask } from './issue-task.mjs';
 
 const settings = JSON.parse(await readFile(new URL('../.github/maintainers.json', import.meta.url)));
 const labels = JSON.parse(await readFile(new URL('../.github/labels.json', import.meta.url)));
@@ -77,6 +77,20 @@ if (command === 'sync') {
   const current = names(issue);
   if (current.some(label => ['status:ready', 'status:in-progress'].includes(label))) validateTask(issue);
   console.log(`已检查 Issue #${issueNumber} 的标签`);
+} else if (command === 'issue-status') {
+  requireNumber();
+  const [from, to, assignee, ...extra] = process.argv.slice(4);
+  assert(from && to && extra.length === 0, '用法：issue-status 编号 原状态 新状态 [负责人]');
+  const parameters = { ...target, issue_number: number };
+  const statusArgs = [`status:${from}`, `status:${to}`, assignee];
+  let { data: issue } = await github.rest.issues.get(parameters);
+  const update = planIssueStatusUpdate(issue, ...statusArgs);
+  if (update) {
+    await github.rest.issues.update({ ...parameters, ...update });
+    ({ data: issue } = await github.rest.issues.get(parameters));
+    assert.equal(planIssueStatusUpdate(issue, ...statusArgs), null, `Issue #${number} 更新未完整生效，请核对后重试`);
+  }
+  console.log(`Issue #${number} 已确认处于 status:${to}${assignee ? `，负责人包含 ${assignee}` : ''}`);
 } else if (command === 'inspect-issue') {
   requireNumber();
   const parameters = { ...target, issue_number: number };
@@ -116,5 +130,5 @@ if (command === 'sync') {
   await writeFile('.local/agent-task.md', brief);
   console.log(`已生成 .local/agent-task.md，来源为 ${issue.html_url}`);
 } else {
-  throw new Error('支持的命令：sync、coordinate、inspect-issue、check-commits、agent-brief');
+  throw new Error('支持的命令：sync、coordinate、issue-status、inspect-issue、check-commits、agent-brief');
 }

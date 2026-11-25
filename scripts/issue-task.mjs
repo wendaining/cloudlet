@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 
+const taskStatuses = ['status:triage', 'status:blocked', 'status:ready', 'status:in-progress'];
+
 export function labelNames(issue) {
   return issue.labels.map(label => typeof label === 'string' ? label : label.name);
 }
@@ -27,11 +29,34 @@ export function inspectTaskReadiness(issue, dependencies) {
   const statuses = labels.filter(label => label.startsWith('status:'));
   const problems = taskMetadataProblems(labels);
   if (issue.pull_request || issue.state !== 'open') problems.push('任务必须是开放的 Issue');
-  if (statuses.length !== 1 || !['status:triage', 'status:blocked', 'status:ready', 'status:in-progress'].includes(statuses[0])) {
+  if (statuses.length !== 1 || !taskStatuses.includes(statuses[0])) {
     problems.push('任务需要一个有效的 status 标签');
   }
   const remainingDependencies = dependencies.filter(
     dependency => dependency.state !== 'closed' || dependency.state_reason !== 'completed',
   );
   return { statuses, problems, remainingDependencies };
+}
+
+export function planIssueStatusUpdate(issue, from, to, assignee) {
+  assert(!issue.pull_request && issue.state === 'open', '任务必须是开放的 Issue');
+  assert(taskStatuses.includes(from) && taskStatuses.includes(to) && from !== to, '需要两个不同的有效状态');
+  assert(to !== 'status:in-progress' || assignee, '领取任务需要指定获授权的负责人');
+  assert(!assignee || to === 'status:in-progress', '只有转入实施中时可以指定负责人');
+
+  const labels = labelNames(issue);
+  const statuses = labels.filter(label => label.startsWith('status:'));
+  assert(statuses.length === 1 && [from, to].includes(statuses[0]), '当前状态与预期不符，请人工核对');
+
+  const assignees = issue.assignees.map(person => person.login.toLowerCase());
+  if (assignee) {
+    assert(assignees.length === 0 || assignees.includes(assignee.toLowerCase()), '任务已有其他负责人');
+  }
+
+  const update = {};
+  const nextLabels = labels.map(label => label === from ? to : label);
+  if (['status:ready', 'status:in-progress'].includes(to)) validateTask({ ...issue, labels: nextLabels });
+  if (statuses[0] === from) update.labels = nextLabels;
+  if (assignee && assignees.length === 0) update.assignees = [assignee];
+  return Object.keys(update).length ? update : null;
 }

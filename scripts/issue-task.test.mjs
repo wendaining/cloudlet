@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { inspectTaskReadiness, validateTask } from './issue-task.mjs';
+import { inspectTaskReadiness, planIssueStatusUpdate, validateTask } from './issue-task.mjs';
 
 const taskLabels = ['type:task', 'area:automation', 'area:cli', 'priority:p1'];
 const readyLabels = [...taskLabels, 'status:ready'];
@@ -61,4 +61,27 @@ test('checks migrated triage issues and reports all metadata and status problems
   });
   const result = inspectTaskReadiness({ state: 'closed', labels: ['status:triage', 'status:ready'] }, []);
   assert.equal(result.problems.length, 5);
+});
+
+test('prepares one claim update and safely retries after an uncertain result', () => {
+  const issue = { state: 'open', labels: [...readyLabels, 'legacy-label'], assignees: [] };
+  const claim = current => planIssueStatusUpdate(current, 'status:ready', 'status:in-progress', 'owner');
+  const labels = [...taskLabels, 'status:in-progress', 'legacy-label'];
+  assert.deepEqual(claim(issue), { labels, assignees: ['owner'] });
+  assert.deepEqual(claim({ ...issue, labels }), { assignees: ['owner'] });
+  assert.deepEqual(claim({ ...issue, assignees: [{ login: 'owner' }] }), { labels });
+  assert.equal(claim({ ...issue, labels, assignees: [{ login: 'Owner' }] }), null);
+  assert.throws(() => claim({ ...issue, assignees: [{ login: 'other' }] }), /已有其他负责人/u);
+  assert.throws(() => claim({ ...issue, labels: taskLabels }), /状态与预期不符/u);
+});
+
+test('preserves unrelated labels and assignees on a status-only transition', () => {
+  const issue = { state: 'open', labels: [...taskLabels, 'status:blocked', 'legacy-label'], assignees: [{ login: 'owner' }] };
+  const update = planIssueStatusUpdate(issue, 'status:blocked', 'status:ready');
+  assert.deepEqual(update, { labels: [...readyLabels, 'legacy-label'] });
+  assert.equal(planIssueStatusUpdate({ ...issue, ...update }, 'status:blocked', 'status:ready'), null);
+  assert.throws(
+    () => planIssueStatusUpdate({ ...issue, labels: [...issue.labels, 'status:triage'] }, 'status:blocked', 'status:ready'),
+    /状态与预期不符/u,
+  );
 });
