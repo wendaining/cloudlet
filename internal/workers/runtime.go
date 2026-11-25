@@ -29,10 +29,11 @@ var entryPathPattern = regexp.MustCompile(`^[a-zA-Z0-9._/-]+$`)
 // RuntimeConfig contains the files to place at ConfigPath and ModulePath and
 // the metadata required by runtime preflight.
 type RuntimeConfig struct {
-	Config            []byte
-	Module            []byte
-	Entry             string
-	CompatibilityDate string
+	Config             []byte
+	Module             []byte
+	Entry              string
+	CompatibilityDate  string
+	CompatibilityFlags []string
 }
 
 // ServeArgs returns the arguments for the pinned image's entrypoint.
@@ -81,15 +82,20 @@ func prepare(bundleDir, entry, compatibilityDate string, namespaces []durableobj
 	if err != nil {
 		return RuntimeConfig{}, fmt.Errorf("read entry %q in bundle %q: %w", entry, bundleDir, err)
 	}
-	return prepareModule(entry, module, compatibilityDate, namespaces)
+	return prepareModule(entry, module, compatibilityDate, namespaces, nil)
 }
 
 // PrepareModule prepares a bundled ES module already read from an upload.
 func PrepareModule(module []byte, compatibilityDate string) (RuntimeConfig, error) {
-	return prepareModule("index.mjs", module, compatibilityDate, nil)
+	return prepareModule("index.mjs", module, compatibilityDate, nil, nil)
 }
 
-func prepareModule(entry string, module []byte, compatibilityDate string, namespaces []durableobjects.Namespace) (RuntimeConfig, error) {
+// PrepareModuleWithFlags prepares an uploaded module with explicit compatibility flags.
+func PrepareModuleWithFlags(module []byte, compatibilityDate string, flags []string) (RuntimeConfig, error) {
+	return prepareModule("index.mjs", module, compatibilityDate, nil, flags)
+}
+
+func prepareModule(entry string, module []byte, compatibilityDate string, namespaces []durableobjects.Namespace, flags []string) (RuntimeConfig, error) {
 	if err := validateCompatibilityDate(compatibilityDate, time.Now()); err != nil {
 		return RuntimeConfig{}, err
 	}
@@ -97,11 +103,17 @@ func prepareModule(entry string, module []byte, compatibilityDate string, namesp
 		return RuntimeConfig{}, fmt.Errorf("entry %q must contain non-empty UTF-8 JavaScript", entry)
 	}
 
+	normalized, err := normalizeCompatibilityFlags(flags)
+	if err != nil {
+		return RuntimeConfig{}, err
+	}
+
 	return RuntimeConfig{
-		Config:            renderConfig(entry, compatibilityDate, namespaces),
-		Module:            bytes.Clone(module),
-		Entry:             entry,
-		CompatibilityDate: compatibilityDate,
+		Config:             renderConfig(entry, compatibilityDate, namespaces, normalized),
+		Module:             bytes.Clone(module),
+		Entry:              entry,
+		CompatibilityDate:  compatibilityDate,
+		CompatibilityFlags: normalized,
 	}, nil
 }
 
@@ -119,7 +131,7 @@ func validateCompatibilityDate(compatibilityDate string, now time.Time) error {
 	return nil
 }
 
-func renderConfig(entry, compatibilityDate string, namespaces []durableobjects.Namespace) []byte {
+func renderConfig(entry, compatibilityDate string, namespaces []durableobjects.Namespace, flags []string) []byte {
 	var storageService, workerFields []byte
 	if len(namespaces) > 0 {
 		storageService = fmt.Appendf(nil, `, (name = "durable-storage", disk = (path = "%s", writable = true))`, durableobjects.StoragePath)
@@ -135,7 +147,7 @@ func renderConfig(entry, compatibilityDate string, namespaces []durableobjects.N
 		}
 		workerFields = append(workerFields, "  ],\n"...)
 	}
-	return fmt.Appendf(nil, configTemplate, storageService, HTTPPort, entry, path.Base(ModulePath), compatibilityDate, workerFields)
+	return fmt.Appendf(nil, configTemplate, storageService, HTTPPort, entry, path.Base(ModulePath), compatibilityDate, renderCompatibilityFlags(flags), workerFields)
 }
 
 const configTemplate = `using Workerd = import "/workerd/workerd.capnp";
@@ -148,5 +160,5 @@ const config :Workerd.Config = (
 const worker :Workerd.Worker = (
   modules = [(name = "%s", esModule = embed "%s")],
   compatibilityDate = "%s",
-%s);
+%s%s);
 `

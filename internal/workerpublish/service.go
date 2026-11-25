@@ -43,9 +43,10 @@ var (
 )
 
 type Request struct {
-	Module            string `json:"module"`
-	CompatibilityDate string `json:"compatibility_date"`
-	Hostname          string `json:"hostname"`
+	Module             string   `json:"module"`
+	CompatibilityDate  string   `json:"compatibility_date"`
+	Hostname           string   `json:"hostname"`
+	CompatibilityFlags []string `json:"compatibility_flags,omitempty"`
 }
 
 func ValidateRequest(name, key string, request Request) (workers.RuntimeConfig, error) {
@@ -58,7 +59,7 @@ func ValidateRequest(name, key string, request Request) (workers.RuntimeConfig, 
 	if err := config.ValidateRoutes([]config.Route{{Host: request.Hostname, Target: "http://127.0.0.1:8080"}}); err != nil {
 		return workers.RuntimeConfig{}, fmt.Errorf("validate Worker hostname: %w: %w", fs.ErrInvalid, err)
 	}
-	prepared, err := workers.PrepareModule([]byte(request.Module), request.CompatibilityDate)
+	prepared, err := workers.PrepareModuleWithFlags([]byte(request.Module), request.CompatibilityDate, request.CompatibilityFlags)
 	if err != nil {
 		return prepared, fmt.Errorf("validate Worker module: %w: %w", fs.ErrInvalid, err)
 	}
@@ -246,6 +247,7 @@ func (s *Service) Deploy(ctx context.Context, projectID uuid.UUID, name, key str
 		return result, false, fmt.Errorf("verify Worker controller ownership: %w", err)
 	}
 	request.Hostname = gateway.CanonicalHost(request.Hostname)
+	request.CompatibilityFlags = prepared.CompatibilityFlags
 	encoded, err := json.Marshal(request)
 	if err != nil {
 		return result, false, err
@@ -323,7 +325,7 @@ func (s *Service) Deploy(ctx context.Context, projectID uuid.UUID, name, key str
 	deployment, workerExecution, err := s.store.CreateWorkerDeployment(ctx, name, database.WorkerDeployment{
 		ID: uuid.New(), ProjectID: projectID, OperationID: op.ID, ArtifactDigest: moduleDigest, ConfigDigest: configDigest,
 		Entry: prepared.Entry, CompatibilityDate: prepared.CompatibilityDate, RuntimeVersion: workers.RuntimeVersion, RuntimeImage: s.image,
-		Hostname: request.Hostname, CPUMillis: 1000, MemoryBytes: 256 << 20, State: "pending",
+		Hostname: request.Hostname, CompatibilityFlags: prepared.CompatibilityFlags, CPUMillis: 1000, MemoryBytes: 256 << 20, State: "pending",
 	})
 	if err != nil {
 		return result, true, err

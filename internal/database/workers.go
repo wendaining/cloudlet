@@ -25,22 +25,23 @@ type Worker struct {
 
 // WorkerDeployment contains the immutable deployment inputs and its outcome.
 type WorkerDeployment struct {
-	ID                uuid.UUID
-	ProjectID         uuid.UUID
-	WorkerID          uuid.UUID
-	OperationID       uuid.UUID
-	ArtifactDigest    string
-	ConfigDigest      string
-	Entry             string
-	CompatibilityDate string
-	RuntimeVersion    string
-	RuntimeImage      string
-	Hostname          string
-	CPUMillis         int64
-	MemoryBytes       int64
-	State             string
-	Failure           string
-	CreatedAt         time.Time
+	ID                 uuid.UUID
+	ProjectID          uuid.UUID
+	WorkerID           uuid.UUID
+	OperationID        uuid.UUID
+	ArtifactDigest     string
+	ConfigDigest       string
+	Entry              string
+	CompatibilityDate  string
+	CompatibilityFlags []string `gorm:"serializer:json;type:jsonb"`
+	RuntimeVersion     string
+	RuntimeImage       string
+	Hostname           string
+	CPUMillis          int64
+	MemoryBytes        int64
+	State              string
+	Failure            string
+	CreatedAt          time.Time
 }
 
 type WorkerExecution struct {
@@ -79,6 +80,9 @@ func (s *Store) CheckFirstWorkerPublication(ctx context.Context, projectID uuid.
 
 // CreateWorkerDeployment records a complete artifact before starting runtime work.
 func (s *Store) CreateWorkerDeployment(ctx context.Context, name string, deployment WorkerDeployment) (WorkerDeployment, WorkerExecution, error) {
+	if deployment.CompatibilityFlags == nil {
+		deployment.CompatibilityFlags = []string{}
+	}
 	worker := Worker{ID: uuid.New(), ProjectID: deployment.ProjectID, Name: name}
 	execution := WorkerExecution{ID: uuid.New(), ProjectID: deployment.ProjectID, DeploymentID: deployment.ID, State: "pending"}
 	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {

@@ -1358,6 +1358,14 @@ components:
           type: string
           maxLength: 253
           description: 无端口的公开域名。
+        compatibility_flags:
+          type: array
+          maxItems: 64
+          uniqueItems: true
+          description: 显式声明的 workerd 兼容标志，由部署采用的固定版本验证。
+          items:
+            type: string
+            pattern: '^[a-z][a-z0-9_]{0,63}$'
     WorkerDeployment:
       type: object
       required:
@@ -1370,6 +1378,7 @@ components:
         - config_digest
         - entry
         - compatibility_date
+        - compatibility_flags
         - runtime_version
         - runtime_image
         - hostname
@@ -1407,6 +1416,11 @@ components:
           type: string
         compatibility_date:
           type: string
+        compatibility_flags:
+          type: array
+          description: 该版本声明的兼容标志。成功版本的标志已由实际 workerd 验证。
+          items:
+            type: string
         runtime_version:
           type: string
         runtime_image:

@@ -162,6 +162,9 @@ type DeployWorkerRequest struct {
 	// CompatibilityDate 固定 workerd 支持的兼容日期。
 	CompatibilityDate openapi_types.Date `json:"compatibility_date"`
 
+	// CompatibilityFlags 显式声明的 workerd 兼容标志，由部署采用的固定版本验证。
+	CompatibilityFlags *[]string `json:"compatibility_flags,omitempty"`
+
 	// Hostname 无端口的公开域名。
 	Hostname string `json:"hostname"`
 
@@ -350,28 +353,31 @@ type VersionInfo struct {
 
 // WorkerDeployment defines model for WorkerDeployment.
 type WorkerDeployment struct {
-	ArtifactDigest    string             `json:"artifact_digest"`
-	CompatibilityDate string             `json:"compatibility_date"`
-	ConfigDigest      string             `json:"config_digest"`
-	ContainerId       string             `json:"container_id"`
-	CpuMillis         int64              `json:"cpu_millis"`
-	CreatedAt         time.Time          `json:"created_at"`
-	Entry             string             `json:"entry"`
-	ExecutionId       openapi_types.UUID `json:"execution_id"`
-	ExecutionState    string             `json:"execution_state"`
-	Failure           string             `json:"failure"`
-	Generation        int64              `json:"generation"`
-	Hostname          string             `json:"hostname"`
-	Id                openapi_types.UUID `json:"id"`
-	MemoryBytes       int64              `json:"memory_bytes"`
-	OperationId       openapi_types.UUID `json:"operation_id"`
-	OperationOutcome  string             `json:"operation_outcome"`
-	OperationPhase    string             `json:"operation_phase"`
-	ProjectId         openapi_types.UUID `json:"project_id"`
-	RuntimeImage      string             `json:"runtime_image"`
-	RuntimeVersion    string             `json:"runtime_version"`
-	State             string             `json:"state"`
-	WorkerId          openapi_types.UUID `json:"worker_id"`
+	ArtifactDigest    string `json:"artifact_digest"`
+	CompatibilityDate string `json:"compatibility_date"`
+
+	// CompatibilityFlags 该版本声明的兼容标志。成功版本的标志已由实际 workerd 验证。
+	CompatibilityFlags []string           `json:"compatibility_flags"`
+	ConfigDigest       string             `json:"config_digest"`
+	ContainerId        string             `json:"container_id"`
+	CpuMillis          int64              `json:"cpu_millis"`
+	CreatedAt          time.Time          `json:"created_at"`
+	Entry              string             `json:"entry"`
+	ExecutionId        openapi_types.UUID `json:"execution_id"`
+	ExecutionState     string             `json:"execution_state"`
+	Failure            string             `json:"failure"`
+	Generation         int64              `json:"generation"`
+	Hostname           string             `json:"hostname"`
+	Id                 openapi_types.UUID `json:"id"`
+	MemoryBytes        int64              `json:"memory_bytes"`
+	OperationId        openapi_types.UUID `json:"operation_id"`
+	OperationOutcome   string             `json:"operation_outcome"`
+	OperationPhase     string             `json:"operation_phase"`
+	ProjectId          openapi_types.UUID `json:"project_id"`
+	RuntimeImage       string             `json:"runtime_image"`
+	RuntimeVersion     string             `json:"runtime_version"`
+	State              string             `json:"state"`
+	WorkerId           openapi_types.UUID `json:"worker_id"`
 }
 
 // BrowserProjectID defines model for BrowserProjectID.

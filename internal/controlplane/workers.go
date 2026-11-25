@@ -39,7 +39,7 @@ func (h *handler) DeployWorker(c *gin.Context, projectID, name string, params ap
 		return
 	}
 	var request workerpublish.Request
-	decoder := json.NewDecoder(http.MaxBytesReader(c.Writer, c.Request.Body, 6*workerpublish.MaxModuleBytes+4096))
+	decoder := json.NewDecoder(http.MaxBytesReader(c.Writer, c.Request.Body, 6*workerpublish.MaxModuleBytes+(64<<10)))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&request); err != nil {
 		c.JSON(http.StatusBadRequest, apigen.Error{Message: "Worker 发布请求格式无效"})
@@ -121,7 +121,7 @@ func workerDeploymentResponse(result workerpublish.Result) apigen.WorkerDeployme
 		Id: d.ID, ProjectId: d.ProjectID, WorkerId: d.WorkerID, ExecutionId: e.ID, OperationId: d.OperationID,
 		ArtifactDigest: d.ArtifactDigest, ConfigDigest: d.ConfigDigest, Entry: d.Entry,
 		CompatibilityDate: d.CompatibilityDate, RuntimeVersion: d.RuntimeVersion, RuntimeImage: d.RuntimeImage,
-		Hostname: d.Hostname, CpuMillis: d.CPUMillis, MemoryBytes: d.MemoryBytes, State: d.State, Failure: d.Failure,
+		CompatibilityFlags: d.CompatibilityFlags, Hostname: d.Hostname, CpuMillis: d.CPUMillis, MemoryBytes: d.MemoryBytes, State: d.State, Failure: d.Failure,
 		ContainerId: e.ContainerID, ExecutionState: e.State, Generation: int64(e.Generation),
 		OperationPhase: string(o.Phase), OperationOutcome: string(o.Outcome), CreatedAt: d.CreatedAt,
 	}

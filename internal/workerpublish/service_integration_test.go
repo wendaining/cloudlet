@@ -553,6 +553,44 @@ AND d.state = 'pending' AND o.phase = 'preparing' AND e.container_id <> ''`, pro
 	if usage.ProjectUsed.CPUMillis != 3000 || usage.ProjectUsed.Instances != 3 {
 		t.Fatalf("failed publication leaked capacity: %+v", usage)
 	}
+	t.Run("validate compatibility flags with pinned workerd", func(t *testing.T) {
+		input := workerpublish.Request{
+			Module: `import { Buffer } from "node:buffer";
+export default { fetch() { return new Response(Buffer.from("636f6d706174", "hex").toString()) } };`,
+			CompatibilityDate:  valid.CompatibilityDate,
+			Hostname:           "compatibility.localhost",
+			CompatibilityFlags: []string{"nodejs_compat", "cloudlet_unknown_compat_flag"},
+		}
+		path := deployPath(otherProject.ID, "compatibility")
+		rejected := decode(request(outsider, http.MethodPost, path, "unsupported-flag", input, http.StatusUnprocessableEntity))
+		if rejected.State != "failed" || rejected.OperationOutcome != "failed" || !strings.Contains(rejected.Failure, "cloudlet_unknown_compat_flag") {
+			t.Fatalf("unsupported workerd flag was not rejected: %+v", rejected)
+		}
+		input.CompatibilityFlags = []string{"nodejs_compat"}
+		good := decode(request(outsider, http.MethodPost, path, "supported-flag", input, http.StatusCreated))
+		stored := decode(request(outsider, http.MethodGet, metadataPath(otherProject.ID, good.Id), "", nil, http.StatusOK))
+		if good.OperationOutcome != "succeeded" || len(good.CompatibilityFlags) != 1 || good.CompatibilityFlags[0] != "nodejs_compat" ||
+			len(stored.CompatibilityFlags) != 1 || stored.CompatibilityFlags[0] != "nodejs_compat" || stored.ConfigDigest != good.ConfigDigest {
+			t.Fatalf("compatibility flag manifest: %+v %+v", good, stored)
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, public.URL, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Host = input.Hostname
+		response, err := outsider.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		body, err := io.ReadAll(response.Body)
+		if err != nil || response.StatusCode != http.StatusOK || string(body) != "compat" {
+			t.Fatalf("Worker node:buffer response: HTTP %d %q %v", response.StatusCode, body, err)
+		}
+		input.CompatibilityFlags = nil
+		request(outsider, http.MethodPost, path, "supported-flag", input, http.StatusConflict)
+		t.Logf("workerd validated nodejs_compat for deployment %s, config %s", good.Id, good.ConfigDigest)
+	})
 	if err := os.Chmod(configuration.Directory, 0o500); err != nil {
 		t.Fatal(err)
 	}

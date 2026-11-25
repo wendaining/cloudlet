@@ -12,7 +12,7 @@ import (
 )
 
 func TestPreflightConfigIncludesWrapperAndUserModule(t *testing.T) {
-	config := string(preflightConfig("2026-10-12"))
+	config := string(preflightConfig("2026-10-12", nil))
 	for _, expected := range []string{
 		`name = "wrapper.mjs", esModule = embed "wrapper.mjs"`,
 		`name = "user.mjs", esModule = embed "user.mjs"`,

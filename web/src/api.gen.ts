@@ -741,6 +741,8 @@ export interface components {
             compatibility_date: string;
             /** @description 无端口的公开域名。 */
             hostname: string;
+            /** @description 显式声明的 workerd 兼容标志，由部署采用的固定版本验证。 */
+            compatibility_flags?: string[];
         };
         WorkerDeployment: {
             /** Format: uuid */
@@ -757,6 +759,8 @@ export interface components {
             config_digest: string;
             entry: string;
             compatibility_date: string;
+            /** @description 该版本声明的兼容标志。成功版本的标志已由实际 workerd 验证。 */
+            compatibility_flags: string[];
             runtime_version: string;
             runtime_image: string;
             hostname: string;
