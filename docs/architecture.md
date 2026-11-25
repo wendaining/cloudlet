@@ -48,7 +48,7 @@ Cloudlet 在一台 Linux 服务器上管理计算资源。本地开发在成员�
 | internal/containers | Docker Engine 镜像摘要准备、容器生命周期、回环端口或内部网络端点观测、HTTP 就绪探测与宿主配额支持报告 |
 | internal/browser | 复用容器管理的 Playwright 会话 |
 | pkg/client | CLI 与其他客户端共享的 API 客户端 |
-| internal/mcpserver | 只读 MCP 项目与操作查询，复用管理 API 会话权限 |
+| internal/mcpserver | MCP 项目查询、Worker 发布与操作查询，复用管理 API 会话权限 |
 
 PostgreSQL 当前保存账号、登录会话、项目、操作记录、项目凭据、项目路由、容量预留、静态站点版本、浏览器会话以及 Worker 部署与执行记录。首个无状态 Worker 可以通过管理 API 发布并访问。Durable Objects 的运行配置与存储能力通过独立 workerd 集成验证。
 
@@ -83,7 +83,7 @@ PostgreSQL 当前保存账号、登录会话、项目、操作记录、项目凭
 | /api/v1/projects/{projectID}/secrets/{name}/versions/{version}/value | GET | 所有者读取指定版本的值 |
 | /api/v1/projects/{projectID}/workers/{name}/deployments | POST | 所有者或开发者发布首个无状态 Worker，按 Idempotency-Key 复用操作 |
 | /api/v1/projects/{projectID}/worker-deployments/{deploymentID} | GET | 项目成员查询版本、产物摘要、执行与 Operation 结果 |
-| /mcp | MCP Streamable HTTP | 使用当前会话查询可访问项目与项目操作 |
+| /mcp | MCP Streamable HTTP | 使用当前会话查询项目、发布 Worker 并查询项目操作 |
 
 两组监听端口完成初始化后才开始接受请求。管理环境启动前验证数据库连接和迁移版本，就绪接口同时检查数据库连接，数据库不可用时返回 503。
 
