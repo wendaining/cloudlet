@@ -414,6 +414,45 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{projectID}/postgres-bindings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 项目所有者登记 PostgreSQL 绑定。连接验证成功后保存。 */
+        post: operations["createPostgresBinding"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/postgres-bindings/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        /** @description 项目成员查询 PostgreSQL 绑定元数据与验证时间。 */
+        get: operations["getPostgresBinding"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -447,6 +486,24 @@ export interface components {
             /** Format: uuid */
             id: string;
             name: string;
+        };
+        PostgresBindingInput: {
+            name: string;
+            host: string;
+            port: number;
+            database: string;
+            /** Format: uuid */
+            secret_version_id: string;
+        };
+        PostgresBinding: {
+            name: string;
+            host: string;
+            port: number;
+            database: string;
+            /** Format: uuid */
+            secret_version_id: string;
+            /** Format: date-time */
+            verified_at: string;
         };
         /** @enum {string} */
         ProjectRole: "owner" | "developer" | "viewer";
@@ -1420,6 +1477,66 @@ export interface operations {
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
             503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createPostgresBinding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PostgresBindingInput"];
+            };
+        };
+        responses: {
+            /** @description 已验证的绑定 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PostgresBinding"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getPostgresBinding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 绑定元数据 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PostgresBinding"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };

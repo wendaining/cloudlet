@@ -189,6 +189,25 @@ type Operation struct {
 	UpdatedAt time.Time          `json:"updated_at"`
 }
 
+// PostgresBinding defines model for PostgresBinding.
+type PostgresBinding struct {
+	Database        string             `json:"database"`
+	Host            string             `json:"host"`
+	Name            string             `json:"name"`
+	Port            int                `json:"port"`
+	SecretVersionId openapi_types.UUID `json:"secret_version_id"`
+	VerifiedAt      time.Time          `json:"verified_at"`
+}
+
+// PostgresBindingInput defines model for PostgresBindingInput.
+type PostgresBindingInput struct {
+	Database        string             `json:"database"`
+	Host            string             `json:"host"`
+	Name            string             `json:"name"`
+	Port            int                `json:"port"`
+	SecretVersionId openapi_types.UUID `json:"secret_version_id"`
+}
+
 // Project defines model for Project.
 type Project struct {
 	Id   openapi_types.UUID `json:"id"`
@@ -358,6 +377,9 @@ type NavigateBrowserSessionJSONRequestBody = NavigateBrowserSessionRequest
 
 // UpsertProjectMemberJSONRequestBody defines body for UpsertProjectMember for application/json ContentType.
 type UpsertProjectMemberJSONRequestBody = UpsertProjectMemberRequest
+
+// CreatePostgresBindingJSONRequestBody defines body for CreatePostgresBinding for application/json ContentType.
+type CreatePostgresBindingJSONRequestBody = PostgresBindingInput
 
 // CreateProjectSecretVersionJSONRequestBody defines body for CreateProjectSecretVersion for application/json ContentType.
 type CreateProjectSecretVersionJSONRequestBody = CreateProjectSecretRequest
@@ -533,6 +555,23 @@ type ClientInterface interface {
 
 	// ListProjectOperations performs a GET /api/v1/projects/{projectID}/operations (the `ListProjectOperations` operationId) request.
 	ListProjectOperations(ctx context.Context, projectID string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreatePostgresBindingWithBody performs a POST /api/v1/projects/{projectID}/postgres-bindings (the `CreatePostgresBinding` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// 项目所有者登记 PostgreSQL 绑定。连接验证成功后保存。.
+	CreatePostgresBindingWithBody(ctx context.Context, projectID string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreatePostgresBinding performs a POST /api/v1/projects/{projectID}/postgres-bindings (the `CreatePostgresBinding` operationId) request.
+	// Takes a body of the `application/json` content type.
+	//
+	// 项目所有者登记 PostgreSQL 绑定。连接验证成功后保存。.
+	CreatePostgresBinding(ctx context.Context, projectID string, body CreatePostgresBindingJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetPostgresBinding performs a GET /api/v1/projects/{projectID}/postgres-bindings/{name} (the `GetPostgresBinding` operationId) request.
+	//
+	// 项目成员查询 PostgreSQL 绑定元数据与验证时间。.
+	GetPostgresBinding(ctx context.Context, projectID string, name string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListProjectSecrets performs a GET /api/v1/projects/{projectID}/secrets (the `ListProjectSecrets` operationId) request.
 	//
@@ -908,6 +947,53 @@ func (c *Client) RemoveProjectMember(ctx context.Context, projectID string, user
 // ListProjectOperations performs a GET /api/v1/projects/{projectID}/operations (the `ListProjectOperations` operationId) request.
 func (c *Client) ListProjectOperations(ctx context.Context, projectID string, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListProjectOperationsRequest(c.Server, projectID)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreatePostgresBindingWithBody performs a POST /api/v1/projects/{projectID}/postgres-bindings (the `CreatePostgresBinding` operationId) request,
+// with any type of body and a specified content type.
+//
+// 项目所有者登记 PostgreSQL 绑定。连接验证成功后保存。.
+func (c *Client) CreatePostgresBindingWithBody(ctx context.Context, projectID string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreatePostgresBindingRequestWithBody(c.Server, projectID, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreatePostgresBinding performs a POST /api/v1/projects/{projectID}/postgres-bindings (the `CreatePostgresBinding` operationId) request.
+// Takes a body of the `application/json` content type.
+//
+// 项目所有者登记 PostgreSQL 绑定。连接验证成功后保存。.
+func (c *Client) CreatePostgresBinding(ctx context.Context, projectID string, body CreatePostgresBindingJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreatePostgresBindingRequest(c.Server, projectID, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetPostgresBinding performs a GET /api/v1/projects/{projectID}/postgres-bindings/{name} (the `GetPostgresBinding` operationId) request.
+//
+// 项目成员查询 PostgreSQL 绑定元数据与验证时间。.
+func (c *Client) GetPostgresBinding(ctx context.Context, projectID string, name string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetPostgresBindingRequest(c.Server, projectID, name)
 	if err != nil {
 		return nil, err
 	}
@@ -1756,6 +1842,94 @@ func NewListProjectOperationsRequest(server string, projectID string) (*http.Req
 	return req, nil
 }
 
+// NewCreatePostgresBindingRequest calls the generic CreatePostgresBinding builder with application/json body
+func NewCreatePostgresBindingRequest(server string, projectID string, body CreatePostgresBindingJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreatePostgresBindingRequestWithBody(server, projectID, "application/json", bodyReader)
+}
+
+// NewCreatePostgresBindingRequestWithBody constructs an http.Request for the CreatePostgresBinding method, with any body, and a specified content type
+func NewCreatePostgresBindingRequestWithBody(server string, projectID string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/postgres-bindings", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewGetPostgresBindingRequest constructs an http.Request for the GetPostgresBinding method
+func NewGetPostgresBindingRequest(server string, projectID string, name string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "name", name, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/postgres-bindings/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewListProjectSecretsRequest constructs an http.Request for the ListProjectSecrets method
 func NewListProjectSecretsRequest(server string, projectID string) (*http.Request, error) {
 	var err error
@@ -2326,6 +2500,27 @@ type ClientWithResponsesInterface interface {
 	//
 	// Returns a wrapper object for the known response body format(s).
 	ListProjectOperationsWithResponse(ctx context.Context, projectID string, reqEditors ...RequestEditorFn) (*ListProjectOperationsResponse, error)
+
+	// CreatePostgresBindingWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/postgres-bindings (the `CreatePostgresBinding` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// 项目所有者登记 PostgreSQL 绑定。连接验证成功后保存。.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	CreatePostgresBindingWithBodyWithResponse(ctx context.Context, projectID string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreatePostgresBindingResponse, error)
+
+	// CreatePostgresBindingWithResponse performs a POST /api/v1/projects/{projectID}/postgres-bindings (the `CreatePostgresBinding` operationId) request.
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// 项目所有者登记 PostgreSQL 绑定。连接验证成功后保存。.
+	CreatePostgresBindingWithResponse(ctx context.Context, projectID string, body CreatePostgresBindingJSONRequestBody, reqEditors ...RequestEditorFn) (*CreatePostgresBindingResponse, error)
+
+	// GetPostgresBindingWithResponse performs a GET /api/v1/projects/{projectID}/postgres-bindings/{name} (the `GetPostgresBinding` operationId) request.
+	//
+	// 项目成员查询 PostgreSQL 绑定元数据与验证时间。.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	GetPostgresBindingWithResponse(ctx context.Context, projectID string, name string, reqEditors ...RequestEditorFn) (*GetPostgresBindingResponse, error)
 
 	// ListProjectSecretsWithResponse performs a GET /api/v1/projects/{projectID}/secrets (the `ListProjectSecrets` operationId) request.
 	//
@@ -3471,6 +3666,165 @@ func (r ListProjectOperationsResponse) ContentType() string {
 	return ""
 }
 
+type CreatePostgresBindingResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *PostgresBinding
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *Error
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Error
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Error
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *Error
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
+	// JSON422 the response for an HTTP 422 `application/json` response
+	JSON422 *Error
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *Error
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r CreatePostgresBindingResponse) GetJSON201() *PostgresBinding {
+	return r.JSON201
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r CreatePostgresBindingResponse) GetJSON400() *Error {
+	return r.JSON400
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r CreatePostgresBindingResponse) GetJSON401() *Error {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r CreatePostgresBindingResponse) GetJSON403() *Error {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r CreatePostgresBindingResponse) GetJSON404() *Error {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r CreatePostgresBindingResponse) GetJSON409() *Error {
+	return r.JSON409
+}
+
+// GetJSON422 returns the response for an HTTP 422 `application/json` response
+func (r CreatePostgresBindingResponse) GetJSON422() *Error {
+	return r.JSON422
+}
+
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r CreatePostgresBindingResponse) GetJSON503() *Error {
+	return r.JSON503
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r CreatePostgresBindingResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r CreatePostgresBindingResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CreatePostgresBindingResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreatePostgresBindingResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CreatePostgresBindingResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetPostgresBindingResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *PostgresBinding
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Error
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *Error
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetPostgresBindingResponse) GetJSON200() *PostgresBinding {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r GetPostgresBindingResponse) GetJSON401() *Error {
+	return r.JSON401
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetPostgresBindingResponse) GetJSON404() *Error {
+	return r.JSON404
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r GetPostgresBindingResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r GetPostgresBindingResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetPostgresBindingResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetPostgresBindingResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetPostgresBindingResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type ListProjectSecretsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -4452,6 +4806,45 @@ func (c *ClientWithResponses) ListProjectOperationsWithResponse(ctx context.Cont
 	return ParseListProjectOperationsResponse(rsp)
 }
 
+// CreatePostgresBindingWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/postgres-bindings (the `CreatePostgresBinding` operationId) request,
+// with any type of body and a specified content type.
+//
+// 项目所有者登记 PostgreSQL 绑定。连接验证成功后保存。.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) CreatePostgresBindingWithBodyWithResponse(ctx context.Context, projectID string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreatePostgresBindingResponse, error) {
+	rsp, err := c.CreatePostgresBindingWithBody(ctx, projectID, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreatePostgresBindingResponse(rsp)
+}
+
+// CreatePostgresBindingWithResponse performs a POST /api/v1/projects/{projectID}/postgres-bindings (the `CreatePostgresBinding` operationId) request.
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// 项目所有者登记 PostgreSQL 绑定。连接验证成功后保存。.
+func (c *ClientWithResponses) CreatePostgresBindingWithResponse(ctx context.Context, projectID string, body CreatePostgresBindingJSONRequestBody, reqEditors ...RequestEditorFn) (*CreatePostgresBindingResponse, error) {
+	rsp, err := c.CreatePostgresBinding(ctx, projectID, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreatePostgresBindingResponse(rsp)
+}
+
+// GetPostgresBindingWithResponse performs a GET /api/v1/projects/{projectID}/postgres-bindings/{name} (the `GetPostgresBinding` operationId) request.
+//
+// 项目成员查询 PostgreSQL 绑定元数据与验证时间。.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) GetPostgresBindingWithResponse(ctx context.Context, projectID string, name string, reqEditors ...RequestEditorFn) (*GetPostgresBindingResponse, error) {
+	rsp, err := c.GetPostgresBinding(ctx, projectID, name, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetPostgresBindingResponse(rsp)
+}
+
 // ListProjectSecretsWithResponse performs a GET /api/v1/projects/{projectID}/secrets (the `ListProjectSecrets` operationId) request.
 //
 // 返回项目凭据的名称与最新版本元数据，项目成员可以读取。.
@@ -5403,6 +5796,135 @@ func ParseListProjectOperationsResponse(rsp *http.Response) (*ListProjectOperati
 	return response, nil
 }
 
+// ParseCreatePostgresBindingResponse parses an HTTP response from a CreatePostgresBindingWithResponse call
+func ParseCreatePostgresBindingResponse(rsp *http.Response) (*CreatePostgresBindingResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreatePostgresBindingResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest PostgresBinding
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetPostgresBindingResponse parses an HTTP response from a GetPostgresBindingWithResponse call
+func ParseGetPostgresBindingResponse(rsp *http.Response) (*GetPostgresBindingResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetPostgresBindingResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest PostgresBinding
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseListProjectSecretsResponse parses an HTTP response from a ListProjectSecretsWithResponse call
 func ParseListProjectSecretsResponse(rsp *http.Response) (*ListProjectSecretsResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -6067,6 +6589,12 @@ type ServerInterface interface {
 	// (GET /api/v1/projects/{projectID}/operations)
 	ListProjectOperations(c *gin.Context, projectID string)
 
+	// (POST /api/v1/projects/{projectID}/postgres-bindings)
+	CreatePostgresBinding(c *gin.Context, projectID string)
+
+	// (GET /api/v1/projects/{projectID}/postgres-bindings/{name})
+	GetPostgresBinding(c *gin.Context, projectID string, name string)
+
 	// (GET /api/v1/projects/{projectID}/secrets)
 	ListProjectSecrets(c *gin.Context, projectID string)
 
@@ -6527,6 +7055,65 @@ func (siw *ServerInterfaceWrapper) ListProjectOperations(c *gin.Context) {
 	siw.Handler.ListProjectOperations(c, projectID)
 }
 
+// CreatePostgresBinding operation middleware
+func (siw *ServerInterfaceWrapper) CreatePostgresBinding(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.CreatePostgresBinding(c, projectID)
+}
+
+// GetPostgresBinding operation middleware
+func (siw *ServerInterfaceWrapper) GetPostgresBinding(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "name" -------------
+	var name string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", c.Param("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter name: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetPostgresBinding(c, projectID, name)
+}
+
 // ListProjectSecrets operation middleware
 func (siw *ServerInterfaceWrapper) ListProjectSecrets(c *gin.Context) {
 
@@ -6893,4 +7480,6 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/secrets/:name/versions/:version/value", wrapper.GetProjectSecretValue)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/workers/:name/deployments", wrapper.DeployWorker)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/worker-deployments/:deploymentID", wrapper.GetWorkerDeployment)
+	router.POST(options.BaseURL+"/api/v1/projects/:projectID/postgres-bindings", wrapper.CreatePostgresBinding)
+	router.GET(options.BaseURL+"/api/v1/projects/:projectID/postgres-bindings/:name", wrapper.GetPostgresBinding)
 }
