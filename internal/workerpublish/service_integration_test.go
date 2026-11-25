@@ -103,7 +103,7 @@ func TestWorkerPublicationHTTP(t *testing.T) {
 			}
 		}
 	})
-	configuration := config.WorkerRuntime{Directory: t.TempDir(), HostID: "publication-" + uuid.NewString(), HostBudget: config.ResourceBudget{CPUMillis: 4000, MemoryBytes: 4 << 30, Instances: 4}, ProjectQuota: config.ResourceBudget{CPUMillis: 3000, MemoryBytes: 1 << 30, Instances: 3}}
+	configuration := config.WorkerRuntime{Directory: t.TempDir(), HostID: "publication-" + uuid.NewString(), HostBudget: config.ResourceBudget{CPUMillis: 5000, MemoryBytes: 4 << 30, Instances: 5}, ProjectQuota: config.ResourceBudget{CPUMillis: 3000, MemoryBytes: 1 << 30, Instances: 3}}
 	newFront := func() *gateway.Handler {
 		front, err := gateway.NewHandler(config.Config{APIAddress: "127.0.0.1:0", GatewayAddress: "127.0.0.1:0"}, slog.Default())
 		if err != nil {
@@ -320,7 +320,7 @@ func TestWorkerPublicationHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	pending.ID, pending.OperationID, pending.State, pending.Hostname = uuid.New(), pendingOperation.ID, "pending", "pending.localhost"
-	if _, _, err := store.CreateWorkerDeployment(ctx, "pending", pending); err != nil {
+	if _, _, err := store.CreateWorkerDeployment(ctx, "pending", pending, false); err != nil {
 		t.Fatal(err)
 	}
 	location, _ := requestWithLocation(owner, http.MethodPost, deployPath(project.ID, "pending"), "second-pending", pendingRequest, http.StatusConflict)
@@ -553,6 +553,171 @@ AND d.state = 'pending' AND o.phase = 'preparing' AND e.container_id <> ''`, pro
 	if usage.ProjectUsed.CPUMillis != 3000 || usage.ProjectUsed.Instances != 3 {
 		t.Fatalf("failed publication leaked capacity: %+v", usage)
 	}
+	t.Run("activate ready version without interrupting requests", func(t *testing.T) {
+		const hostname = "activation.localhost"
+		oldCode := `export default {
+  fetch(request) {
+    if (new URL(request.url).pathname !== "/stream") return new Response("A");
+    const encoder = new TextEncoder();
+    return new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode("A-start"));
+      },
+      async pull(controller) {
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        controller.enqueue(encoder.encode("A-finish"));
+        controller.close();
+      }
+    }));
+  }
+};`
+		otherPath := deployPath(otherProject.ID, "activation")
+		old := decode(request(outsider, http.MethodPost, otherPath, "version-a", workerpublish.Request{
+			Module: oldCode, CompatibilityDate: valid.CompatibilityDate, Hostname: hostname,
+		}, http.StatusCreated))
+		candidateRequest := workerpublish.Request{
+			Module: `export default { fetch() { return new Response("B") } };`, CompatibilityDate: valid.CompatibilityDate, Hostname: hostname, Stage: true,
+		}
+		wrongHost := candidateRequest
+		wrongHost.Hostname = "another.localhost"
+		request(outsider, http.MethodPost, otherPath, "wrong-host", wrongHost, http.StatusConflict)
+		candidate := decode(request(outsider, http.MethodPost, otherPath, "version-b", candidateRequest, http.StatusCreated))
+		if candidate.State != "ready" || candidate.WorkerId != old.WorkerId || candidate.Generation != old.Generation+1 || candidate.OperationOutcome != "succeeded" {
+			t.Fatalf("candidate: %+v", candidate)
+		}
+		replayed := decode(request(outsider, http.MethodPost, otherPath, "version-b", candidateRequest, http.StatusOK))
+		if replayed.Id != candidate.Id || replayed.OperationId != candidate.OperationId || replayed.State != "ready" {
+			t.Fatalf("repeated candidate publication: %+v", replayed)
+		}
+		request(outsider, http.MethodPost, otherPath, "another-candidate", candidateRequest, http.StatusConflict)
+		activationPath := metadataPath(otherProject.ID, candidate.Id) + "/activate"
+		if err := store.UpsertProjectMember(ctx, otherProject.ID, viewerUser.ID, "viewer"); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.UpsertProjectMember(ctx, otherProject.ID, developerUser.ID, "developer"); err != nil {
+			t.Fatal(err)
+		}
+		request(viewer, http.MethodPost, activationPath, "", nil, http.StatusForbidden)
+		request(owner, http.MethodPost, activationPath, "", nil, http.StatusNotFound)
+		request(outsider, http.MethodPost, metadataPath(otherProject.ID, old.Id)+"/activate", "", nil, http.StatusConflict)
+
+		streamCtx, cancelStream := context.WithCancel(ctx)
+		defer cancelStream()
+		publicRequest := func(path string) (*http.Response, error) {
+			req, err := http.NewRequestWithContext(streamCtx, http.MethodGet, public.URL+path, nil)
+			if err != nil {
+				return nil, err
+			}
+			req.Host = hostname
+			return outsider.Do(req)
+		}
+		publicBody := func() (string, error) {
+			response, err := publicRequest("/")
+			if err != nil {
+				return "", err
+			}
+			defer response.Body.Close()
+			if response.StatusCode != http.StatusOK {
+				return "", fmt.Errorf("public version returned HTTP %d", response.StatusCode)
+			}
+			data, err := io.ReadAll(response.Body)
+			return string(data), err
+		}
+		if body, err := publicBody(); err != nil || body != "A" {
+			t.Fatalf("candidate changed public traffic before activation: %q %v", body, err)
+		}
+		stream, err := publicRequest("/stream")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer stream.Body.Close()
+		prefix := make([]byte, len("A-start"))
+		if _, err := io.ReadFull(stream.Body, prefix); err != nil || string(prefix) != "A-start" {
+			t.Fatalf("old request did not start: %q %v", prefix, err)
+		}
+		activationClient, err := sharedclient.New(api.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		developerSession := &http.Request{Header: make(http.Header)}
+		for _, cookie := range developer.Jar.Cookies(apiURL) {
+			developerSession.AddCookie(cookie)
+		}
+		if err := activationClient.SetSessionCookie(developerSession.Header.Get("Cookie")); err != nil {
+			t.Fatal(err)
+		}
+		type activationResult struct {
+			op  apigen.Operation
+			err error
+		}
+		done := make(chan activationResult, 1)
+		go func() {
+			op, err := activationClient.ActivateWorkerDeployment(streamCtx, otherProject.ID, candidate.Id.String())
+			done <- activationResult{op: op, err: err}
+		}()
+		deadline := time.NewTimer(10 * time.Second)
+		defer deadline.Stop()
+		tick := time.NewTicker(30 * time.Millisecond)
+		defer tick.Stop()
+	visible:
+		for {
+			select {
+			case result := <-done:
+				t.Fatalf("activation finished while an old request was in flight: %+v", result)
+			case <-deadline.C:
+				t.Fatal("new version did not receive traffic during drain")
+			case <-tick.C:
+				body, err := publicBody()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if body == "B" {
+					break visible
+				}
+				if body != "A" {
+					t.Fatalf("unexpected public response %q", body)
+				}
+			}
+		}
+		if suffix, err := io.ReadAll(stream.Body); err != nil || string(suffix) != "A-finish" {
+			t.Fatalf("old request did not finish on A: %q %v", suffix, err)
+		}
+		var activated apigen.Operation
+		select {
+		case result := <-done:
+			if result.err != nil || result.op.Outcome != "succeeded" || result.op.Action != "worker.activate" {
+				t.Fatalf("activation result: %+v", result)
+			}
+			activated = result.op
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+		version, _, err := store.RouteSnapshot(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		duplicate, err := activationClient.ActivateWorkerDeployment(ctx, otherProject.ID, candidate.Id.String())
+		if err != nil || duplicate != activated {
+			t.Fatalf("duplicate activation changed its operation: %+v %v", duplicate, err)
+		}
+		repeatedVersion, _, err := store.RouteSnapshot(ctx)
+		if err != nil || repeatedVersion != version {
+			t.Fatalf("duplicate activation rewrote Gateway snapshot: %d to %d, %v", version, repeatedVersion, err)
+		}
+		measured, err := reservations.Usage(ctx, configuration.HostID, uuid.MustParse(otherProject.ID))
+		if err != nil || measured.ProjectUsed.Instances != 1 {
+			t.Fatalf("retired execution capacity: %+v %v", measured, err)
+		}
+		retired := decode(request(outsider, http.MethodGet, metadataPath(otherProject.ID, old.Id), "", nil, http.StatusOK))
+		active := decode(request(outsider, http.MethodGet, metadataPath(otherProject.ID, candidate.Id), "", nil, http.StatusOK))
+		if retired.State != "retired" || retired.ExecutionState != "stopped" || active.State != "active" || active.Hostname != retired.Hostname {
+			t.Fatalf("versions after switch: %+v %+v", retired, active)
+		}
+		if _, err := docker.ContainerInspect(ctx, old.ContainerId, client.ContainerInspectOptions{}); !cerrdefs.IsNotFound(err) {
+			t.Fatalf("retired Worker container was not removed: %v", err)
+		}
+		t.Logf("same-domain switch %s: version %s to %s, operation %s, old stream completed", hostname, retired.Id, active.Id, activated.Id)
+	})
 	if err := os.Chmod(configuration.Directory, 0o500); err != nil {
 		t.Fatal(err)
 	}

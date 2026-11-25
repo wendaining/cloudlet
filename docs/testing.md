@@ -102,7 +102,7 @@ go test -race -count=1 -tags=integration ./internal/routes
 
 ## workerd 集成验证
 
-Worker 首发验收使用真实 PostgreSQL、Docker、workerd、管理 HTTP 接口与 Gateway。
+Worker 首发与版本激活验收使用真实 PostgreSQL、Docker、workerd、管理 HTTP 接口与 Gateway。
 
 ```sh
 export DOCKER_HOST="$(docker context inspect --format '{{.Endpoints.docker.Host}}')"

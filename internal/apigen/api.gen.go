@@ -167,6 +167,9 @@ type DeployWorkerRequest struct {
 
 	// Module 已打包的单文件 JavaScript ES Module，UTF-8 编码后最多 1048576 字节。入口固定为 index.mjs。
 	Module string `json:"module"`
+
+	// Stage 现有 Worker 的候选版本使用 true，域名须与活动版本相同。候选版本就绪后需显式激活。
+	Stage *bool `json:"stage,omitempty"`
 }
 
 // Environment defines model for Environment.
@@ -682,16 +685,21 @@ type ClientInterface interface {
 	// 项目成员查询不可变 Worker 版本、执行与操作结果。.
 	GetWorkerDeployment(ctx context.Context, projectID string, deploymentID string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ActivateWorkerDeployment performs a POST /api/v1/projects/{projectID}/worker-deployments/{deploymentID}/activate (the `ActivateWorkerDeployment` operationId) request.
+	//
+	// 由项目所有者或开发者显式激活已就绪的候选版本。同一版本的重复激活返回原操作，域名保持不变。.
+	ActivateWorkerDeployment(ctx context.Context, projectID string, deploymentID string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// DeployWorkerWithBody performs a POST /api/v1/projects/{projectID}/workers/{name}/deployments (the `DeployWorker` operationId) request,
 	// with any type of body and a specified content type.
 	//
-	// 发布首个无状态 Worker 版本，等待真实运行时就绪并激活域名。所有者和开发者可以调用。同一幂等键复用操作。.
+	// 发布首个无状态 Worker 版本并激活域名，或通过 stage 准备后续版本。所有者和开发者可以调用。同一幂等键复用操作。.
 	DeployWorkerWithBody(ctx context.Context, projectID string, name string, params *DeployWorkerParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// DeployWorker performs a POST /api/v1/projects/{projectID}/workers/{name}/deployments (the `DeployWorker` operationId) request.
 	// Takes a body of the `application/json` content type.
 	//
-	// 发布首个无状态 Worker 版本，等待真实运行时就绪并激活域名。所有者和开发者可以调用。同一幂等键复用操作。.
+	// 发布首个无状态 Worker 版本并激活域名，或通过 stage 准备后续版本。所有者和开发者可以调用。同一幂等键复用操作。.
 	DeployWorker(ctx context.Context, projectID string, name string, params *DeployWorkerParams, body DeployWorkerJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetVersion performs a GET /api/v1/version (the `GetVersion` operationId) request.
@@ -1249,10 +1257,25 @@ func (c *Client) GetWorkerDeployment(ctx context.Context, projectID string, depl
 	return c.Client.Do(req)
 }
 
+// ActivateWorkerDeployment performs a POST /api/v1/projects/{projectID}/worker-deployments/{deploymentID}/activate (the `ActivateWorkerDeployment` operationId) request.
+//
+// 由项目所有者或开发者显式激活已就绪的候选版本。同一版本的重复激活返回原操作，域名保持不变。.
+func (c *Client) ActivateWorkerDeployment(ctx context.Context, projectID string, deploymentID string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewActivateWorkerDeploymentRequest(c.Server, projectID, deploymentID)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // DeployWorkerWithBody performs a POST /api/v1/projects/{projectID}/workers/{name}/deployments (the `DeployWorker` operationId) request,
 // with any type of body and a specified content type.
 //
-// 发布首个无状态 Worker 版本，等待真实运行时就绪并激活域名。所有者和开发者可以调用。同一幂等键复用操作。.
+// 发布首个无状态 Worker 版本并激活域名，或通过 stage 准备后续版本。所有者和开发者可以调用。同一幂等键复用操作。.
 func (c *Client) DeployWorkerWithBody(ctx context.Context, projectID string, name string, params *DeployWorkerParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewDeployWorkerRequestWithBody(c.Server, projectID, name, params, contentType, body)
 	if err != nil {
@@ -1268,7 +1291,7 @@ func (c *Client) DeployWorkerWithBody(ctx context.Context, projectID string, nam
 // DeployWorker performs a POST /api/v1/projects/{projectID}/workers/{name}/deployments (the `DeployWorker` operationId) request.
 // Takes a body of the `application/json` content type.
 //
-// 发布首个无状态 Worker 版本，等待真实运行时就绪并激活域名。所有者和开发者可以调用。同一幂等键复用操作。.
+// 发布首个无状态 Worker 版本并激活域名，或通过 stage 准备后续版本。所有者和开发者可以调用。同一幂等键复用操作。.
 func (c *Client) DeployWorker(ctx context.Context, projectID string, name string, params *DeployWorkerParams, body DeployWorkerJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewDeployWorkerRequest(c.Server, projectID, name, params, body)
 	if err != nil {
@@ -2617,6 +2640,47 @@ func NewGetWorkerDeploymentRequest(server string, projectID string, deploymentID
 	return req, nil
 }
 
+// NewActivateWorkerDeploymentRequest constructs an http.Request for the ActivateWorkerDeployment method
+func NewActivateWorkerDeploymentRequest(server string, projectID string, deploymentID string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "deploymentID", deploymentID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/worker-deployments/%s/activate", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewDeployWorkerRequest calls the generic DeployWorker builder with application/json body
 func NewDeployWorkerRequest(server string, projectID string, name string, params *DeployWorkerParams, body DeployWorkerJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -2988,10 +3052,17 @@ type ClientWithResponsesInterface interface {
 	// Returns a wrapper object for the known response body format(s).
 	GetWorkerDeploymentWithResponse(ctx context.Context, projectID string, deploymentID string, reqEditors ...RequestEditorFn) (*GetWorkerDeploymentResponse, error)
 
+	// ActivateWorkerDeploymentWithResponse performs a POST /api/v1/projects/{projectID}/worker-deployments/{deploymentID}/activate (the `ActivateWorkerDeployment` operationId) request.
+	//
+	// 由项目所有者或开发者显式激活已就绪的候选版本。同一版本的重复激活返回原操作，域名保持不变。.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	ActivateWorkerDeploymentWithResponse(ctx context.Context, projectID string, deploymentID string, reqEditors ...RequestEditorFn) (*ActivateWorkerDeploymentResponse, error)
+
 	// DeployWorkerWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/workers/{name}/deployments (the `DeployWorker` operationId) request,
 	// with any type of body and a specified content type.
 	//
-	// 发布首个无状态 Worker 版本，等待真实运行时就绪并激活域名。所有者和开发者可以调用。同一幂等键复用操作。.
+	// 发布首个无状态 Worker 版本并激活域名，或通过 stage 准备后续版本。所有者和开发者可以调用。同一幂等键复用操作。.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	DeployWorkerWithBodyWithResponse(ctx context.Context, projectID string, name string, params *DeployWorkerParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*DeployWorkerResponse, error)
@@ -2999,7 +3070,7 @@ type ClientWithResponsesInterface interface {
 	// DeployWorkerWithResponse performs a POST /api/v1/projects/{projectID}/workers/{name}/deployments (the `DeployWorker` operationId) request.
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
-	// 发布首个无状态 Worker 版本，等待真实运行时就绪并激活域名。所有者和开发者可以调用。同一幂等键复用操作。.
+	// 发布首个无状态 Worker 版本并激活域名，或通过 stage 准备后续版本。所有者和开发者可以调用。同一幂等键复用操作。.
 	DeployWorkerWithResponse(ctx context.Context, projectID string, name string, params *DeployWorkerParams, body DeployWorkerJSONRequestBody, reqEditors ...RequestEditorFn) (*DeployWorkerResponse, error)
 
 	// GetVersionWithResponse performs a GET /api/v1/version (the `GetVersion` operationId) request.
@@ -4981,6 +5052,96 @@ func (r GetWorkerDeploymentResponse) ContentType() string {
 	return ""
 }
 
+type ActivateWorkerDeploymentResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *Operation
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Error
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Error
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *Error
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
+	// JSON422 the response for an HTTP 422 `application/json` response
+	JSON422 *Error
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *Error
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ActivateWorkerDeploymentResponse) GetJSON200() *Operation {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r ActivateWorkerDeploymentResponse) GetJSON401() *Error {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r ActivateWorkerDeploymentResponse) GetJSON403() *Error {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r ActivateWorkerDeploymentResponse) GetJSON404() *Error {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r ActivateWorkerDeploymentResponse) GetJSON409() *Error {
+	return r.JSON409
+}
+
+// GetJSON422 returns the response for an HTTP 422 `application/json` response
+func (r ActivateWorkerDeploymentResponse) GetJSON422() *Error {
+	return r.JSON422
+}
+
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r ActivateWorkerDeploymentResponse) GetJSON503() *Error {
+	return r.JSON503
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r ActivateWorkerDeploymentResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r ActivateWorkerDeploymentResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ActivateWorkerDeploymentResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ActivateWorkerDeploymentResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ActivateWorkerDeploymentResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 // DeployWorkerResponse200Headers the declared response headers of an HTTP 200 response for DeployWorker
 type DeployWorkerResponse200Headers struct {
 	Location *string
@@ -5657,10 +5818,23 @@ func (c *ClientWithResponses) GetWorkerDeploymentWithResponse(ctx context.Contex
 	return ParseGetWorkerDeploymentResponse(rsp)
 }
 
+// ActivateWorkerDeploymentWithResponse performs a POST /api/v1/projects/{projectID}/worker-deployments/{deploymentID}/activate (the `ActivateWorkerDeployment` operationId) request.
+//
+// 由项目所有者或开发者显式激活已就绪的候选版本。同一版本的重复激活返回原操作，域名保持不变。.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) ActivateWorkerDeploymentWithResponse(ctx context.Context, projectID string, deploymentID string, reqEditors ...RequestEditorFn) (*ActivateWorkerDeploymentResponse, error) {
+	rsp, err := c.ActivateWorkerDeployment(ctx, projectID, deploymentID, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseActivateWorkerDeploymentResponse(rsp)
+}
+
 // DeployWorkerWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/workers/{name}/deployments (the `DeployWorker` operationId) request,
 // with any type of body and a specified content type.
 //
-// 发布首个无状态 Worker 版本，等待真实运行时就绪并激活域名。所有者和开发者可以调用。同一幂等键复用操作。.
+// 发布首个无状态 Worker 版本并激活域名，或通过 stage 准备后续版本。所有者和开发者可以调用。同一幂等键复用操作。.
 //
 // Returns a wrapper object for the known response body format(s).
 func (c *ClientWithResponses) DeployWorkerWithBodyWithResponse(ctx context.Context, projectID string, name string, params *DeployWorkerParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*DeployWorkerResponse, error) {
@@ -5674,7 +5848,7 @@ func (c *ClientWithResponses) DeployWorkerWithBodyWithResponse(ctx context.Conte
 // DeployWorkerWithResponse performs a POST /api/v1/projects/{projectID}/workers/{name}/deployments (the `DeployWorker` operationId) request.
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
-// 发布首个无状态 Worker 版本，等待真实运行时就绪并激活域名。所有者和开发者可以调用。同一幂等键复用操作。.
+// 发布首个无状态 Worker 版本并激活域名，或通过 stage 准备后续版本。所有者和开发者可以调用。同一幂等键复用操作。.
 func (c *ClientWithResponses) DeployWorkerWithResponse(ctx context.Context, projectID string, name string, params *DeployWorkerParams, body DeployWorkerJSONRequestBody, reqEditors ...RequestEditorFn) (*DeployWorkerResponse, error) {
 	rsp, err := c.DeployWorker(ctx, projectID, name, params, body, reqEditors...)
 	if err != nil {
@@ -7244,6 +7418,81 @@ func ParseGetWorkerDeploymentResponse(rsp *http.Response) (*GetWorkerDeploymentR
 	return response, nil
 }
 
+// ParseActivateWorkerDeploymentResponse parses an HTTP response from a ActivateWorkerDeploymentWithResponse call
+func ParseActivateWorkerDeploymentResponse(rsp *http.Response) (*ActivateWorkerDeploymentResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ActivateWorkerDeploymentResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest Operation
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseDeployWorkerResponse parses an HTTP response from a DeployWorkerWithResponse call
 func ParseDeployWorkerResponse(rsp *http.Response) (*DeployWorkerResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -7548,6 +7797,9 @@ type ServerInterface interface {
 
 	// (GET /api/v1/projects/{projectID}/worker-deployments/{deploymentID})
 	GetWorkerDeployment(c *gin.Context, projectID string, deploymentID string)
+
+	// (POST /api/v1/projects/{projectID}/worker-deployments/{deploymentID}/activate)
+	ActivateWorkerDeployment(c *gin.Context, projectID string, deploymentID string)
 
 	// (POST /api/v1/projects/{projectID}/workers/{name}/deployments)
 	DeployWorker(c *gin.Context, projectID string, name string, params DeployWorkerParams)
@@ -8486,6 +8738,40 @@ func (siw *ServerInterfaceWrapper) GetWorkerDeployment(c *gin.Context) {
 	siw.Handler.GetWorkerDeployment(c, projectID, deploymentID)
 }
 
+// ActivateWorkerDeployment operation middleware
+func (siw *ServerInterfaceWrapper) ActivateWorkerDeployment(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "deploymentID" -------------
+	var deploymentID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "deploymentID", c.Param("deploymentID"), &deploymentID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter deploymentID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ActivateWorkerDeployment(c, projectID, deploymentID)
+}
+
 // DeployWorker operation middleware
 func (siw *ServerInterfaceWrapper) DeployWorker(c *gin.Context) {
 
@@ -8620,4 +8906,5 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/secrets/:name/versions/:version/value", wrapper.GetProjectSecretValue)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/workers/:name/deployments", wrapper.DeployWorker)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/worker-deployments/:deploymentID", wrapper.GetWorkerDeployment)
+	router.POST(options.BaseURL+"/api/v1/projects/:projectID/worker-deployments/:deploymentID/activate", wrapper.ActivateWorkerDeployment)
 }

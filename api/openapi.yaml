@@ -762,7 +762,7 @@ paths:
           type: string
     post:
       operationId: deployWorker
-      description: 发布首个无状态 Worker 版本，等待真实运行时就绪并激活域名。所有者和开发者可以调用。同一幂等键复用操作。
+      description: 发布首个无状态 Worker 版本并激活域名，或通过 stage 准备后续版本。所有者和开发者可以调用。同一幂等键复用操作。
       security:
         - SessionCookie: []
       parameters:
@@ -899,6 +899,45 @@ paths:
           $ref: "#/components/responses/Error"
         default:
           $ref: "#/components/responses/Error"
+  /api/v1/projects/{projectID}/worker-deployments/{deploymentID}/activate:
+    parameters:
+      - name: projectID
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: deploymentID
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      operationId: activateWorkerDeployment
+      description: 由项目所有者或开发者显式激活已就绪的候选版本。同一版本的重复激活返回原操作，域名保持不变。
+      security:
+        - SessionCookie: []
+      responses:
+        "200":
+          description: 激活已完成
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "422":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+
 components:
   parameters:
     BrowserProjectID:
@@ -1358,6 +1397,10 @@ components:
           type: string
           maxLength: 253
           description: 无端口的公开域名。
+        stage:
+          type: boolean
+          default: false
+          description: 现有 Worker 的候选版本使用 true，域名须与活动版本相同。候选版本就绪后需显式激活。
     WorkerDeployment:
       type: object
       required:
