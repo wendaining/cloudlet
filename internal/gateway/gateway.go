@@ -18,7 +18,7 @@ import (
 
 type pathRoute struct {
 	segments []string
-	proxy    *httputil.ReverseProxy
+	handler  http.Handler
 }
 
 type routeSnapshot map[string][]pathRoute
@@ -47,6 +47,17 @@ func NewHandler(cfg config.Config, logger *slog.Logger) (*Handler, error) {
 // ReplaceRoutes atomically replaces all dynamic routes and preserves startup routes.
 // A dynamic route cannot use a host reserved by startup configuration.
 func (h *Handler) ReplaceRoutes(routes []config.Route) error {
+	return h.ReplaceRoutesWithSites(routes, nil)
+}
+
+// SiteRoute serves one published version from the root of its host.
+type SiteRoute struct {
+	Host    string
+	Handler http.Handler
+}
+
+// ReplaceRoutesWithSites applies proxy routes and in-process sites together.
+func (h *Handler) ReplaceRoutesWithSites(routes []config.Route, sites []SiteRoute) error {
 	combined := slices.Concat(h.staticRoutes, routes)
 	if err := config.ValidateRoutes(combined); err != nil {
 		return err
@@ -60,7 +71,7 @@ func (h *Handler) ReplaceRoutes(routes []config.Route) error {
 			return fmt.Errorf("route host %q is reserved by startup configuration", route.Host)
 		}
 	}
-	proxies := make(routeSnapshot, len(combined))
+	snapshot := make(routeSnapshot, len(combined)+len(sites))
 	for _, route := range combined {
 		target, err := url.Parse(route.Target)
 		if err != nil {
@@ -82,14 +93,29 @@ func (h *Handler) ReplaceRoutes(routes []config.Route) error {
 			segments = strings.Split(route.PathPrefix[1:], "/")
 		}
 		host := CanonicalHost(route.Host)
-		proxies[host] = append(proxies[host], pathRoute{segments: segments, proxy: proxy})
+		snapshot[host] = append(snapshot[host], pathRoute{segments: segments, handler: proxy})
 	}
-	for _, routes := range proxies {
+	for _, site := range sites {
+		if err := config.ValidateRouteHost(site.Host); err != nil {
+			return err
+		}
+		host := CanonicalHost(site.Host)
+		if site.Handler == nil || staticHosts[host] {
+			return fmt.Errorf("invalid static site route for host %q", site.Host)
+		}
+		for _, route := range snapshot[host] {
+			if len(route.segments) == 0 {
+				return fmt.Errorf("duplicate route for host %q and path prefix /", site.Host)
+			}
+		}
+		snapshot[host] = append(snapshot[host], pathRoute{handler: site.Handler})
+	}
+	for _, routes := range snapshot {
 		slices.SortFunc(routes, func(a, b pathRoute) int {
 			return cmp.Compare(len(b.segments), len(a.segments))
 		})
 	}
-	h.snapshot.Store(&proxies)
+	h.snapshot.Store(&snapshot)
 	return nil
 }
 
@@ -97,7 +123,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	routes := (*h.snapshot.Load())[CanonicalHost(r.Host)]
 	if len(routes) > 0 {
 		if len(routes[0].segments) == 0 {
-			routes[0].proxy.ServeHTTP(w, r)
+			routes[0].handler.ServeHTTP(w, r)
 			return
 		}
 		// Split before decoding so an escaped slash stays in its original segment.
@@ -116,7 +142,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, route := range routes {
 			if n := len(route.segments); n <= len(segments) && slices.Equal(route.segments, segments[:n]) {
-				route.proxy.ServeHTTP(w, r)
+				route.handler.ServeHTTP(w, r)
 				return
 			}
 		}
