@@ -339,6 +339,25 @@ paths:
           $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/browser-sessions/{sessionID}/click:
+    parameters:
+      - $ref: '#/components/parameters/BrowserProjectID'
+      - $ref: '#/components/parameters/BrowserSessionID'
+    post:
+      operationId: clickBrowserPage
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClickBrowserPageRequest'
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '204':
+          description: 已点击当前页面的指定元素
   /api/v1/projects/{projectID}/browser-sessions/{sessionID}/navigate:
     parameters:
       - $ref: '#/components/parameters/BrowserProjectID'
@@ -988,6 +1007,21 @@ components:
         database_version:
           type: integer
           format: int64
+    ClickBrowserPageRequest:
+      type: object
+      additionalProperties: false
+      required: [selector]
+      properties:
+        selector:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          description: 唯一定位当前页面元素的 CSS 选择器
+        timeout_ms:
+          type: integer
+          minimum: 1
+          maximum: 30000
+          default: 10000
     CreateProjectRequest:
       type: object
       additionalProperties: false
