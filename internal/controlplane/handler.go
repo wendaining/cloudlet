@@ -18,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/wendaining/cloudlet/internal/apigen"
 	"github.com/wendaining/cloudlet/internal/browser"
+	"github.com/wendaining/cloudlet/internal/capacity"
 	"github.com/wendaining/cloudlet/internal/config"
 	"github.com/wendaining/cloudlet/internal/database"
 	"github.com/wendaining/cloudlet/internal/mcpserver"
@@ -266,6 +267,35 @@ func (h *handler) RenameProject(c *gin.Context, projectID string) {
 		return
 	}
 	c.JSON(http.StatusOK, projectResponse(database.Project{ID: normalizedID, Name: name}))
+}
+
+// GetProjectCapacity exposes the project quota and active usage. Host budgets
+// remain internal because they aggregate usage across projects.
+func (h *handler) GetProjectCapacity(c *gin.Context, projectID string) {
+	_, normalizedID, _, ok := h.projectAccess(c, projectID)
+	if !ok {
+		return
+	}
+	capacityStore, err := capacity.NewStore(h.store.DB)
+	if err != nil {
+		h.failure(c, err)
+		return
+	}
+	usage, err := capacityStore.ProjectUsage(c.Request.Context(), uuid.MustParse(normalizedID))
+	if errors.Is(err, capacity.ErrProjectQuotaNotFound) {
+		c.JSON(http.StatusNotFound, apigen.Error{Message: "项目配额未配置"})
+		return
+	}
+	if err != nil {
+		h.failure(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, apigen.ProjectCapacity{
+		ProjectId: usage.ProjectID,
+		Limit:     resourceAmounts(usage.Limit),
+		Used:      resourceAmounts(usage.Used),
+		Remaining: resourceAmounts(usage.Remaining),
+	})
 }
 
 func (h *handler) ListProjectMembers(c *gin.Context, projectID string) {
@@ -558,6 +588,14 @@ func normalizeProjectName(name string) (string, bool) {
 
 func projectResponse(project database.Project) apigen.Project {
 	return apigen.Project{Id: uuid.MustParse(project.ID), Name: project.Name}
+}
+
+func resourceAmounts(resources capacity.Resources) apigen.ResourceAmounts {
+	return apigen.ResourceAmounts{
+		CpuMillis:   resources.CPUMillis,
+		MemoryBytes: resources.MemoryBytes,
+		Instances:   resources.Instances,
+	}
 }
 
 func projectSecretVersionResponse(version database.ProjectSecretVersion) apigen.ProjectSecretVersion {

@@ -137,6 +137,25 @@ export interface paths {
         patch: operations["renameProject"];
         trace?: never;
     };
+    "/api/v1/projects/{projectID}/capacity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        /** @description 返回项目成员可见的项目额度、活动预留占用和剩余量；三个值来自同一数据库快照。 */
+        get: operations["getProjectCapacity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{projectID}/members": {
         parameters: {
             query?: never;
@@ -208,6 +227,26 @@ export interface paths {
         get: operations["getBrowserSession"];
         put?: never;
         post?: never;
+        /** @description 停止容器并确认清理，释放容量后返回会话终态。重复关闭返回已有终态。 */
+        delete: operations["closeBrowserSession"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/browser-sessions/{sessionID}/click": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["clickBrowserPage"];
         delete?: never;
         options?: never;
         head?: never;
@@ -233,7 +272,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/projects/{projectID}/browser-sessions/{sessionID}/click": {
+    "/api/v1/projects/{projectID}/browser-sessions/{sessionID}/console": {
         parameters: {
             query?: never;
             header?: never;
@@ -243,9 +282,9 @@ export interface paths {
             };
             cookie?: never;
         };
-        get?: never;
+        get: operations["getBrowserConsole"];
         put?: never;
-        post: operations["clickBrowserPage"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -375,6 +414,12 @@ export interface components {
             /** Format: int64 */
             database_version: number;
         };
+        ClickBrowserPageRequest: {
+            /** @description 唯一定位当前页面元素的 CSS 选择器 */
+            selector: string;
+            /** @default 10000 */
+            timeout_ms: number;
+        };
         CreateProjectRequest: {
             /** @description 服务端去除首尾空白后必须包含 1 至 100 个 Unicode 字符；原始字符串可以包含首尾空白。 */
             name: string;
@@ -390,6 +435,31 @@ export interface components {
         };
         /** @enum {string} */
         ProjectRole: "owner" | "developer" | "viewer";
+        ResourceAmounts: {
+            /**
+             * Format: int64
+             * @description CPU 毫核。
+             */
+            cpu_millis: number;
+            /**
+             * Format: int64
+             * @description 内存字节。
+             */
+            memory_bytes: number;
+            /**
+             * Format: int64
+             * @description 实例数。
+             */
+            instances: number;
+        };
+        /** @description 项目配额与活动预留快照。used 可能超过 limit；remaining 是按资源钳制后的额度内余量，不表示超用标记。 */
+        ProjectCapacity: {
+            /** Format: uuid */
+            project_id: string;
+            limit: components["schemas"]["ResourceAmounts"];
+            used: components["schemas"]["ResourceAmounts"];
+            remaining: components["schemas"]["ResourceAmounts"];
+        };
         /** @enum {string} */
         ProjectMemberRole: "developer" | "viewer";
         ProjectMember: {
@@ -442,11 +512,20 @@ export interface components {
             user: components["schemas"]["User"];
             projects: components["schemas"]["Project"][];
         };
-        ClickBrowserPageRequest: {
-            /** @description 唯一定位当前页面元素的 CSS 选择器 */
-            selector: string;
-            /** @default 10000 */
-            timeout_ms: number;
+        BrowserConsoleEntry: {
+            /** @description console 表示控制台消息，page_error 表示未捕获的页面错误 */
+            kind: string;
+            level: string;
+            message: string;
+            truncated: boolean;
+        };
+        BrowserConsole: {
+            entries: components["schemas"]["BrowserConsoleEntry"][];
+            /**
+             * Format: int64
+             * @description 已从会话历史移除的旧记录数
+             */
+            dropped: number;
         };
         /** @enum {string} */
         BrowserSessionStatus: "starting" | "ready" | "failed" | "closed";
@@ -773,6 +852,31 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    getProjectCapacity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 项目 CPU、内存与实例容量使用快照 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectCapacity"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     listProjectMembers: {
         parameters: {
             query?: never;
@@ -896,6 +1000,58 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    closeBrowserSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已结束的浏览器会话 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrowserSession"];
+                };
+            };
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    clickBrowserPage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClickBrowserPageRequest"];
+            };
+        };
+        responses: {
+            /** @description 已点击当前页面的指定元素 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
     navigateBrowserSession: {
         parameters: {
             query?: never;
@@ -924,7 +1080,7 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
-    clickBrowserPage: {
+    getBrowserConsole: {
         parameters: {
             query?: never;
             header?: never;
@@ -934,18 +1090,16 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ClickBrowserPageRequest"];
-            };
-        };
+        requestBody?: never;
         responses: {
-            /** @description 已点击当前页面的指定元素 */
-            204: {
+            /** @description 会话的最近控制台消息和页面错误 */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["BrowserConsole"];
+                };
             };
             default: components["responses"]["Error"];
         };

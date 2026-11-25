@@ -4,6 +4,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { chromium, errors, type Page } from 'playwright';
 import { readSessionDeadline } from './session-deadline.ts';
 import { readViewport } from './viewport.ts';
+import { collectConsole } from './console-history.ts';
 
 const token = process.env.CLOUDLET_BROWSER_TOKEN;
 if (!token || !/^[A-Za-z0-9_-]{32,}$/.test(token)) {
@@ -133,9 +134,11 @@ function checkExpiry() {
 
 checkExpiry();
 let page: Page;
+let readConsole: ReturnType<typeof collectConsole>;
 if (!stopping) {
   try {
     page = await browser.newPage(viewportOptions);
+    readConsole = collectConsole(page);
   } catch (error) {
     if (!stopping) {
       await shutdown(1);
@@ -161,7 +164,8 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
   const screenshot = request.url === '/screenshot';
   const click = request.url === '/click';
   const viewport = request.method === 'GET' && request.url === '/viewport';
-  if (!viewport && (request.method !== 'POST' || (!screenshot && !click && request.url !== '/navigate'))) {
+  const consoleHistory = request.method === 'GET' && request.url === '/console';
+  if (!viewport && !consoleHistory && (request.method !== 'POST' || (!screenshot && !click && request.url !== '/navigate'))) {
     send(response, 404, { error: 'not_found' });
     return;
   }
@@ -170,6 +174,10 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
   if (provided.length !== credential.length || !timingSafeEqual(provided, credential)) {
     response.setHeader('WWW-Authenticate', 'Bearer');
     send(response, 401, { error: 'unauthorized' });
+    return;
+  }
+  if (consoleHistory) {
+    send(response, 200, readConsole());
     return;
   }
   const command = viewport ? undefined : await readCommand(request, screenshot, click);

@@ -176,6 +176,31 @@ paths:
           $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/capacity:
+    parameters:
+      - name: projectID
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: getProjectCapacity
+      description: 返回项目成员可见的项目额度、活动预留占用和剩余量；三个值来自同一数据库快照。
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 项目 CPU、内存与实例容量使用快照
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectCapacity'
+        '401':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
   /api/v1/projects/{projectID}/members:
     parameters:
       - name: projectID
@@ -296,6 +321,43 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BrowserSession'
+    delete:
+      operationId: closeBrowserSession
+      description: 停止容器并确认清理，释放容量后返回会话终态。重复关闭返回已有终态。
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 已结束的浏览器会话
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserSession'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/browser-sessions/{sessionID}/click:
+    parameters:
+      - $ref: '#/components/parameters/BrowserProjectID'
+      - $ref: '#/components/parameters/BrowserSessionID'
+    post:
+      operationId: clickBrowserPage
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClickBrowserPageRequest'
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '204':
+          description: 已点击当前页面的指定元素
   /api/v1/projects/{projectID}/browser-sessions/{sessionID}/navigate:
     parameters:
       - $ref: '#/components/parameters/BrowserProjectID'
@@ -319,25 +381,23 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BrowserNavigation'
-  /api/v1/projects/{projectID}/browser-sessions/{sessionID}/click:
+  /api/v1/projects/{projectID}/browser-sessions/{sessionID}/console:
     parameters:
       - $ref: '#/components/parameters/BrowserProjectID'
       - $ref: '#/components/parameters/BrowserSessionID'
-    post:
-      operationId: clickBrowserPage
+    get:
+      operationId: getBrowserConsole
       security:
         - SessionCookie: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ClickBrowserPageRequest'
       responses:
         default:
           $ref: '#/components/responses/Error'
-        '204':
-          description: 已点击当前页面的指定元素
+        '200':
+          description: 会话的最近控制台消息和页面错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserConsole'
   /api/v1/projects/{projectID}/sites/{siteName}/versions:
     parameters:
       - $ref: '#/components/parameters/SiteProjectID'
@@ -599,6 +659,21 @@ components:
         database_version:
           type: integer
           format: int64
+    ClickBrowserPageRequest:
+      type: object
+      additionalProperties: false
+      required: [selector]
+      properties:
+        selector:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          description: 唯一定位当前页面元素的 CSS 选择器
+        timeout_ms:
+          type: integer
+          minimum: 1
+          maximum: 30000
+          default: 10000
     CreateProjectRequest:
       type: object
       additionalProperties: false
@@ -627,6 +702,39 @@ components:
     ProjectRole:
       type: string
       enum: [owner, developer, viewer]
+    ResourceAmounts:
+      type: object
+      required: [cpu_millis, memory_bytes, instances]
+      properties:
+        cpu_millis:
+          type: integer
+          format: int64
+          minimum: 0
+          description: CPU 毫核。
+        memory_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: 内存字节。
+        instances:
+          type: integer
+          format: int64
+          minimum: 0
+          description: 实例数。
+    ProjectCapacity:
+      type: object
+      description: 项目配额与活动预留快照。used 可能超过 limit；remaining 是按资源钳制后的额度内余量，不表示超用标记。
+      required: [project_id, limit, used, remaining]
+      properties:
+        project_id:
+          type: string
+          format: uuid
+        limit:
+          $ref: '#/components/schemas/ResourceAmounts'
+        used:
+          $ref: '#/components/schemas/ResourceAmounts'
+        remaining:
+          $ref: '#/components/schemas/ResourceAmounts'
     ProjectMemberRole:
       type: string
       enum: [developer, viewer]
@@ -727,21 +835,34 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Project"
-    ClickBrowserPageRequest:
+    BrowserConsoleEntry:
       type: object
-      additionalProperties: false
-      required: [selector]
+      required: [kind, level, message, truncated]
       properties:
-        selector:
+        kind:
           type: string
-          minLength: 1
-          maxLength: 1024
-          description: 唯一定位当前页面元素的 CSS 选择器
-        timeout_ms:
+          description: console 表示控制台消息，page_error 表示未捕获的页面错误
+        level:
+          type: string
+        message:
+          type: string
+          maxLength: 512
+        truncated:
+          type: boolean
+    BrowserConsole:
+      type: object
+      required: [entries, dropped]
+      properties:
+        entries:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/BrowserConsoleEntry'
+        dropped:
           type: integer
-          minimum: 1
-          maximum: 30000
-          default: 10000
+          format: int64
+          minimum: 0
+          description: 已从会话历史移除的旧记录数
     BrowserSessionStatus:
       type: string
       enum: [starting, ready, failed, closed]
