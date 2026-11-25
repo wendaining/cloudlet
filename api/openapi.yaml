@@ -379,6 +379,34 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BrowserConsole'
+  /api/v1/projects/{projectID}/sites:
+    parameters:
+      - $ref: '#/components/parameters/SiteProjectID'
+    get:
+      operationId: listStaticSites
+      description: 按站点名称升序分页列出项目成员可见的静态站点。
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: '#/components/parameters/StaticSitePageLimit'
+        - $ref: '#/components/parameters/StaticSitePageCursor'
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 项目站点列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaticSitePage'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '503':
+          $ref: '#/components/responses/Error'
   /api/v1/projects/{projectID}/sites/{siteName}/versions:
     parameters:
       - $ref: '#/components/parameters/SiteProjectID'
@@ -420,6 +448,31 @@ paths:
         '413':
           $ref: '#/components/responses/Error'
         '415':
+          $ref: '#/components/responses/Error'
+    get:
+      operationId: listStaticSiteVersions
+      description: 按创建时间和版本标识降序分页列出站点版本摘要。
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: '#/components/parameters/StaticSitePageLimit'
+        - $ref: '#/components/parameters/StaticSitePageCursor'
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 静态站点版本列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaticSiteVersionPage'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '503':
           $ref: '#/components/responses/Error'
   /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}:
     parameters:
@@ -733,6 +786,22 @@ components:
       schema:
         type: string
         format: uuid
+    StaticSitePageLimit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+    StaticSitePageCursor:
+      name: cursor
+      in: query
+      description: 同一个列表接口上一页返回的 next_cursor。首次查询时省略。
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 63
     SiteProjectID:
       name: projectID
       in: path
@@ -1015,6 +1084,40 @@ components:
           type: string
         title:
           type: string
+    StaticSiteSummary:
+      type: object
+      required: [id, name, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    StaticSitePage:
+      type: object
+      required: [sites]
+      properties:
+        sites:
+          type: array
+          items:
+            $ref: '#/components/schemas/StaticSiteSummary'
+        next_cursor:
+          type: string
+          description: 有更多结果时返回，用于请求下一页。
+    StaticSiteVersionPage:
+      type: object
+      required: [versions]
+      properties:
+        versions:
+          type: array
+          items:
+            $ref: '#/components/schemas/StaticSiteVersion'
+        next_cursor:
+          type: string
+          description: 有更多结果时返回，用于请求下一页。
     StaticSiteVersion:
       type: object
       required: [id, site_id, artifact_digest, status, created_at]
