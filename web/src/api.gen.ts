@@ -272,6 +272,45 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{projectID}/browser-sessions/{sessionID}/screenshots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["captureBrowserScreenshot"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/browser-sessions/{sessionID}/screenshots/{screenshotID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+                screenshotID: string;
+            };
+            cookie?: never;
+        };
+        get: operations["downloadBrowserScreenshot"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{projectID}/sites/{siteName}/versions": {
         parameters: {
             query?: never;
@@ -307,6 +346,27 @@ export interface paths {
         get: operations["getStaticSiteVersion"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["SiteProjectID"];
+                siteName: components["parameters"]["SiteName"];
+                versionID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 项目所有者绑定域名并激活站点的首个就绪版本。重复相同请求返回同一发布结果。 */
+        post: operations["publishStaticSiteVersion"];
         delete?: never;
         options?: never;
         head?: never;
@@ -599,6 +659,18 @@ export interface components {
              */
             dropped: number;
         };
+        BrowserScreenshot: {
+            /** Format: uuid */
+            id: string;
+            /** @description 原始 PNG 的 SHA-256 摘要 */
+            artifact_digest: string;
+            /** Format: int64 */
+            size_bytes: number;
+            /** @description 需要项目会话凭据的相对下载地址 */
+            download_url: string;
+            /** Format: date-time */
+            created_at: string;
+        };
         /** @enum {string} */
         BrowserSessionStatus: "starting" | "ready" | "failed" | "closed";
         BrowserSession: {
@@ -616,6 +688,19 @@ export interface components {
         BrowserNavigation: {
             url: string;
             title: string;
+        };
+        StaticSitePublicationRequest: {
+            /** @description 不带端口的域名，国际化域名使用 ASCII 形式。 */
+            hostname: string;
+        };
+        StaticSitePublication: {
+            /** Format: uuid */
+            site_id: string;
+            /** Format: uuid */
+            version_id: string;
+            hostname: string;
+            /** Format: uri */
+            url: string;
         };
         StaticSiteVersion: {
             /** Format: uuid */
@@ -1194,6 +1279,56 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    captureBrowserScreenshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 截图已保存 */
+            201: {
+                headers: {
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrowserScreenshot"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    downloadBrowserScreenshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+                screenshotID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 原始 PNG 截图 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": string;
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
     uploadStaticSiteVersion: {
         parameters: {
             query?: never;
@@ -1246,6 +1381,41 @@ export interface operations {
             200: components["responses"]["StaticSiteVersion"];
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    publishStaticSiteVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["SiteProjectID"];
+                siteName: components["parameters"]["SiteName"];
+                versionID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaticSitePublicationRequest"];
+            };
+        };
+        responses: {
+            /** @description 已生效的首个站点发布及其 Gateway 地址 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaticSitePublication"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };

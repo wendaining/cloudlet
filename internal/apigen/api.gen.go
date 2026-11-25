@@ -119,6 +119,18 @@ type BrowserNavigation struct {
 	Url   string `json:"url"`
 }
 
+// BrowserScreenshot defines model for BrowserScreenshot.
+type BrowserScreenshot struct {
+	// ArtifactDigest 原始 PNG 的 SHA-256 摘要
+	ArtifactDigest string    `json:"artifact_digest"`
+	CreatedAt      time.Time `json:"created_at"`
+
+	// DownloadUrl 需要项目会话凭据的相对下载地址
+	DownloadUrl string             `json:"download_url"`
+	Id          openapi_types.UUID `json:"id"`
+	SizeBytes   int64              `json:"size_bytes"`
+}
+
 // BrowserSession defines model for BrowserSession.
 type BrowserSession struct {
 	// Endpoint 需要项目会话凭据的相对管理 API 地址
@@ -287,6 +299,20 @@ type Session struct {
 	User     User      `json:"user"`
 }
 
+// StaticSitePublication defines model for StaticSitePublication.
+type StaticSitePublication struct {
+	Hostname  string             `json:"hostname"`
+	SiteId    openapi_types.UUID `json:"site_id"`
+	Url       string             `json:"url"`
+	VersionId openapi_types.UUID `json:"version_id"`
+}
+
+// StaticSitePublicationRequest defines model for StaticSitePublicationRequest.
+type StaticSitePublicationRequest struct {
+	// Hostname 不带端口的域名，国际化域名使用 ASCII 形式。
+	Hostname string `json:"hostname"`
+}
+
 // StaticSiteVersion defines model for StaticSiteVersion.
 type StaticSiteVersion struct {
 	ArtifactDigest string             `json:"artifact_digest"`
@@ -383,6 +409,9 @@ type CreateS3BindingJSONRequestBody = S3BindingInput
 
 // CreateProjectSecretVersionJSONRequestBody defines body for CreateProjectSecretVersion for application/json ContentType.
 type CreateProjectSecretVersionJSONRequestBody = CreateProjectSecretRequest
+
+// PublishStaticSiteVersionJSONRequestBody defines body for PublishStaticSiteVersion for application/json ContentType.
+type PublishStaticSiteVersionJSONRequestBody = StaticSitePublicationRequest
 
 // DeployWorkerJSONRequestBody defines body for DeployWorker for application/json ContentType.
 type DeployWorkerJSONRequestBody = DeployWorkerRequest
@@ -526,6 +555,12 @@ type ClientInterface interface {
 	// Takes a body of the `application/json` content type.
 	NavigateBrowserSession(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, body NavigateBrowserSessionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// CaptureBrowserScreenshot performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/screenshots (the `CaptureBrowserScreenshot` operationId) request.
+	CaptureBrowserScreenshot(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DownloadBrowserScreenshot performs a GET /api/v1/projects/{projectID}/browser-sessions/{sessionID}/screenshots/{screenshotID} (the `DownloadBrowserScreenshot` operationId) request.
+	DownloadBrowserScreenshot(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, screenshotID openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetProjectCapacity performs a GET /api/v1/projects/{projectID}/capacity (the `GetProjectCapacity` operationId) request.
 	//
 	// 返回项目成员可见的项目额度、活动预留占用和剩余量；三个值来自同一数据库快照。.
@@ -610,6 +645,18 @@ type ClientInterface interface {
 	//
 	// 项目成员按标识读取一个静态站点版本。.
 	GetStaticSiteVersion(ctx context.Context, projectID SiteProjectID, siteName SiteName, versionID string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PublishStaticSiteVersionWithBody performs a POST /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/publish (the `PublishStaticSiteVersion` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// 项目所有者绑定域名并激活站点的首个就绪版本。重复相同请求返回同一发布结果。.
+	PublishStaticSiteVersionWithBody(ctx context.Context, projectID SiteProjectID, siteName SiteName, versionID string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PublishStaticSiteVersion performs a POST /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/publish (the `PublishStaticSiteVersion` operationId) request.
+	// Takes a body of the `application/json` content type.
+	//
+	// 项目所有者绑定域名并激活站点的首个就绪版本。重复相同请求返回同一发布结果。.
+	PublishStaticSiteVersion(ctx context.Context, projectID SiteProjectID, siteName SiteName, versionID string, body PublishStaticSiteVersionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetWorkerDeployment performs a GET /api/v1/projects/{projectID}/worker-deployments/{deploymentID} (the `GetWorkerDeployment` operationId) request.
 	//
@@ -867,6 +914,32 @@ func (c *Client) NavigateBrowserSession(ctx context.Context, projectID BrowserPr
 	return c.Client.Do(req)
 }
 
+// CaptureBrowserScreenshot performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/screenshots (the `CaptureBrowserScreenshot` operationId) request.
+func (c *Client) CaptureBrowserScreenshot(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCaptureBrowserScreenshotRequest(c.Server, projectID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// DownloadBrowserScreenshot performs a GET /api/v1/projects/{projectID}/browser-sessions/{sessionID}/screenshots/{screenshotID} (the `DownloadBrowserScreenshot` operationId) request.
+func (c *Client) DownloadBrowserScreenshot(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, screenshotID openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDownloadBrowserScreenshotRequest(c.Server, projectID, sessionID, screenshotID)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // GetProjectCapacity performs a GET /api/v1/projects/{projectID}/capacity (the `GetProjectCapacity` operationId) request.
 //
 // 返回项目成员可见的项目额度、活动预留占用和剩余量；三个值来自同一数据库快照。.
@@ -1102,6 +1175,38 @@ func (c *Client) UploadStaticSiteVersionWithBody(ctx context.Context, projectID 
 // 项目成员按标识读取一个静态站点版本。.
 func (c *Client) GetStaticSiteVersion(ctx context.Context, projectID SiteProjectID, siteName SiteName, versionID string, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetStaticSiteVersionRequest(c.Server, projectID, siteName, versionID)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// PublishStaticSiteVersionWithBody performs a POST /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/publish (the `PublishStaticSiteVersion` operationId) request,
+// with any type of body and a specified content type.
+//
+// 项目所有者绑定域名并激活站点的首个就绪版本。重复相同请求返回同一发布结果。.
+func (c *Client) PublishStaticSiteVersionWithBody(ctx context.Context, projectID SiteProjectID, siteName SiteName, versionID string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPublishStaticSiteVersionRequestWithBody(c.Server, projectID, siteName, versionID, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// PublishStaticSiteVersion performs a POST /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/publish (the `PublishStaticSiteVersion` operationId) request.
+// Takes a body of the `application/json` content type.
+//
+// 项目所有者绑定域名并激活站点的首个就绪版本。重复相同请求返回同一发布结果。.
+func (c *Client) PublishStaticSiteVersion(ctx context.Context, projectID SiteProjectID, siteName SiteName, versionID string, body PublishStaticSiteVersionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPublishStaticSiteVersionRequest(c.Server, projectID, siteName, versionID, body)
 	if err != nil {
 		return nil, err
 	}
@@ -1652,6 +1757,95 @@ func NewNavigateBrowserSessionRequestWithBody(server string, projectID BrowserPr
 	return req, nil
 }
 
+// NewCaptureBrowserScreenshotRequest constructs an http.Request for the CaptureBrowserScreenshot method
+func NewCaptureBrowserScreenshotRequest(server string, projectID BrowserProjectID, sessionID BrowserSessionID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "sessionID", sessionID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/browser-sessions/%s/screenshots", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewDownloadBrowserScreenshotRequest constructs an http.Request for the DownloadBrowserScreenshot method
+func NewDownloadBrowserScreenshotRequest(server string, projectID BrowserProjectID, sessionID BrowserSessionID, screenshotID openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "sessionID", sessionID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "screenshotID", screenshotID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/browser-sessions/%s/screenshots/%s", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewGetProjectCapacityRequest constructs an http.Request for the GetProjectCapacity method
 func NewGetProjectCapacityRequest(server string, projectID string) (*http.Request, error) {
 	var err error
@@ -2191,6 +2385,67 @@ func NewGetStaticSiteVersionRequest(server string, projectID SiteProjectID, site
 	return req, nil
 }
 
+// NewPublishStaticSiteVersionRequest calls the generic PublishStaticSiteVersion builder with application/json body
+func NewPublishStaticSiteVersionRequest(server string, projectID SiteProjectID, siteName SiteName, versionID string, body PublishStaticSiteVersionJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPublishStaticSiteVersionRequestWithBody(server, projectID, siteName, versionID, "application/json", bodyReader)
+}
+
+// NewPublishStaticSiteVersionRequestWithBody constructs an http.Request for the PublishStaticSiteVersion method, with any body, and a specified content type
+func NewPublishStaticSiteVersionRequestWithBody(server string, projectID SiteProjectID, siteName SiteName, versionID string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "siteName", siteName, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "versionID", versionID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/sites/%s/versions/%s/publish", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewGetWorkerDeploymentRequest constructs an http.Request for the GetWorkerDeployment method
 func NewGetWorkerDeploymentRequest(server string, projectID string, deploymentID string) (*http.Request, error) {
 	var err error
@@ -2461,6 +2716,16 @@ type ClientWithResponsesInterface interface {
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	NavigateBrowserSessionWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, body NavigateBrowserSessionJSONRequestBody, reqEditors ...RequestEditorFn) (*NavigateBrowserSessionResponse, error)
 
+	// CaptureBrowserScreenshotWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/screenshots (the `CaptureBrowserScreenshot` operationId) request.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	CaptureBrowserScreenshotWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, reqEditors ...RequestEditorFn) (*CaptureBrowserScreenshotResponse, error)
+
+	// DownloadBrowserScreenshotWithResponse performs a GET /api/v1/projects/{projectID}/browser-sessions/{sessionID}/screenshots/{screenshotID} (the `DownloadBrowserScreenshot` operationId) request.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	DownloadBrowserScreenshotWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, screenshotID openapi_types.UUID, reqEditors ...RequestEditorFn) (*DownloadBrowserScreenshotResponse, error)
+
 	// GetProjectCapacityWithResponse performs a GET /api/v1/projects/{projectID}/capacity (the `GetProjectCapacity` operationId) request.
 	//
 	// 返回项目成员可见的项目额度、活动预留占用和剩余量；三个值来自同一数据库快照。.
@@ -2571,6 +2836,20 @@ type ClientWithResponsesInterface interface {
 	//
 	// Returns a wrapper object for the known response body format(s).
 	GetStaticSiteVersionWithResponse(ctx context.Context, projectID SiteProjectID, siteName SiteName, versionID string, reqEditors ...RequestEditorFn) (*GetStaticSiteVersionResponse, error)
+
+	// PublishStaticSiteVersionWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/publish (the `PublishStaticSiteVersion` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// 项目所有者绑定域名并激活站点的首个就绪版本。重复相同请求返回同一发布结果。.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	PublishStaticSiteVersionWithBodyWithResponse(ctx context.Context, projectID SiteProjectID, siteName SiteName, versionID string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PublishStaticSiteVersionResponse, error)
+
+	// PublishStaticSiteVersionWithResponse performs a POST /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/publish (the `PublishStaticSiteVersion` operationId) request.
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// 项目所有者绑定域名并激活站点的首个就绪版本。重复相同请求返回同一发布结果。.
+	PublishStaticSiteVersionWithResponse(ctx context.Context, projectID SiteProjectID, siteName SiteName, versionID string, body PublishStaticSiteVersionJSONRequestBody, reqEditors ...RequestEditorFn) (*PublishStaticSiteVersionResponse, error)
 
 	// GetWorkerDeploymentWithResponse performs a GET /api/v1/projects/{projectID}/worker-deployments/{deploymentID} (the `GetWorkerDeployment` operationId) request.
 	//
@@ -3322,6 +3601,102 @@ func (r NavigateBrowserSessionResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r NavigateBrowserSessionResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// CaptureBrowserScreenshotResponse201Headers the declared response headers of an HTTP 201 response for CaptureBrowserScreenshot
+type CaptureBrowserScreenshotResponse201Headers struct {
+	Location *string
+}
+
+type CaptureBrowserScreenshotResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *BrowserScreenshot
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+	// Headers201 the parsed response headers for an HTTP 201 response
+	Headers201 *CaptureBrowserScreenshotResponse201Headers
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r CaptureBrowserScreenshotResponse) GetJSON201() *BrowserScreenshot {
+	return r.JSON201
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r CaptureBrowserScreenshotResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r CaptureBrowserScreenshotResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CaptureBrowserScreenshotResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CaptureBrowserScreenshotResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CaptureBrowserScreenshotResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type DownloadBrowserScreenshotResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r DownloadBrowserScreenshotResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r DownloadBrowserScreenshotResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r DownloadBrowserScreenshotResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DownloadBrowserScreenshotResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r DownloadBrowserScreenshotResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -4253,6 +4628,96 @@ func (r GetStaticSiteVersionResponse) ContentType() string {
 	return ""
 }
 
+type PublishStaticSiteVersionResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *StaticSitePublication
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *Error
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Error
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Error
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *Error
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *Error
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r PublishStaticSiteVersionResponse) GetJSON200() *StaticSitePublication {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r PublishStaticSiteVersionResponse) GetJSON400() *Error {
+	return r.JSON400
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r PublishStaticSiteVersionResponse) GetJSON401() *Error {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r PublishStaticSiteVersionResponse) GetJSON403() *Error {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r PublishStaticSiteVersionResponse) GetJSON404() *Error {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r PublishStaticSiteVersionResponse) GetJSON409() *Error {
+	return r.JSON409
+}
+
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r PublishStaticSiteVersionResponse) GetJSON503() *Error {
+	return r.JSON503
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r PublishStaticSiteVersionResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r PublishStaticSiteVersionResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r PublishStaticSiteVersionResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PublishStaticSiteVersionResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r PublishStaticSiteVersionResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type GetWorkerDeploymentResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -4730,6 +5195,28 @@ func (c *ClientWithResponses) NavigateBrowserSessionWithResponse(ctx context.Con
 	return ParseNavigateBrowserSessionResponse(rsp)
 }
 
+// CaptureBrowserScreenshotWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/screenshots (the `CaptureBrowserScreenshot` operationId) request.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) CaptureBrowserScreenshotWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, reqEditors ...RequestEditorFn) (*CaptureBrowserScreenshotResponse, error) {
+	rsp, err := c.CaptureBrowserScreenshot(ctx, projectID, sessionID, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCaptureBrowserScreenshotResponse(rsp)
+}
+
+// DownloadBrowserScreenshotWithResponse performs a GET /api/v1/projects/{projectID}/browser-sessions/{sessionID}/screenshots/{screenshotID} (the `DownloadBrowserScreenshot` operationId) request.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) DownloadBrowserScreenshotWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, screenshotID openapi_types.UUID, reqEditors ...RequestEditorFn) (*DownloadBrowserScreenshotResponse, error) {
+	rsp, err := c.DownloadBrowserScreenshot(ctx, projectID, sessionID, screenshotID, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDownloadBrowserScreenshotResponse(rsp)
+}
+
 // GetProjectCapacityWithResponse performs a GET /api/v1/projects/{projectID}/capacity (the `GetProjectCapacity` operationId) request.
 //
 // 返回项目成员可见的项目额度、活动预留占用和剩余量；三个值来自同一数据库快照。.
@@ -4935,6 +5422,32 @@ func (c *ClientWithResponses) GetStaticSiteVersionWithResponse(ctx context.Conte
 		return nil, err
 	}
 	return ParseGetStaticSiteVersionResponse(rsp)
+}
+
+// PublishStaticSiteVersionWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/publish (the `PublishStaticSiteVersion` operationId) request,
+// with any type of body and a specified content type.
+//
+// 项目所有者绑定域名并激活站点的首个就绪版本。重复相同请求返回同一发布结果。.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) PublishStaticSiteVersionWithBodyWithResponse(ctx context.Context, projectID SiteProjectID, siteName SiteName, versionID string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PublishStaticSiteVersionResponse, error) {
+	rsp, err := c.PublishStaticSiteVersionWithBody(ctx, projectID, siteName, versionID, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePublishStaticSiteVersionResponse(rsp)
+}
+
+// PublishStaticSiteVersionWithResponse performs a POST /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/publish (the `PublishStaticSiteVersion` operationId) request.
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// 项目所有者绑定域名并激活站点的首个就绪版本。重复相同请求返回同一发布结果。.
+func (c *ClientWithResponses) PublishStaticSiteVersionWithResponse(ctx context.Context, projectID SiteProjectID, siteName SiteName, versionID string, body PublishStaticSiteVersionJSONRequestBody, reqEditors ...RequestEditorFn) (*PublishStaticSiteVersionResponse, error) {
+	rsp, err := c.PublishStaticSiteVersion(ctx, projectID, siteName, versionID, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePublishStaticSiteVersionResponse(rsp)
 }
 
 // GetWorkerDeploymentWithResponse performs a GET /api/v1/projects/{projectID}/worker-deployments/{deploymentID} (the `GetWorkerDeployment` operationId) request.
@@ -5518,6 +6031,78 @@ func ParseNavigateBrowserSessionResponse(rsp *http.Response) (*NavigateBrowserSe
 		}
 		response.JSON200 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCaptureBrowserScreenshotResponse parses an HTTP response from a CaptureBrowserScreenshotWithResponse call
+func ParseCaptureBrowserScreenshotResponse(rsp *http.Response) (*CaptureBrowserScreenshotResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CaptureBrowserScreenshotResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest BrowserScreenshot
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 201:
+		var headers CaptureBrowserScreenshotResponse201Headers
+		if values := rsp.Header.Values("Location"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Location", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.Location = &value
+		}
+		response.Headers201 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseDownloadBrowserScreenshotResponse parses an HTTP response from a DownloadBrowserScreenshotWithResponse call
+func ParseDownloadBrowserScreenshotResponse(rsp *http.Response) (*DownloadBrowserScreenshotResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DownloadBrowserScreenshotResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -6269,6 +6854,81 @@ func ParseGetStaticSiteVersionResponse(rsp *http.Response) (*GetStaticSiteVersio
 	return response, nil
 }
 
+// ParsePublishStaticSiteVersionResponse parses an HTTP response from a PublishStaticSiteVersionWithResponse call
+func ParsePublishStaticSiteVersionResponse(rsp *http.Response) (*PublishStaticSiteVersionResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PublishStaticSiteVersionResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest StaticSitePublication
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseGetWorkerDeploymentResponse parses an HTTP response from a GetWorkerDeploymentWithResponse call
 func ParseGetWorkerDeploymentResponse(rsp *http.Response) (*GetWorkerDeploymentResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -6574,6 +7234,12 @@ type ServerInterface interface {
 	// (POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/navigate)
 	NavigateBrowserSession(c *gin.Context, projectID BrowserProjectID, sessionID BrowserSessionID)
 
+	// (POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/screenshots)
+	CaptureBrowserScreenshot(c *gin.Context, projectID BrowserProjectID, sessionID BrowserSessionID)
+
+	// (GET /api/v1/projects/{projectID}/browser-sessions/{sessionID}/screenshots/{screenshotID})
+	DownloadBrowserScreenshot(c *gin.Context, projectID BrowserProjectID, sessionID BrowserSessionID, screenshotID openapi_types.UUID)
+
 	// (GET /api/v1/projects/{projectID}/capacity)
 	GetProjectCapacity(c *gin.Context, projectID string)
 
@@ -6612,6 +7278,9 @@ type ServerInterface interface {
 
 	// (GET /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID})
 	GetStaticSiteVersion(c *gin.Context, projectID SiteProjectID, siteName SiteName, versionID string)
+
+	// (POST /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/publish)
+	PublishStaticSiteVersion(c *gin.Context, projectID SiteProjectID, siteName SiteName, versionID string)
 
 	// (GET /api/v1/projects/{projectID}/worker-deployments/{deploymentID})
 	GetWorkerDeployment(c *gin.Context, projectID string, deploymentID string)
@@ -6919,6 +7588,83 @@ func (siw *ServerInterfaceWrapper) NavigateBrowserSession(c *gin.Context) {
 	}
 
 	siw.Handler.NavigateBrowserSession(c, projectID, sessionID)
+}
+
+// CaptureBrowserScreenshot operation middleware
+func (siw *ServerInterfaceWrapper) CaptureBrowserScreenshot(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID BrowserProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "sessionID" -------------
+	var sessionID BrowserSessionID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "sessionID", c.Param("sessionID"), &sessionID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter sessionID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.CaptureBrowserScreenshot(c, projectID, sessionID)
+}
+
+// DownloadBrowserScreenshot operation middleware
+func (siw *ServerInterfaceWrapper) DownloadBrowserScreenshot(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID BrowserProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "sessionID" -------------
+	var sessionID BrowserSessionID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "sessionID", c.Param("sessionID"), &sessionID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter sessionID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "screenshotID" -------------
+	var screenshotID openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "screenshotID", c.Param("screenshotID"), &screenshotID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter screenshotID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.DownloadBrowserScreenshot(c, projectID, sessionID, screenshotID)
 }
 
 // GetProjectCapacity operation middleware
@@ -7318,6 +8064,49 @@ func (siw *ServerInterfaceWrapper) GetStaticSiteVersion(c *gin.Context) {
 	siw.Handler.GetStaticSiteVersion(c, projectID, siteName, versionID)
 }
 
+// PublishStaticSiteVersion operation middleware
+func (siw *ServerInterfaceWrapper) PublishStaticSiteVersion(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID SiteProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "siteName" -------------
+	var siteName SiteName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "siteName", c.Param("siteName"), &siteName, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter siteName: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "versionID" -------------
+	var versionID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "versionID", c.Param("versionID"), &versionID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter versionID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.PublishStaticSiteVersion(c, projectID, siteName, versionID)
+}
+
 // GetWorkerDeployment operation middleware
 func (siw *ServerInterfaceWrapper) GetWorkerDeployment(c *gin.Context) {
 
@@ -7472,8 +8261,11 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID", wrapper.GetBrowserSession)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID/navigate", wrapper.NavigateBrowserSession)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID/console", wrapper.GetBrowserConsole)
+	router.POST(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID/screenshots", wrapper.CaptureBrowserScreenshot)
+	router.GET(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID/screenshots/:screenshotID", wrapper.DownloadBrowserScreenshot)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/sites/:siteName/versions", wrapper.UploadStaticSiteVersion)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/sites/:siteName/versions/:versionID", wrapper.GetStaticSiteVersion)
+	router.POST(options.BaseURL+"/api/v1/projects/:projectID/sites/:siteName/versions/:versionID/publish", wrapper.PublishStaticSiteVersion)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/secrets", wrapper.ListProjectSecrets)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/secrets", wrapper.CreateProjectSecretVersion)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/secrets/:name", wrapper.ListProjectSecretVersions)
