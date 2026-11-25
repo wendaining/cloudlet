@@ -45,6 +45,8 @@ make setup 安装 npm 与 Go 锁定依赖、提交检查和 Chromium，生成权
 
 make dev 检查配置与端口，使用 compose.yaml 和 compose.dev.yaml 启动本实例数据库，等待健康，执行 goose 迁移，准备开发账号，再启动 Air、Vite 与 TypeScript 检查。所有服务就绪后显示访问地址。初始化失败时停止本次启动的环境资源。
 
+开发入口在实例配置中启用 Worker 首发，产物保存到 `.local/实例名称/workers`。主机预算与项目初始配额均配置为 4000 CPU 毫核、四 GiB 内存与四个实例。已有项目配额保持原值。每个 Worker 执行申请 1000 CPU 毫核、256 MiB 内存与一个实例。发布方法见 [Worker 发布](workers.md)。
+
 开发账号使用 CLOUDLET_DEV_EMAIL 与 CLOUDLET_DEV_PASSWORD，走正常登录流程。后续启动保留数据库中已有的账号与密码。生产环境禁止执行开发账号初始化。
 
 | 命令 | 行为 |
@@ -132,3 +134,7 @@ make dev
 使用登录会话在项目下向 `POST /api/v1/projects/{projectID}/browser-sessions` 发出请求。收到 201 后，响应的 endpoint 可用于查询会话。向 endpoint 后追加 `/navigate` 并提交 JSON 正文 `{"url":"http://可从容器访问的测试地址/"}`，核对响应中的页面地址和标题。使用另一项目的账号查询同一会话应返回 404。
 
 开发时管理进程需要连接本地 Docker Unix socket。测试页面需要监听容器能访问的接口。Linux 默认 Docker 网桥的网关地址可用 `docker network inspect bridge` 查看。不要把测试页面只绑定到宿主的 127.0.0.1。
+
+发起 `DELETE` 到会话 endpoint 可以主动关闭会话，响应状态为 `closed`，重复调用仍返回终态。要检查自动回收，可在启动 `make dev` 的终端执行 `export CLOUDLET_BROWSER_SESSION_SECONDS=15`。该值只影响随后创建的会话，有效范围为 5 到 300 秒，默认 300 秒。
+
+验收时分别创建一个主动关闭和一个等到期的会话。在会话运行时通过 `docker ps` 的 `io.cloudlet.resource=browser-<会话 ID>` 标签查到容器；关闭或到期后，对原容器执行 `docker inspect` 应查不到。在管理 API 查询会话应返回 `closed`，随后可在同一默认配额下创建新会话。

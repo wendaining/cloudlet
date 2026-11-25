@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/pressly/goose/v3"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/wendaining/cloudlet/internal/apigen"
@@ -33,6 +34,13 @@ func TestPostgresMigrationAccountsSessionsAndProjects(t *testing.T) {
 	store, connection, container := openIntegrationDatabase(t, ctx)
 	if err := store.CheckVersion(ctx); err == nil {
 		t.Fatal("未迁移的数据库通过了版本检查")
+	}
+	provider, err := goose.NewProvider(goose.DialectPostgres, store.SQL, migrations.Files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.UpTo(ctx, 9); err != nil {
+		t.Fatalf("迁移到浏览器会话版本 9: %v", err)
 	}
 	for range 2 {
 		if err := store.Migrate(ctx); err != nil {

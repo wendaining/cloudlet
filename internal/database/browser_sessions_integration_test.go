@@ -23,23 +23,13 @@ import (
 	"github.com/wendaining/cloudlet/internal/capacity"
 	"github.com/wendaining/cloudlet/internal/config"
 	"github.com/wendaining/cloudlet/internal/controlplane"
+	"github.com/wendaining/cloudlet/internal/database"
 )
 
 func TestBrowserSessionHTTP(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 	defer cancel()
-	runtimeDir, err := filepath.Abs("../../runtimes/browser")
-	if err != nil {
-		t.Fatal(err)
-	}
-	imageID := os.Getenv("CLOUDLET_BROWSER_TEST_IMAGE")
-	if imageID == "" {
-		output, err := exec.CommandContext(ctx, "docker", "build", "--quiet", runtimeDir).CombinedOutput()
-		if err != nil {
-			t.Fatalf("build Chromium runtime: %v\n%s", err, output)
-		}
-		imageID = strings.TrimSpace(string(output))
-	}
+	runtimeDir, imageID := browserRuntimeImage(t, ctx)
 	store, _, _ := openIntegrationDatabase(t, ctx)
 	if err := store.Migrate(ctx); err != nil {
 		t.Fatal(err)
@@ -139,6 +129,32 @@ func TestBrowserSessionHTTP(t *testing.T) {
 		t.Fatalf("unexpected Chromium page: %+v", page)
 	}
 	t.Logf("navigation HTTP 200, title=%q, url=%s; cross-project read and navigation HTTP 404", page.Title, page.Url)
+	readConsole := func(api *apigen.ClientWithResponses, project string, id uuid.UUID, want int) *apigen.BrowserConsole {
+		t.Helper()
+		result, err := api.GetBrowserConsoleWithResponse(ctx, project, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.StatusCode() != want {
+			t.Fatalf("read console = %d %s, want %d", result.StatusCode(), result.Body, want)
+		}
+		return result.JSON200
+	}
+	readConsole(otherAPI, owner.ID, session.Id, http.StatusNotFound)
+	history := readConsole(ownerAPI, owner.ID, session.Id, http.StatusOK)
+	if history == nil || len(history.Entries) != 100 || history.Dropped < 10 {
+		t.Fatalf("console retention is not bounded: %+v", history)
+	}
+	var logged, truncated, threw bool
+	for _, entry := range history.Entries {
+		logged = logged || (entry.Kind == "console" && entry.Level == "warning" && entry.Message == "console fixture warning")
+		truncated = truncated || (entry.Kind == "console" && entry.Truncated && entry.Message == strings.Repeat("x", 512))
+		threw = threw || (entry.Kind == "page_error" && entry.Message == "console fixture exception")
+	}
+	if !logged || !truncated || !threw {
+		t.Fatalf("warning, truncated message or page error missing: warn=%v truncated=%v error=%v", logged, truncated, threw)
+	}
+	t.Log("console retains 100 messages, truncates long entries, captures uncaught errors and rejects another project")
 	second, err := ownerAPI.CreateBrowserSessionWithResponse(ctx, owner.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -207,7 +223,53 @@ func TestBrowserSessionHTTP(t *testing.T) {
 		pageWithHistory.Items[2].ActualStatus != apigen.BrowserSessionStatusClosed {
 		t.Fatalf("wrong history after creating a second session: %+v", pageWithHistory)
 	}
+	interrupted := database.BrowserSession{
+		ID: uuid.New(), ProjectID: projectID, HostID: instance, Status: "starting",
+		CreatedAt: time.Now().Add(-2 * time.Minute), ExpiresAt: time.Now().Add(-time.Minute),
+	}
+	if err := store.CreateBrowserSession(ctx, interrupted); err != nil {
+		t.Fatal(err)
+	}
+	interruptedPage := list(ownerAPI, owner.ID, nil, http.StatusOK)
+	var found bool
+	for _, item := range interruptedPage.Items {
+		if item.Id != interrupted.ID {
+			continue
+		}
+		found = true
+		detail, err := ownerAPI.GetBrowserSessionWithResponse(ctx, owner.ID, interrupted.ID)
+		if err != nil || detail.JSON200 == nil || item.ActualStatus != apigen.BrowserSessionStatusClosed ||
+			detail.JSON200.ActualStatus != item.ActualStatus || detail.JSON200.DesiredStatus != item.DesiredStatus {
+			t.Fatalf("inconsistent interrupted session: list=%+v detail=%+v error=%v", item, detail, err)
+		}
+	}
+	if !found {
+		t.Fatal("interrupted session is missing from the list")
+	}
+	t.Log("expired interrupted startup is closed in both list and detail")
 	t.Log("project list and detail expose ready, closed and failed state; bounded pagination and cross-project scope verified")
+	isolated := readConsole(ownerAPI, owner.ID, replacement.JSON201.Id, http.StatusOK)
+	if isolated == nil || len(isolated.Entries) != 0 || isolated.Dropped != 0 {
+		t.Fatalf("previous session console leaked into new session: %+v", isolated)
+	}
+	t.Log("a second real Chromium session has no logs from the first")
+}
+
+func browserRuntimeImage(t *testing.T, ctx context.Context) (string, string) {
+	t.Helper()
+	runtimeDir, err := filepath.Abs("../../runtimes/browser")
+	if err != nil {
+		t.Fatal(err)
+	}
+	imageID := os.Getenv("CLOUDLET_BROWSER_TEST_IMAGE")
+	if imageID == "" {
+		output, err := exec.CommandContext(ctx, "docker", "build", "--quiet", runtimeDir).CombinedOutput()
+		if err != nil {
+			t.Fatalf("build Chromium runtime: %v\n%s", err, output)
+		}
+		imageID = strings.TrimSpace(string(output))
+	}
+	return runtimeDir, imageID
 }
 
 func chromiumPage(t *testing.T, ctx context.Context, docker *client.Client) string {
@@ -234,7 +296,13 @@ func chromiumPage(t *testing.T, ctx context.Context, docker *client.Client) stri
 		ReadHeaderTimeout: time.Second,
 		Handler: http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 			writer.Header().Set("Content-Type", "text/html; charset=utf-8")
-			fmt.Fprint(writer, "<!doctype html><title>Cloudlet Browser Run</title>")
+			fmt.Fprint(writer, `<!doctype html><title>Cloudlet Browser Run</title>
+<script>
+for (let i = 0; i < 110; i++) console.log('entry ' + i);
+console.warn('console fixture warning');
+console.log('x'.repeat(600));
+throw new Error('console fixture exception');
+</script>`)
 		}),
 	}
 	go server.Serve(listener)

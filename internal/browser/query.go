@@ -24,6 +24,10 @@ type SessionView struct {
 
 // Describe reports the recorded state and the inspected runtime separately.
 func (s *Service) Describe(ctx context.Context, session database.BrowserSession) (SessionView, error) {
+	session, err := s.reconcileExpiredSession(ctx, session)
+	if err != nil {
+		return SessionView{}, err
+	}
 	view := SessionView{BrowserSession: session, DesiredStatus: "ready", ActualStatus: session.Status}
 	expired := !time.Now().Before(session.ExpiresAt)
 	if expired || session.Status == "closed" || session.Status == "failed" {

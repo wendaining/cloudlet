@@ -176,6 +176,31 @@ paths:
           $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/capacity:
+    parameters:
+      - name: projectID
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: getProjectCapacity
+      description: 返回项目成员可见的项目额度、活动预留占用和剩余量；三个值来自同一数据库快照。
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 项目 CPU、内存与实例容量使用快照
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectCapacity'
+        '401':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
   /api/v1/projects/{projectID}/members:
     parameters:
       - name: projectID
@@ -322,6 +347,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BrowserSession'
+    delete:
+      operationId: closeBrowserSession
+      description: 停止容器并确认清理，释放容量后返回会话终态。重复关闭返回已有终态。
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 已结束的浏览器会话
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserSession'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
   /api/v1/projects/{projectID}/browser-sessions/{sessionID}/navigate:
     parameters:
       - $ref: '#/components/parameters/BrowserProjectID'
@@ -345,6 +388,23 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BrowserNavigation'
+  /api/v1/projects/{projectID}/browser-sessions/{sessionID}/console:
+    parameters:
+      - $ref: '#/components/parameters/BrowserProjectID'
+      - $ref: '#/components/parameters/BrowserSessionID'
+    get:
+      operationId: getBrowserConsole
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 会话的最近控制台消息和页面错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserConsole'
   /api/v1/projects/{projectID}/sites/{siteName}/versions:
     parameters:
       - $ref: '#/components/parameters/SiteProjectID'
@@ -533,6 +593,157 @@ paths:
           $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/workers/{name}/deployments:
+    parameters:
+      - name: projectID
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      operationId: deployWorker
+      description: 发布首个无状态 Worker 版本，等待真实运行时就绪并激活域名。所有者和开发者可以调用。同一幂等键复用操作。
+      security:
+        - SessionCookie: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeployWorkerRequest"
+      responses:
+        "200":
+          description: 已存在的发布结果
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkerDeployment"
+          headers:
+            Location:
+              description: 已登记版本的项目内查询地址。版本尚未登记时省略。
+              schema:
+                type: string
+        "201":
+          description: 新 Worker 发布结果
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkerDeployment"
+          headers:
+            Location:
+              description: 已登记版本的项目内查询地址。版本尚未登记时省略。
+              schema:
+                type: string
+        "400":
+          description: Worker 发布请求参数无效
+          headers:
+            Location:
+              description: 已登记版本的项目内查询地址。版本尚未登记时省略。
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          description: Worker 发布请求冲突
+          headers:
+            Location:
+              description: 已登记版本的项目内查询地址。版本尚未登记时省略。
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: 运行时预检或就绪检查失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkerDeployment"
+          headers:
+            Location:
+              description: 已登记版本的项目内查询地址。版本尚未登记时省略。
+              schema:
+                type: string
+        "429":
+          description: 容量不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkerDeployment"
+          headers:
+            Location:
+              description: 已登记版本的项目内查询地址。版本尚未登记时省略。
+              schema:
+                type: string
+        "500":
+          description: Worker 发布步骤失败
+          headers:
+            Location:
+              description: 已登记版本的项目内查询地址。版本尚未登记时省略。
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/projects/{projectID}/worker-deployments/{deploymentID}:
+    parameters:
+      - name: projectID
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: deploymentID
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: getWorkerDeployment
+      description: 项目成员查询不可变 Worker 版本、执行与操作结果。
+      security:
+        - SessionCookie: []
+      responses:
+        "200":
+          description: Worker 发布结果
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkerDeployment"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
 components:
   parameters:
     BrowserProjectID:
@@ -571,7 +782,7 @@ components:
   schemas:
     User:
       type: object
-      required: [id, email]
+      required: [ id, email ]
       properties:
         id:
           type: string
@@ -580,7 +791,7 @@ components:
     LoginRequest:
       type: object
       additionalProperties: false
-      required: [email, password]
+      required: [ email, password ]
       properties:
         email:
           type: string
@@ -591,7 +802,7 @@ components:
           maxLength: 72
     VersionInfo:
       type: object
-      required: [version, commit]
+      required: [ version, commit ]
       properties:
         version:
           type: string
@@ -599,7 +810,7 @@ components:
           type: string
     Environment:
       type: object
-      required: [instance, database_version]
+      required: [ instance, database_version ]
       properties:
         instance:
           type: string
@@ -609,7 +820,7 @@ components:
     CreateProjectRequest:
       type: object
       additionalProperties: false
-      required: [name]
+      required: [ name ]
       properties:
         name:
           type: string
@@ -617,14 +828,14 @@ components:
     RenameProjectRequest:
       type: object
       additionalProperties: false
-      required: [name]
+      required: [ name ]
       properties:
         name:
           type: string
           description: 服务端去除首尾空白后必须包含 1 至 100 个 Unicode 字符；原始字符串可以包含首尾空白。
     Project:
       type: object
-      required: [id, name]
+      required: [ id, name ]
       properties:
         id:
           type: string
@@ -634,12 +845,45 @@ components:
     ProjectRole:
       type: string
       enum: [owner, developer, viewer]
+    ResourceAmounts:
+      type: object
+      required: [cpu_millis, memory_bytes, instances]
+      properties:
+        cpu_millis:
+          type: integer
+          format: int64
+          minimum: 0
+          description: CPU 毫核。
+        memory_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: 内存字节。
+        instances:
+          type: integer
+          format: int64
+          minimum: 0
+          description: 实例数。
+    ProjectCapacity:
+      type: object
+      description: 项目配额与活动预留快照。used 可能超过 limit；remaining 是按资源钳制后的额度内余量，不表示超用标记。
+      required: [project_id, limit, used, remaining]
+      properties:
+        project_id:
+          type: string
+          format: uuid
+        limit:
+          $ref: '#/components/schemas/ResourceAmounts'
+        used:
+          $ref: '#/components/schemas/ResourceAmounts'
+        remaining:
+          $ref: '#/components/schemas/ResourceAmounts'
     ProjectMemberRole:
       type: string
-      enum: [developer, viewer]
+      enum: [ developer, viewer ]
     ProjectMember:
       type: object
-      required: [user_id, email, role]
+      required: [ user_id, email, role ]
       properties:
         user_id:
           type: string
@@ -649,7 +893,7 @@ components:
           $ref: '#/components/schemas/ProjectRole'
     ProjectSecret:
       type: object
-      required: [id, name, latest_version, created_at, updated_at]
+      required: [ id, name, latest_version, created_at, updated_at ]
       properties:
         id:
           type: string
@@ -666,7 +910,7 @@ components:
           format: date-time
     ProjectSecretVersion:
       type: object
-      required: [id, secret_id, name, version, created_at]
+      required: [ id, secret_id, name, version, created_at ]
       properties:
         id:
           type: string
@@ -683,7 +927,7 @@ components:
           format: date-time
     ProjectSecretValue:
       type: object
-      required: [id, secret_id, name, version, created_at, value]
+      required: [ id, secret_id, name, version, created_at, value ]
       properties:
         id:
           type: string
@@ -703,7 +947,7 @@ components:
     CreateProjectSecretRequest:
       type: object
       additionalProperties: false
-      required: [name, value]
+      required: [ name, value ]
       properties:
         name:
           type: string
@@ -715,7 +959,7 @@ components:
     UpsertProjectMemberRequest:
       type: object
       additionalProperties: false
-      required: [email, role]
+      required: [ email, role ]
       properties:
         email:
           type: string
@@ -726,7 +970,7 @@ components:
           $ref: '#/components/schemas/ProjectMemberRole'
     Session:
       type: object
-      required: [user, projects]
+      required: [ user, projects ]
       properties:
         user:
           $ref: "#/components/schemas/User"
@@ -734,6 +978,34 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Project"
+    BrowserConsoleEntry:
+      type: object
+      required: [kind, level, message, truncated]
+      properties:
+        kind:
+          type: string
+          description: console 表示控制台消息，page_error 表示未捕获的页面错误
+        level:
+          type: string
+        message:
+          type: string
+          maxLength: 512
+        truncated:
+          type: boolean
+    BrowserConsole:
+      type: object
+      required: [entries, dropped]
+      properties:
+        entries:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/BrowserConsoleEntry'
+        dropped:
+          type: integer
+          format: int64
+          minimum: 0
+          description: 已从会话历史移除的旧记录数
     BrowserSessionStatus:
       type: string
       enum: [starting, ready, failed, closed]
@@ -809,7 +1081,7 @@ components:
           format: date-time
     Operation:
       type: object
-      required: [id, action, phase, outcome, created_at, updated_at]
+      required: [ id, action, phase, outcome, created_at, updated_at ]
       properties:
         id:
           type: string
@@ -828,10 +1100,109 @@ components:
           format: date-time
     Error:
       type: object
-      required: [message]
+      required: [ message ]
       properties:
         message:
           type: string
+    DeployWorkerRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - module
+        - compatibility_date
+        - hostname
+      properties:
+        module:
+          type: string
+          minLength: 1
+          description: 已打包的单文件 JavaScript ES Module，UTF-8 编码后最多 1048576 字节。入口固定为 index.mjs。
+        compatibility_date:
+          type: string
+          format: date
+          description: 固定 workerd 支持的兼容日期。
+        hostname:
+          type: string
+          maxLength: 253
+          description: 无端口的公开域名。
+    WorkerDeployment:
+      type: object
+      required:
+        - id
+        - project_id
+        - worker_id
+        - execution_id
+        - operation_id
+        - artifact_digest
+        - config_digest
+        - entry
+        - compatibility_date
+        - runtime_version
+        - runtime_image
+        - hostname
+        - state
+        - failure
+        - container_id
+        - execution_state
+        - operation_phase
+        - operation_outcome
+        - cpu_millis
+        - memory_bytes
+        - generation
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+        worker_id:
+          type: string
+          format: uuid
+        execution_id:
+          type: string
+          format: uuid
+        operation_id:
+          type: string
+          format: uuid
+        artifact_digest:
+          type: string
+        config_digest:
+          type: string
+        entry:
+          type: string
+        compatibility_date:
+          type: string
+        runtime_version:
+          type: string
+        runtime_image:
+          type: string
+        hostname:
+          type: string
+        state:
+          type: string
+        failure:
+          type: string
+        container_id:
+          type: string
+        execution_state:
+          type: string
+        operation_phase:
+          type: string
+        operation_outcome:
+          type: string
+        cpu_millis:
+          type: integer
+          format: int64
+        memory_bytes:
+          type: integer
+          format: int64
+        generation:
+          type: integer
+          format: int64
+        created_at:
+          type: string
+          format: date-time
   responses:
     StaticSiteVersion:
       description: 不可变静态站点版本

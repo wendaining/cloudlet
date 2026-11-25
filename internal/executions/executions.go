@@ -156,6 +156,9 @@ func (s *Service) Start(ctx context.Context, request StartRequest) (Execution, e
 			return Execution{Reservation: reservation}, errors.Join(cause, fmt.Errorf("检查执行 %s 的容器: %w", request.ExecutionID, findErr))
 		}
 		if found {
+			if len(request.Spec.Files) > 0 {
+				return Execution{Container: containers.Container{ID: existing.ID, Name: existing.Name}, Reservation: reservation}, cause
+			}
 			return s.adoptExisting(ctx, request, reservation, existing)
 		}
 		released, releaseErr := s.releaseAfterFailure(ctx, request.ProjectID, request.ExecutionID, cause)
@@ -375,6 +378,13 @@ func checkBoundContainer(reservation capacity.Reservation, existing containers.O
 }
 
 func checkAdoptedContainer(executionID uuid.UUID, existing containers.Observation, spec containers.Spec) error {
+	digest, err := spec.FilesDigest()
+	if err != nil {
+		return err
+	}
+	if digest != existing.FilesDigest {
+		return fmt.Errorf("%w: execution %s has different prepared files", ErrExecutionConflict, executionID)
+	}
 	if existing.Image != spec.Image {
 		return fmt.Errorf("%w: 执行 %s 的容器镜像 %q 与请求 %q 不一致", ErrExecutionConflict, executionID, existing.Image, spec.Image)
 	}

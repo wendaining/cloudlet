@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,13 +23,12 @@ import (
 	"github.com/wendaining/cloudlet/internal/containers"
 	"github.com/wendaining/cloudlet/internal/database"
 	"github.com/wendaining/cloudlet/internal/executions"
-	"gorm.io/gorm"
 )
 
 const (
-	runtimePort     = 8080
-	sessionLifetime = 5 * time.Minute
-	cleanupTimeout  = 30 * time.Second
+	runtimePort            = 8080
+	defaultSessionLifetime = 5 * time.Minute
+	cleanupTimeout         = 30 * time.Second
 )
 
 var ErrSessionUnavailable = errors.New("浏览器会话未就绪或已结束")
@@ -43,6 +43,7 @@ type Service struct {
 	image      string
 	profile    string
 	key        []byte
+	starting   sync.Map // session ID to a channel closed when startup and any rollback finish
 }
 
 func NewService(ctx context.Context, store *database.Store, docker *client.Client, hostID, imageID, profilePath string, key []byte) (*Service, error) {
@@ -97,25 +98,31 @@ func NewService(ctx context.Context, store *database.Store, docker *client.Clien
 	}, nil
 }
 
-func (s *Service) Create(ctx context.Context, projectID uuid.UUID) (database.BrowserSession, error) {
-	now := time.Now().UTC().Truncate(time.Millisecond)
+func (s *Service) Create(ctx context.Context, projectID uuid.UUID, lifetime time.Duration) (database.BrowserSession, error) {
+	if lifetime == 0 {
+		lifetime = defaultSessionLifetime
+	}
+	if lifetime < 5*time.Second || lifetime > defaultSessionLifetime {
+		return database.BrowserSession{}, fmt.Errorf("browser session lifetime must be between 5 and 300 seconds: %w", fs.ErrInvalid)
+	}
 	defaults := capacity.Resources{CPUMillis: 4000, MemoryBytes: 4 << 30, Instances: 4}
 	if err := s.capacity.EnsureDefaults(ctx, s.hostID, projectID, defaults); err != nil {
 		return database.BrowserSession{}, err
 	}
-	expired, err := s.store.ExpiredBrowserSessions(ctx, s.hostID, now)
-	if err != nil {
+	if err := s.reapExpired(ctx); err != nil {
 		return database.BrowserSession{}, err
 	}
-	for _, session := range expired {
-		if err := s.finish(ctx, session, "closed"); err != nil {
-			return database.BrowserSession{}, err
-		}
-	}
+	now := time.Now().UTC().Truncate(time.Millisecond)
 	session := database.BrowserSession{
 		ID: uuid.New(), ProjectID: projectID, HostID: s.hostID, Status: "starting",
-		CreatedAt: now, ExpiresAt: now.Add(sessionLifetime),
+		CreatedAt: now, ExpiresAt: now.Add(lifetime),
 	}
+	startDone := make(chan struct{})
+	s.starting.Store(session.ID, startDone)
+	defer func() {
+		close(startDone)
+		s.starting.Delete(session.ID)
+	}()
 	if err := s.store.CreateBrowserSession(ctx, session); err != nil {
 		return database.BrowserSession{}, err
 	}
@@ -129,7 +136,7 @@ func (s *Service) Create(ctx context.Context, projectID uuid.UUID) (database.Bro
 		},
 		ChromiumSeccompProfile: s.profile,
 	}
-	startCtx, stop := context.WithTimeout(ctx, 45*time.Second)
+	startCtx, stop := context.WithDeadline(ctx, now.Add(min(45*time.Second, lifetime)))
 	defer stop()
 	execution, err := s.executions.Start(startCtx, executions.StartRequest{ExecutionID: session.ID, ProjectID: projectID, Spec: spec})
 	if err == nil {
@@ -149,7 +156,8 @@ func (s *Service) Create(ctx context.Context, projectID uuid.UUID) (database.Bro
 			message = "浏览器会话容量不足"
 		}
 		recordErr := s.store.RecordBrowserSessionError(cleanupCtx, projectID, session.ID, s.hostID, message)
-		return database.BrowserSession{}, errors.Join(err, recordErr, s.finish(cleanupCtx, session, "failed"))
+		_, cleanupErr := s.finish(cleanupCtx, session, "failed")
+		return database.BrowserSession{}, errors.Join(err, recordErr, cleanupErr)
 	}
 	session.Status = "ready"
 	return session, nil
@@ -160,38 +168,14 @@ func (s *Service) Session(ctx context.Context, projectID, id uuid.UUID) (databas
 	if err != nil {
 		return database.BrowserSession{}, err
 	}
-	if (session.Status == "starting" || session.Status == "ready") && !time.Now().Before(session.ExpiresAt) {
-		if err := s.finish(ctx, session, "closed"); err != nil {
-			return database.BrowserSession{}, err
-		}
-		session.Status = "closed"
-	}
-	return session, nil
+	return s.reconcileExpiredSession(ctx, session)
 }
 
-func (s *Service) finish(ctx context.Context, session database.BrowserSession, status string) error {
-	reservation, err := s.capacity.GetReservation(ctx, session.ProjectID, session.ID)
-	if err == nil {
-		err = s.executions.Stop(ctx, executions.StopRequest{
-			ExecutionID: session.ID, ProjectID: session.ProjectID,
-			Ownership: ownership(session), ContainerID: reservation.ContainerID,
-		})
+func (s *Service) reconcileExpiredSession(ctx context.Context, session database.BrowserSession) (database.BrowserSession, error) {
+	if !terminalSession(session) && !time.Now().Before(session.ExpiresAt) {
+		return s.closeSession(ctx, session)
 	}
-	if err != nil && !errors.Is(err, capacity.ErrReservationNotFound) {
-		return fmt.Errorf("clean up browser session %s: %w", session.ID, err)
-	}
-	err = s.store.SetBrowserSessionStatus(ctx, session, status)
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		current, lookupErr := s.store.BrowserSession(ctx, session.ProjectID, session.ID, session.HostID)
-		if lookupErr != nil {
-			return errors.Join(err, lookupErr)
-		}
-		if current.Status == "closed" || current.Status == "failed" {
-			return nil
-		}
-		return s.store.SetBrowserSessionStatus(ctx, current, status)
-	}
-	return err
+	return session, nil
 }
 
 func ownership(session database.BrowserSession) containers.Ownership {

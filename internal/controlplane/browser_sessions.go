@@ -20,7 +20,7 @@ func (h *handler) CreateBrowserSession(c *gin.Context, projectID string) {
 	if !ok || !h.browserAccess(c, member, true) {
 		return
 	}
-	session, err := h.browser.Create(c.Request.Context(), uuid.MustParse(project))
+	session, err := h.browser.Create(c.Request.Context(), uuid.MustParse(project), h.config.BrowserSessionLifetime)
 	if err != nil {
 		h.browserFailure(c, err)
 		return
@@ -70,6 +70,19 @@ func (h *handler) GetBrowserSession(c *gin.Context, projectID string, sessionID 
 		return
 	}
 	c.JSON(http.StatusOK, browserSessionViewResponse(view))
+}
+
+func (h *handler) CloseBrowserSession(c *gin.Context, projectID string, sessionID uuid.UUID) {
+	_, project, member, ok := h.projectAccess(c, projectID)
+	if !ok || !h.browserAccess(c, member, true) {
+		return
+	}
+	session, err := h.browser.CloseSession(c.Request.Context(), uuid.MustParse(project), sessionID)
+	if err != nil {
+		h.browserFailure(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, browserSessionResponse(session))
 }
 
 func (h *handler) NavigateBrowserSession(c *gin.Context, projectID string, sessionID uuid.UUID) {

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/wendaining/cloudlet/internal/config"
 )
@@ -59,6 +60,33 @@ func TestLoadSecretKey(t *testing.T) {
 	}
 }
 
+func TestLoadBrowserSessionLifetime(t *testing.T) {
+	file := filepath.Join("..", "..", "configs", "cloudlet.json")
+	t.Setenv("CLOUDLET_DATABASE_URL", "")
+	t.Setenv("CLOUDLET_BROWSER_IMAGE", "")
+	t.Setenv("CLOUDLET_BROWSER_SECCOMP", "")
+	for _, test := range []struct {
+		value string
+		want  time.Duration
+		valid bool
+	}{
+		{"", 0, true},
+		{"5", 5 * time.Second, true},
+		{"300", 300 * time.Second, true},
+		{"0", 0, false},
+		{"4", 0, false},
+		{"301", 0, false},
+		{"1.5", 0, false},
+		{"99999999999", 0, false},
+	} {
+		t.Setenv("CLOUDLET_BROWSER_SESSION_SECONDS", test.value)
+		cfg, err := config.Load(file)
+		if (err == nil) != test.valid || cfg.BrowserSessionLifetime != test.want {
+			t.Errorf("lifetime %q = %s (%v), want %s, valid=%v", test.value, cfg.BrowserSessionLifetime, err, test.want, test.valid)
+		}
+	}
+}
+
 func TestValidateRoutePathPrefixes(t *testing.T) {
 	defaultRoute := config.Route{Host: "app.localhost", Target: "http://localhost"}
 	for _, test := range []struct {
@@ -107,6 +135,30 @@ func TestValidateRoutesUpstreamPort(t *testing.T) {
 				t.Fatalf("valid = %v, validation returned %v", test.valid, err)
 			}
 		})
+	}
+}
+
+func TestWorkerRuntimeConfiguration(t *testing.T) {
+	valid := config.WorkerRuntime{Directory: t.TempDir(), HostID: "host-1", HostBudget: config.ResourceBudget{CPUMillis: 4000, MemoryBytes: 4 << 30, Instances: 4}, ProjectQuota: config.ResourceBudget{CPUMillis: 1000, MemoryBytes: 256 << 20, Instances: 1}}
+	if err := valid.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for _, change := range []func(*config.WorkerRuntime){
+		func(w *config.WorkerRuntime) { w.Directory = "relative" },
+		func(w *config.WorkerRuntime) { w.HostID = "" },
+		func(w *config.WorkerRuntime) { w.HostBudget.CPUMillis = 999 },
+		func(w *config.WorkerRuntime) { w.ProjectQuota.MemoryBytes = (256 << 20) - 1 },
+		func(w *config.WorkerRuntime) { w.ProjectQuota.Instances = 0 },
+	} {
+		invalid := valid
+		change(&invalid)
+		if err := invalid.Validate(); err == nil {
+			t.Fatalf("invalid configuration accepted: %+v", invalid)
+		}
+	}
+	cfg := config.Config{APIAddress: "127.0.0.1:0", GatewayAddress: "127.0.0.1:0", Workers: &valid}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Worker runtime accepted without management dependencies")
 	}
 }
 
