@@ -11,7 +11,7 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-type staticSite struct {
+type StaticSite struct {
 	ID        uuid.UUID
 	ProjectID string
 	Name      string
@@ -31,7 +31,7 @@ type StaticSiteVersion struct {
 // so a potentially committed version can still be served.
 func (s *Store) CreateStaticSiteVersion(ctx context.Context, projectID, name, digest, directory string) (version StaticSiteVersion, uncertain bool, err error) {
 	err = s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		site := staticSite{ID: uuid.New(), ProjectID: projectID, Name: name}
+		site := StaticSite{ID: uuid.New(), ProjectID: projectID, Name: name}
 		insert := tx.Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "project_id"}, {Name: "name"}},
 			DoNothing: true,
@@ -40,7 +40,7 @@ func (s *Store) CreateStaticSiteVersion(ctx context.Context, projectID, name, di
 			return fmt.Errorf("register static site: %w", insert.Error)
 		}
 		if insert.RowsAffected == 0 {
-			site = staticSite{}
+			site = StaticSite{}
 			if err := tx.First(&site, "project_id = ? AND name = ?", projectID, name).Error; err != nil {
 				return fmt.Errorf("look up existing static site: %w", err)
 			}
@@ -68,4 +68,39 @@ func (s *Store) StaticSiteVersion(ctx context.Context, projectID, name string, i
 		return StaticSiteVersion{}, fmt.Errorf("read static site %q version %s in project %s: %w", name, id, projectID, err)
 	}
 	return version, nil
+}
+
+// ListStaticSites reads a bounded page ordered by the project's unique site name.
+func (s *Store) ListStaticSites(ctx context.Context, projectID, after string, limit int) ([]StaticSite, error) {
+	items := make([]StaticSite, 0)
+	query := s.DB.WithContext(ctx).Where("project_id = ?", projectID)
+	if after != "" {
+		query = query.Where("name > ?", after)
+	}
+	if err := query.Order("name ASC").Limit(limit).Find(&items).Error; err != nil {
+		return nil, fmt.Errorf("list static sites in project %s: %w", projectID, err)
+	}
+	return items, nil
+}
+
+// StaticSiteVersionCursor identifies a position in the version order.
+type StaticSiteVersionCursor struct {
+	CreatedAt time.Time
+	ID        uuid.UUID
+}
+
+func (s *Store) ListStaticSiteVersions(ctx context.Context, projectID, name string, after *StaticSiteVersionCursor, limit int) ([]StaticSiteVersion, error) {
+	var site StaticSite
+	if err := s.DB.WithContext(ctx).Select("id").Where("project_id = ? AND name = ?", projectID, name).Take(&site).Error; err != nil {
+		return nil, fmt.Errorf("find static site %q in project %s: %w", name, projectID, err)
+	}
+	items := make([]StaticSiteVersion, 0)
+	query := s.DB.WithContext(ctx).Select("id, site_id, artifact_digest, created_at").Where("site_id = ?", site.ID)
+	if after != nil {
+		query = query.Where("(created_at, id) < (?, ?)", after.CreatedAt, after.ID)
+	}
+	if err := query.Order("created_at DESC, id DESC").Limit(limit).Find(&items).Error; err != nil {
+		return nil, fmt.Errorf("list versions for static site %s in project %s: %w", site.ID, projectID, err)
+	}
+	return items, nil
 }

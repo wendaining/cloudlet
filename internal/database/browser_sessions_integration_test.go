@@ -12,10 +12,12 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -147,6 +149,35 @@ func TestBrowserSessionHTTP(t *testing.T) {
 	}
 	navigate(otherAPI, owner.ID, fixture, http.StatusNotFound)
 	navigate(ownerAPI, owner.ID, "file:///not-a-web-page", http.StatusBadRequest)
+	counterURL, count := browserCounterPage(t, fixture)
+	navigate(ownerAPI, owner.ID, counterURL, http.StatusOK)
+	click := func(api *apigen.ClientWithResponses, project, selector string, timeout *int, want int) {
+		t.Helper()
+		result, err := api.ClickBrowserPageWithResponse(ctx, project, session.Id,
+			apigen.ClickBrowserPageJSONRequestBody{Selector: selector, TimeoutMs: timeout})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.StatusCode() != want {
+			t.Fatalf("click %#v = %d %s, want %d", selector, result.StatusCode(), result.Body, want)
+		}
+	}
+	click(otherAPI, owner.ID, "#counter", nil, http.StatusNotFound)
+	click(ownerAPI, owner.ID, " ", nil, http.StatusBadRequest)
+	click(ownerAPI, owner.ID, "button", nil, http.StatusUnprocessableEntity)
+	for range 2 {
+		click(ownerAPI, owner.ID, "#counter", nil, http.StatusNoContent)
+	}
+	for deadline := time.Now().Add(3 * time.Second); count.Load() < 2 && time.Now().Before(deadline); {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if count.Load() != 2 {
+		t.Fatalf("page counter = %d, want 2", count.Load())
+	}
+	short := 200
+	click(ownerAPI, owner.ID, "#absent", &short, http.StatusGatewayTimeout)
+	get(ownerAPI, owner.ID, http.StatusOK)
+	t.Log("real Chromium clicked the counter twice; ambiguous locator HTTP 422, absent locator HTTP 504, other project HTTP 404")
 	page := navigate(ownerAPI, owner.ID, fixture, http.StatusOK).JSON200
 	if page == nil || page.Url != fixture || page.Title != "Cloudlet Browser Run" {
 		t.Fatalf("unexpected Chromium page: %+v", page)
@@ -375,4 +406,40 @@ throw new Error('console fixture exception');
 	go server.Serve(listener)
 	t.Cleanup(func() { server.Close() })
 	return "http://" + listener.Addr().String() + "/index.html"
+}
+
+func browserCounterPage(t *testing.T, existingFixture string) (string, *atomic.Int64) {
+	t.Helper()
+	fixtureURL, err := url.Parse(existingFixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("tcp4", net.JoinHostPort(fixtureURL.Hostname(), "0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var count atomic.Int64
+	server := &http.Server{
+		ReadHeaderTimeout: time.Second,
+		Handler: http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			if request.Method == http.MethodPost && request.URL.Path == "/count" {
+				count.Add(1)
+				writer.WriteHeader(http.StatusNoContent)
+				return
+			}
+			writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+			fmt.Fprint(writer, `<!doctype html><title>Cloudlet Click Test</title>
+<button id="counter">0</button><button>Other</button>
+<script>
+const button = document.querySelector('#counter');
+button.onclick = () => {
+  button.textContent = String(Number(button.textContent) + 1);
+  void fetch('/count', { method: 'POST' });
+};
+</script>`)
+		}),
+	}
+	go server.Serve(listener)
+	t.Cleanup(func() { server.Close() })
+	return "http://" + listener.Addr().String() + "/index.html", &count
 }
