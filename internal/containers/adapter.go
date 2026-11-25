@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/http"
 	"net/netip"
 	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
@@ -21,8 +23,10 @@ import (
 // adapter is no longer used. Every container operation other than Create
 // inspects the container first and returns ErrNotOwned when its canonical name
 // or ownership labels do not match.
+// WaitReady probes HTTP readiness through the published loopback endpoint.
 type Adapter struct {
-	docker *client.Client
+	docker     *client.Client
+	httpClient *http.Client
 }
 
 // New verifies that the Docker Engine is reachable and provides Linux
@@ -38,16 +42,25 @@ func New(ctx context.Context, docker *client.Client) (*Adapter, error) {
 	if ping.OSType != "linux" {
 		return nil, fmt.Errorf("create container adapter: Docker Engine provides %q containers, want linux: %w", ping.OSType, fs.ErrInvalid)
 	}
-	return &Adapter{docker: docker}, nil
+	return &Adapter{docker: docker, httpClient: newProbeClient()}, nil
 }
 
-// Create creates a stopped container with ownership labels and a loopback port
-// binding. The actual host port is assigned by Docker and reported by Observe
-// after Start. A duplicate container name returns ErrConflict.
+// Create creates a stopped container with ownership labels. AccessPublished
+// containers publish the container port on the host loopback interface;
+// AccessNetwork containers join the requested existing bridge network without
+// publishing a host port. The actual endpoint is reported by Observe after
+// Start. A duplicate container name returns ErrConflict, and a missing network,
+// including a name that Docker resolves to a different network, returns
+// ErrNetworkNotFound.
 func (a *Adapter) Create(ctx context.Context, spec Spec) (Container, error) {
 	options, err := spec.createOptions()
 	if err != nil {
 		return Container{}, err
+	}
+	if spec.Access == AccessNetwork {
+		if err := a.checkNetwork(ctx, spec.Network); err != nil {
+			return Container{}, fmt.Errorf("create container %s: %w", options.Name, err)
+		}
 	}
 	result, err := a.docker.ContainerCreate(ctx, options)
 	if err != nil {
@@ -96,7 +109,10 @@ func (a *Adapter) Find(ctx context.Context, ownership Ownership) (Observation, b
 }
 
 // Start starts a container that belongs to the requested ownership. Starting a
-// running container is a no-op.
+// running container is a no-op. In network mode the requested network is
+// checked again before starting, and a missing network returns
+// ErrNetworkNotFound instead of ErrNotFound while the container remains in its
+// previous state.
 func (a *Adapter) Start(ctx context.Context, ownership Ownership, id string) (Observation, error) {
 	info, err := a.inspectOwned(ctx, ownership, id)
 	if err != nil {
@@ -106,15 +122,65 @@ func (a *Adapter) Start(ctx context.Context, ownership Ownership, id string) (Ob
 		return Observation{}, fmt.Errorf("start container %s: state is missing: %w", id, fs.ErrInvalid)
 	}
 	if !info.State.Running {
+		networkName := managedNetworkMode(info)
+		if networkName != "" {
+			if err := a.checkNetwork(ctx, networkName); err != nil {
+				return Observation{}, fmt.Errorf("start container %s: %w", id, err)
+			}
+		}
 		if _, err := a.docker.ContainerStart(ctx, id, client.ContainerStartOptions{}); err != nil {
+			if networkName != "" && cerrdefs.IsNotFound(err) {
+				return Observation{}, a.networkStartError(ctx, ownership, id, networkName, err)
+			}
 			return Observation{}, dockerOperationError("start", id, err)
 		}
 	}
 	return a.Observe(ctx, ownership, id)
 }
 
-// Observe returns the current state and actual loopback port bindings of a
-// container that belongs to the requested ownership. A missing container
+// networkStartError distinguishes a missing network from a missing container
+// when ContainerStart reports a 404. The network can be removed after the
+// pre-start check and before the engine starts the container.
+func (a *Adapter) networkStartError(ctx context.Context, ownership Ownership, id, networkName string, startErr error) error {
+	_, inspectErr := a.inspectOwned(ctx, ownership, id)
+	switch {
+	case inspectErr == nil:
+		if err := a.checkNetwork(ctx, networkName); err != nil {
+			if errors.Is(err, ErrNetworkNotFound) {
+				return fmt.Errorf("start container %s: %w: %w", id, ErrNetworkNotFound, startErr)
+			}
+			return fmt.Errorf("start container %s: %w", id, err)
+		}
+		// The container and network still exist. Preserve the original error
+		// instead of misreporting a missing container.
+		return fmt.Errorf("start container %s: %w", id, startErr)
+	case errors.Is(inspectErr, ErrNotFound):
+		return dockerOperationError("start", id, startErr)
+	default:
+		return fmt.Errorf("verify container %s after start failure: %w", id, inspectErr)
+	}
+}
+
+// managedNetworkMode returns the user-defined bridge network name configured
+// for a container, or an empty string for Docker's special network modes.
+func managedNetworkMode(info container.InspectResponse) string {
+	if info.HostConfig == nil {
+		return ""
+	}
+	mode := string(info.HostConfig.NetworkMode)
+	switch mode {
+	case "", network.NetworkDefault, network.NetworkBridge, network.NetworkHost, network.NetworkNone:
+		return ""
+	}
+	if strings.HasPrefix(mode, "container:") {
+		return ""
+	}
+	return mode
+}
+
+// Observe returns the current state and actual endpoints of a container that
+// belongs to the requested ownership. Ports contains loopback bindings and
+// Endpoints contains user-defined network endpoints. A missing container
 // returns ErrNotFound.
 func (a *Adapter) Observe(ctx context.Context, ownership Ownership, id string) (Observation, error) {
 	info, err := a.inspectOwned(ctx, ownership, id)
@@ -166,7 +232,13 @@ func (a *Adapter) Remove(ctx context.Context, ownership Ownership, id string) er
 		return fmt.Errorf("remove container %s: container is running, stop it first: %w", id, fs.ErrInvalid)
 	}
 	if _, err := a.docker.ContainerRemove(ctx, id, client.ContainerRemoveOptions{RemoveVolumes: false}); err != nil {
-		return dockerOperationError("remove", id, err)
+		if !cerrdefs.IsConflict(err) || info.HostConfig == nil || !info.HostConfig.AutoRemove {
+			return dockerOperationError("remove", id, err)
+		}
+		// Docker may already be removing an auto-remove container after exit.
+		if waitErr := a.waitForRemoval(ctx, id); waitErr != nil {
+			return fmt.Errorf("confirm automatic removal of container %s: %w", id, errors.Join(err, waitErr))
+		}
 	}
 	// Confirm removal so callers can rely on the container and its ports being
 	// released.
@@ -176,6 +248,24 @@ func (a *Adapter) Remove(ctx context.Context, ownership Ownership, id string) er
 		return fmt.Errorf("verify removal of container %s: %w", id, err)
 	}
 	return nil
+}
+
+func (a *Adapter) waitForRemoval(ctx context.Context, id string) error {
+	ctx, cancel := context.WithTimeout(ctx, stopTimeout)
+	defer cancel()
+	wait := a.docker.ContainerWait(ctx, id, client.ContainerWaitOptions{Condition: container.WaitConditionRemoved})
+	select {
+	case result := <-wait.Result:
+		if result.Error != nil && result.Error.Message != "" {
+			return errors.New(result.Error.Message)
+		}
+		return nil
+	case err := <-wait.Error:
+		if cerrdefs.IsNotFound(err) {
+			return nil
+		}
+		return err
+	}
 }
 
 func (a *Adapter) inspectOwned(ctx context.Context, ownership Ownership, id string) (container.InspectResponse, error) {
@@ -226,7 +316,6 @@ func (s Spec) createOptions() (client.ContainerCreateOptions, error) {
 	if err != nil {
 		return client.ContainerCreateOptions{}, fmt.Errorf("build container spec: parse port %d: %w", s.Port, err)
 	}
-	hostIP := netip.MustParseAddr(loopbackHost)
 	pids := s.Limits.PIDs
 	labels := s.Ownership.labels()
 	digest, err := filesDigest(s.Files)
@@ -237,7 +326,8 @@ func (s Spec) createOptions() (client.ContainerCreateOptions, error) {
 		labels["io.cloudlet.files-digest"] = digest
 	}
 	seconds := int(stopTimeout / time.Second)
-	return client.ContainerCreateOptions{
+	labels[LabelPort] = strconv.FormatUint(uint64(s.Port), 10)
+	options := client.ContainerCreateOptions{
 		Name: s.Ownership.containerName(),
 		Config: &container.Config{
 			Image:        s.Image,
@@ -249,8 +339,6 @@ func (s Spec) createOptions() (client.ContainerCreateOptions, error) {
 			StopTimeout:  &seconds,
 		},
 		HostConfig: &container.HostConfig{
-			NetworkMode:  network.NetworkBridge,
-			PortBindings: network.PortMap{port: {{HostIP: hostIP}}},
 			RestartPolicy: container.RestartPolicy{
 				Name: container.RestartPolicyDisabled,
 			},
@@ -265,5 +353,61 @@ func (s Spec) createOptions() (client.ContainerCreateOptions, error) {
 				}},
 			},
 		},
-	}, nil
+	}
+	if s.ChromiumSeccompProfile != "" {
+		init := true
+		options.HostConfig.Init = &init
+		options.HostConfig.AutoRemove = true
+		options.HostConfig.CapDrop = []string{"ALL"}
+		options.HostConfig.ShmSize = 256 << 20
+		options.HostConfig.SecurityOpt = []string{"no-new-privileges", "seccomp=" + s.ChromiumSeccompProfile}
+	}
+	switch s.Access {
+	case AccessPublished:
+		options.HostConfig.NetworkMode = network.NetworkBridge
+		options.HostConfig.PortBindings = network.PortMap{
+			port: {{HostIP: netip.MustParseAddr(loopbackHost)}},
+		}
+	case AccessNetwork:
+		options.HostConfig.NetworkMode = container.NetworkMode(s.Network)
+		options.NetworkingConfig = &network.NetworkingConfig{
+			EndpointsConfig: map[string]*network.EndpointSettings{
+				s.Network: {Aliases: []string{s.Ownership.networkAlias()}},
+			},
+		}
+	}
+	return options, nil
+}
+
+// checkNetwork verifies that the requested network exists and can host a
+// managed container. The network must be a local bridge network that is not a
+// config-only placeholder, because managed network endpoints rely on Docker's
+// embedded DNS for the stable alias. Network ownership and labels are not
+// verified here; callers must not pass project-controlled names before #154
+// provides network ownership.
+func (a *Adapter) checkNetwork(ctx context.Context, name string) error {
+	result, err := a.docker.NetworkInspect(ctx, name, client.NetworkInspectOptions{})
+	if err != nil {
+		if cerrdefs.IsNotFound(err) {
+			return fmt.Errorf("inspect network %q: %w: %w", name, ErrNetworkNotFound, err)
+		}
+		return fmt.Errorf("inspect network %q: %w", name, err)
+	}
+	return verifyNetwork(name, result.Network)
+}
+
+func verifyNetwork(name string, info network.Inspect) error {
+	if info.Name != name {
+		return fmt.Errorf("inspect network %q: Docker resolved network name %q: %w", name, info.Name, ErrNetworkNotFound)
+	}
+	if info.Scope != "local" {
+		return fmt.Errorf("inspect network %q: scope is %q, want local: %w", name, info.Scope, fs.ErrInvalid)
+	}
+	if info.Driver != "bridge" {
+		return fmt.Errorf("inspect network %q: driver is %q, want bridge: %w", name, info.Driver, fs.ErrInvalid)
+	}
+	if info.ConfigOnly {
+		return fmt.Errorf("inspect network %q: config-only networks cannot host containers: %w", name, fs.ErrInvalid)
+	}
+	return nil
 }

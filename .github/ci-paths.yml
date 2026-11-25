@@ -43,8 +43,12 @@ tooling:
 
 database:
   - 'internal/database/**'
+  - 'internal/browser/**'
+  - 'runtimes/browser/**'
   - 'internal/operations/**'
   - 'internal/capacity/**'
+  - 'internal/staticdeploy/**'
+  - 'internal/siteartifact/**'
   - 'internal/controlplane/**'
   - 'internal/config/**'
   - 'internal/server/**'

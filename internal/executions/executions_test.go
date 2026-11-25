@@ -16,6 +16,7 @@ func validStartRequest() StartRequest {
 		ExecutionID: uuid.New(),
 		ProjectID:   projectID,
 		Spec: containers.Spec{
+			Access: containers.AccessPublished,
 			Ownership: containers.Ownership{
 				Environment: "test",
 				Project:     projectID.String(),

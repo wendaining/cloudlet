@@ -239,7 +239,11 @@ func TestProjectRoutesRestoreAfterServerProcessRestart(t *testing.T) {
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build server: %v\n%s", err, output)
 	}
-	data, err := json.Marshal(config.Config{APIAddress: "127.0.0.1:0", GatewayAddress: "127.0.0.1:0"})
+	data, err := json.Marshal(config.Config{
+		APIAddress:           "127.0.0.1:0",
+		GatewayAddress:       "127.0.0.1:0",
+		SiteStorageDirectory: filepath.Join(dir, "site-storage"),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -355,7 +355,7 @@ func (s *Service) Deploy(ctx context.Context, projectID uuid.UUID, name, key str
 		return result, true, err
 	}
 	execution, err := s.executions.Start(ctx, executions.StartRequest{ExecutionID: result.Execution.ID, ProjectID: projectID, Spec: containers.Spec{
-		Ownership: ownership, Image: s.image, User: "1000:1000", Port: workers.HTTPPort, Command: workers.ServeArgs(),
+		Ownership: ownership, Image: s.image, User: "1000:1000", Port: workers.HTTPPort, Access: containers.AccessPublished, Command: workers.ServeArgs(),
 		Limits: containers.Limits{CPUMillis: 1000, MemoryBytes: 256 << 20, PIDs: 128, OpenFiles: 1024},
 		Files:  []containers.File{{Path: "worker/config.capnp", Data: prepared.Config}, {Path: "worker/worker.mjs", Data: prepared.Module}},
 	}})

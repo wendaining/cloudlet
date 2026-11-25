@@ -176,6 +176,31 @@ paths:
           $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/capacity:
+    parameters:
+      - name: projectID
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: getProjectCapacity
+      description: 返回项目成员可见的项目额度、活动预留占用和剩余量；三个值来自同一数据库快照。
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 项目 CPU、内存与实例容量使用快照
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectCapacity'
+        '401':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
   /api/v1/projects/{projectID}/members:
     parameters:
       - name: projectID
@@ -258,6 +283,166 @@ paths:
         '404':
           $ref: '#/components/responses/Error'
         '409':
+          $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/browser-sessions:
+    parameters:
+      - $ref: '#/components/parameters/BrowserProjectID'
+    post:
+      operationId: createBrowserSession
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '201':
+          description: 浏览器会话已就绪
+          headers:
+            Location:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserSession'
+  /api/v1/projects/{projectID}/browser-sessions/{sessionID}:
+    parameters:
+      - $ref: '#/components/parameters/BrowserProjectID'
+      - $ref: '#/components/parameters/BrowserSessionID'
+    get:
+      operationId: getBrowserSession
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 项目浏览器会话
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserSession'
+    delete:
+      operationId: closeBrowserSession
+      description: 停止容器并确认清理，释放容量后返回会话终态。重复关闭返回已有终态。
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 已结束的浏览器会话
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserSession'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/browser-sessions/{sessionID}/navigate:
+    parameters:
+      - $ref: '#/components/parameters/BrowserProjectID'
+      - $ref: '#/components/parameters/BrowserSessionID'
+    post:
+      operationId: navigateBrowserSession
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NavigateBrowserSessionRequest'
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 导航后的页面地址和标题
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserNavigation'
+  /api/v1/projects/{projectID}/browser-sessions/{sessionID}/console:
+    parameters:
+      - $ref: '#/components/parameters/BrowserProjectID'
+      - $ref: '#/components/parameters/BrowserSessionID'
+    get:
+      operationId: getBrowserConsole
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 会话的最近控制台消息和页面错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserConsole'
+  /api/v1/projects/{projectID}/sites/{siteName}/versions:
+    parameters:
+      - $ref: '#/components/parameters/SiteProjectID'
+      - $ref: '#/components/parameters/SiteName'
+    post:
+      operationId: uploadStaticSiteVersion
+      description: 项目所有者上传不超过 64 MiB 的 ZIP，站点首次上传时建立项目内的稳定标识。返回已验证的待激活版本。
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/zip:
+            schema:
+              type: string
+              format: binary
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '201':
+          description: 已验证的待激活版本
+          headers:
+            Location:
+              description: 查询新版本的管理 API 路径
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaticSiteVersion'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '413':
+          $ref: '#/components/responses/Error'
+        '415':
+          $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}:
+    parameters:
+      - $ref: '#/components/parameters/SiteProjectID'
+      - $ref: '#/components/parameters/SiteName'
+      - name: versionID
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: getStaticSiteVersion
+      description: 项目成员按标识读取一个静态站点版本。
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          $ref: '#/components/responses/StaticSiteVersion'
+        '401':
+          $ref: '#/components/responses/Error'
+        '404':
           $ref: '#/components/responses/Error'
   /api/v1/projects/{projectID}/secrets:
     parameters:
@@ -534,6 +719,34 @@ paths:
         default:
           $ref: "#/components/responses/Error"
 components:
+  parameters:
+    BrowserProjectID:
+      name: projectID
+      in: path
+      required: true
+      schema:
+        type: string
+    BrowserSessionID:
+      name: sessionID
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    SiteProjectID:
+      name: projectID
+      in: path
+      required: true
+      schema:
+        type: string
+    SiteName:
+      name: siteName
+      in: path
+      required: true
+      schema:
+        type: string
+        maxLength: 63
+        pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
   securitySchemes:
     SessionCookie:
       type: apiKey
@@ -605,7 +818,40 @@ components:
           type: string
     ProjectRole:
       type: string
-      enum: [ owner, developer, viewer ]
+      enum: [owner, developer, viewer]
+    ResourceAmounts:
+      type: object
+      required: [cpu_millis, memory_bytes, instances]
+      properties:
+        cpu_millis:
+          type: integer
+          format: int64
+          minimum: 0
+          description: CPU 毫核。
+        memory_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: 内存字节。
+        instances:
+          type: integer
+          format: int64
+          minimum: 0
+          description: 实例数。
+    ProjectCapacity:
+      type: object
+      description: 项目配额与活动预留快照。used 可能超过 limit；remaining 是按资源钳制后的额度内余量，不表示超用标记。
+      required: [project_id, limit, used, remaining]
+      properties:
+        project_id:
+          type: string
+          format: uuid
+        limit:
+          $ref: '#/components/schemas/ResourceAmounts'
+        used:
+          $ref: '#/components/schemas/ResourceAmounts'
+        remaining:
+          $ref: '#/components/schemas/ResourceAmounts'
     ProjectMemberRole:
       type: string
       enum: [ developer, viewer ]
@@ -706,6 +952,89 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/Project"
+    BrowserConsoleEntry:
+      type: object
+      required: [kind, level, message, truncated]
+      properties:
+        kind:
+          type: string
+          description: console 表示控制台消息，page_error 表示未捕获的页面错误
+        level:
+          type: string
+        message:
+          type: string
+          maxLength: 512
+        truncated:
+          type: boolean
+    BrowserConsole:
+      type: object
+      required: [entries, dropped]
+      properties:
+        entries:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/BrowserConsoleEntry'
+        dropped:
+          type: integer
+          format: int64
+          minimum: 0
+          description: 已从会话历史移除的旧记录数
+    BrowserSessionStatus:
+      type: string
+      enum: [starting, ready, failed, closed]
+      x-enum-varnames: [BrowserSessionStatusStarting, BrowserSessionStatusReady, BrowserSessionStatusFailed, BrowserSessionStatusClosed]
+    BrowserSession:
+      type: object
+      required: [id, endpoint, expires_at, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        endpoint:
+          type: string
+          description: 需要项目会话凭据的相对管理 API 地址
+        expires_at:
+          type: string
+          format: date-time
+        status:
+          $ref: '#/components/schemas/BrowserSessionStatus'
+    NavigateBrowserSessionRequest:
+      type: object
+      additionalProperties: false
+      required: [url]
+      properties:
+        url:
+          type: string
+          maxLength: 4096
+    BrowserNavigation:
+      type: object
+      required: [url, title]
+      properties:
+        url:
+          type: string
+        title:
+          type: string
+    StaticSiteVersion:
+      type: object
+      required: [id, site_id, artifact_digest, status, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        site_id:
+          type: string
+          format: uuid
+        artifact_digest:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+        status:
+          type: string
+          enum: [ready]
+          description: 站点文件已通过校验并准备就绪，等待激活。
+        created_at:
+          type: string
+          format: date-time
     Operation:
       type: object
       required: [ id, action, phase, outcome, created_at, updated_at ]
@@ -831,6 +1160,12 @@ components:
           type: string
           format: date-time
   responses:
+    StaticSiteVersion:
+      description: 不可变静态站点版本
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/StaticSiteVersion'
     Project:
       description: 项目身份
       content:

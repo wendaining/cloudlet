@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 )
 
@@ -24,15 +25,19 @@ type Route struct {
 }
 
 type Config struct {
-	Environment    string         `json:"environment,omitempty"`
-	Instance       string         `json:"instance,omitempty"`
-	PublicOrigin   string         `json:"public_origin,omitempty"`
-	DatabaseURL    string         `json:"-"`
-	SecretKey      []byte         `json:"-"`
-	APIAddress     string         `json:"api_address"`
-	GatewayAddress string         `json:"gateway_address"`
-	Routes         []Route        `json:"routes"`
-	Workers        *WorkerRuntime `json:"workers,omitempty"`
+	Environment            string         `json:"environment,omitempty"`
+	Instance               string         `json:"instance,omitempty"`
+	PublicOrigin           string         `json:"public_origin,omitempty"`
+	SecretKey              []byte         `json:"-"`
+	BrowserImage           string         `json:"-"`
+	BrowserSeccomp         string         `json:"-"`
+	BrowserSessionLifetime time.Duration  `json:"-"`
+	DatabaseURL            string         `json:"-"`
+	SiteStorageDirectory   string         `json:"site_storage_directory,omitempty"`
+	APIAddress             string         `json:"api_address"`
+	GatewayAddress         string         `json:"gateway_address"`
+	Routes                 []Route        `json:"routes"`
+	Workers                *WorkerRuntime `json:"workers,omitempty"`
 }
 
 type ResourceBudget struct {
@@ -78,6 +83,15 @@ func Load(path string) (Config, error) {
 		return Config{}, errors.New("configuration must contain one JSON object")
 	}
 	cfg.DatabaseURL = os.Getenv("CLOUDLET_DATABASE_URL")
+	cfg.BrowserImage = os.Getenv("CLOUDLET_BROWSER_IMAGE")
+	cfg.BrowserSeccomp = os.Getenv("CLOUDLET_BROWSER_SECCOMP")
+	if value := os.Getenv("CLOUDLET_BROWSER_SESSION_SECONDS"); value != "" {
+		seconds, err := strconv.ParseUint(value, 10, 32)
+		if err != nil || seconds < 5 || seconds > 300 {
+			return Config{}, errors.New("CLOUDLET_BROWSER_SESSION_SECONDS must be an integer from 5 to 300")
+		}
+		cfg.BrowserSessionLifetime = time.Duration(seconds) * time.Second
+	}
 	if value := os.Getenv("CLOUDLET_SECRET_KEY"); value != "" {
 		key, err := hex.DecodeString(value)
 		if err != nil || len(key) != 32 {
@@ -99,6 +113,14 @@ func (cfg Config) Validate() error {
 		if err := cfg.Workers.Validate(); err != nil {
 			return err
 		}
+	}
+	if cfg.BrowserImage != "" || cfg.BrowserSeccomp != "" {
+		if cfg.DatabaseURL == "" || cfg.Instance == "" || cfg.BrowserImage == "" || !filepath.IsAbs(cfg.BrowserSeccomp) {
+			return errors.New("Browser Run requires a management database, instance, image ID and absolute seccomp profile path")
+		}
+	}
+	if (cfg.DatabaseURL != "" || cfg.SiteStorageDirectory != "") && !filepath.IsAbs(cfg.SiteStorageDirectory) {
+		return errors.New("management site storage requires an absolute site_storage_directory")
 	}
 	if cfg.Environment != "" && cfg.Environment != "development" && cfg.Environment != "production" {
 		return errors.New("invalid environment")

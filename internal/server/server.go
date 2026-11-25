@@ -12,16 +12,19 @@ import (
 	"time"
 
 	"github.com/moby/moby/client"
+	"github.com/wendaining/cloudlet/internal/browser"
 	"github.com/wendaining/cloudlet/internal/config"
 	"github.com/wendaining/cloudlet/internal/controlplane"
 	"github.com/wendaining/cloudlet/internal/database"
 	"github.com/wendaining/cloudlet/internal/gateway"
 	"github.com/wendaining/cloudlet/internal/routes"
+	"github.com/wendaining/cloudlet/internal/staticdeploy"
 	"github.com/wendaining/cloudlet/internal/workerpublish"
 )
 
 func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr error) {
 	var store *database.Store
+	var sites *staticdeploy.Service
 	if cfg.DatabaseURL != "" {
 		if len(cfg.SecretKey) != 32 {
 			return errors.New("management environment requires a 32-byte secret key")
@@ -37,6 +40,29 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 		}
 		if err := store.CheckSecretKey(ctx, cfg.SecretKey); err != nil {
 			return fmt.Errorf("validate platform secret key before startup: %w", err)
+		}
+		sites, err = staticdeploy.New(store, cfg.SiteStorageDirectory)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			if err := sites.Close(); err != nil {
+				logger.Error("close static site storage", "error", err)
+			}
+		}()
+	}
+	var browserService *browser.Service
+	if cfg.BrowserImage != "" {
+		docker, err := client.New(client.FromEnv)
+		if err != nil {
+			return fmt.Errorf("configure Browser Run Docker client: %w", err)
+		}
+		defer docker.Close()
+		browserCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		browserService, err = browser.NewService(browserCtx, store, docker, cfg.Instance, cfg.BrowserImage, cfg.BrowserSeccomp, cfg.SecretKey)
+		cancel()
+		if err != nil {
+			return fmt.Errorf("configure Browser Run: %w", err)
 		}
 	}
 	proxy, err := gateway.NewHandler(cfg, logger)
@@ -81,11 +107,23 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 	if err != nil {
 		return fmt.Errorf("resolve management API endpoint: %w", err)
 	}
-	management, closeSessions, err := controlplane.NewHandlerWithMCPAndWorkers(store, cfg, logger, endpoint, publication)
+	management, closeSessions, err := controlplane.NewHandlerWithMCPAndWorkers(store, sites, browserService, cfg, logger, endpoint, publication)
 	if err != nil {
 		return fmt.Errorf("configure management API: %w", err)
 	}
 	defer closeSessions()
+	if browserService != nil {
+		reaperCtx, cancelReaper := context.WithCancel(ctx)
+		reaperDone := make(chan struct{})
+		go func() {
+			defer close(reaperDone)
+			browserService.RunReaper(reaperCtx, logger)
+		}()
+		defer func() {
+			cancelReaper()
+			<-reaperDone
+		}()
+	}
 	api := newServer(management)
 	front := newServer(proxy)
 	results := make(chan error, 2)

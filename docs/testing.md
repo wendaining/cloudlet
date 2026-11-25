@@ -8,7 +8,7 @@
 | npm run lint:config | JSON、YAML、Issue 表单与 Actions 约定 |
 | npm run lint:tooling | 脚本语法、ShellCheck、配置文件与真实端口检查 |
 | make test | Go race 测试、真实 HTTP、Gateway 转发与服务停止 |
-| make test-integration | Docker 中的 PostgreSQL 迁移、账号、会话、项目与成员角色、操作记录、项目凭据、路由快照、容量预留、容器容量准入、就绪检查、workerd 执行和容器创建、启动、观测、停止与删除 |
+| make test-integration | Docker 中的 PostgreSQL 迁移、账号、会话、项目与成员角色、操作记录、项目凭据、路由快照、容量预留、容器容量准入、项目容量查询、就绪检查、workerd 执行和容器创建、启动、观测、HTTP 就绪探测、配额触发、停止与删除 |
 | make web-check | TypeScript、ESLint、Prettier、Vite 构建与接口生成一致性 |
 | make dev-check | 真实本机进程、数据库、热重载、完整停止、多实例与失败清理 |
 | make test-e2e | 真实 Chromium 在桌面和手机尺寸下完成登录、刷新和退出 |
@@ -19,6 +19,12 @@
 make generate 从 api/openapi.yaml 同时生成 Go 类型、Gin 接口、客户端和前端类型，生成文件随实现提交。Go 和前端的检查分别比较临时生成结果。
 
 ## 开发流程验证
+
+Gateway 域名验收构建并启动实际管理服务，以真实站点文件作为 HTTP 上游。用例验证域名大小写、末尾句点与端口规范化，GET 与 HEAD 正常转发，未知域名返回 404。停止上游后，该域名返回 502 并记录失败域名，其他上游继续可用。
+
+```sh
+go test -race -count=1 -run TestGatewayDomainRoutingAcceptance -v ./internal/server
+```
 
 开发流程测试创建独立配置与随机可用端口，通过与成员相同的开发入口运行 Go、Vite 和 PostgreSQL。测试验证同名控制器拒绝重复启动、错误的 reset 确认不会停止服务、真实 API 登录和 Gateway 转发。
 
@@ -49,6 +55,16 @@ go test -race -count=1 -tags=integration ./internal/executions
 ```
 
 用例在四核四 GiB 主机预算下预占三核三 GiB 与三个实例，再并发提交八个一核一 GiB、单实例的容器启动请求。只有一个请求成功，其余返回容量不足且没有创建容器；成功启动的固定镜像通过实际发布的回环端口返回预期页面。仅停止容器时预留保持活动；停止并删除容器后容量恢复，后续申请可以再次成功。无效镜像导致创建失败时释放预留且不留下容器；无效用户使 Docker 启动失败时清理容器并释放预留。同一执行标识的并发启动只创建一个容器，并只扣减一次容量。同一执行更换归属或镜像、不同执行复用同一归属都会被拒绝；错误容器标识不会释放容量，绑定容器被外部删除后按归属确认清理。尚未记录容器标识的预留可以在确认没有容器后释放；替换容器清理后释放失败时，原 Stop 请求仍可使用原容器标识重试。256 至 512 字节的摘要固定镜像可以通过准入；Docker 创建失败时正常释放预留。生命周期用例使用真实 PostgreSQL 与 Docker，纯逻辑单元测试只覆盖构造与请求校验、绑定映射和复用配置比较。
+
+## 项目容量查询验收
+
+项目容量查询使用真实 PostgreSQL 和 HTTP 管理 API，验证项目成员读取项目额度、活动预留占用与剩余量。
+
+```sh
+go test -race -count=1 -tags=integration ./internal/controlplane
+```
+
+用例创建两个实际预留，确认查询结果等于两项之和；释放其中一项后再次查询，确认占用减少且剩余量增加；查看者可以读取，非成员、未知项目和未配置配额返回 404，未登录返回 401。接口在 REPEATABLE READ 只读事务中读取配额和占用，两个值来自同一快照。剩余量只表示项目配额内的余量，不表示主机当前余量。
 
 ## 项目凭据验收
 
@@ -128,19 +144,52 @@ npm --prefix runtimes/browser run test:integration
 
 ## 容器执行适配器验收
 
-使用真实 Docker 启动 configs/images.json 中的固定镜像，读取适配器观测到的回环端口并请求预期响应。名称或归属标签不匹配的容器不会被启动、观测、停止或删除。停止和删除后容器与端口释放。
+使用真实 Docker 启动 configs/images.json 中的固定镜像，读取适配器观测到的回环端口并请求预期响应。network 模式创建独立的用户定义 bridge 网络，核对容器没有发布主机端口，读取容器在该网络中的实际地址与稳定别名，并从同一网络的客户端容器通过 IP 与 DNS 名称分别发起真实 HTTP 请求。Docker Desktop 与 WSL2 中宿主机不能直接访问用户定义网络的容器地址，因此内部端点由同网络客户端验证。网络在创建与启动之间被删除时，启动返回 `ErrNetworkNotFound` 且容器保持 `created`；Docker 把网络 ID 前缀解析为其他网络时同样归类为 `ErrNetworkNotFound`。名称或归属标签不匹配的容器不会被启动、观测、停止或删除。停止和删除后容器、网络端点与端口释放。
 
 镜像准备使用真实 Docker Engine 和本地 registry。测试从空缓存按摘要拉取导入的测试镜像，核对返回的镜像标识与摘要；停止 registry 后再次准备，确认直接复用已核对摘要的本地镜像；再以不存在的摘要请求拉取，确认返回包含具体镜像引用的拉取失败。registry 镜像按 digest 固定，缺失时由 Docker Engine 拉取。
+
+HTTP 就绪探测使用真实 Docker 启动延迟就绪、持续返回 503 和启动后退出的服务。延迟服务在探测期间连接失败，随后返回 200；持续 503 的服务在截止时间后返回 `ErrNotReady` 并保留最后状态；启动后退出的容器在截止时间前快速失败并报告退出码。未发布端口与不匹配归属分别返回明确错误；端口在探测期间暂时消失时，保留最近一次 HTTP 状态并继续报告端口缺失原因。单元测试还覆盖状态码已返回但响应体保持打开的流式服务，确认收到状态码后立即结束本次尝试，不等待响应体；100–199 的 1xx 状态码在访问 Docker 前被拒绝，避免配置后等待到超时。
 
 ```sh
 make test-integration
 # 只运行容器适配器
 go test -race -count=1 -tags=integration ./internal/containers
+# 只运行内部网络端点
+go test -race -count=1 -tags=integration -run TestAdapterNetworkAccess ./internal/containers
+# 只运行启动时的网络缺失与网络 ID 前缀回归
+go test -race -count=1 -tags=integration -run 'TestAdapterStartReportsMissingNetwork|TestAdapterCreateRejectsNetworkIDPrefix' ./internal/containers
 # 只运行镜像准备
 go test -race -count=1 -tags=integration -run TestAdapterPrepareImage ./internal/containers
+# 只运行 HTTP 就绪探测
+go test -race -count=1 -tags=integration -run TestAdapterWaitReady ./internal/containers
 ```
 
 测试结束清理所属容器、本地 registry 与拉取的测试镜像。
+
+## 容器配额验收
+
+使用真实 Docker 和 configs/images.json 中的固定镜像，在受限容器内运行有限负载，核对 Docker 实际设置与触发结果。负载依赖固定镜像中的 busybox 工具（sh、timeout、head、tr、awk 与 ulimit），镜像工具集变化时需要同步调整。`containers.ProbeHostLimits` 读取 Docker Engine 报告的主机信息，按 CPU CFS 配额与周期、内存限制、PIDs 限制和 Linux nofile ulimit 报告宿主支持范围；不支持的项在验收中跳过并记录 Docker 给出的原因。
+
+```sh
+go test -race -count=1 -tags=integration -run 'TestProbeHostLimits|TestAdapterLimitsAcceptance' -v ./internal/containers
+```
+
+用例先用 docker inspect 核对创建时的 NanoCPUs、Memory、PidsLimit 与 nofile 软硬限制，再观察实际负载。内存负载的分配量超过 Docker 实际设置的 MemorySwap 上限；宿主没有限制内存交换（SwapLimit 为 false 或 MemorySwap 不大于 0）时，该用例跳过并记录原因：
+
+| 限制 | 受限负载 | 预期触发结果 | 对照负载 |
+| --- | --- | --- | --- |
+| CPU | 500 毫核，忙循环约 2.5 秒 | CPU 用量低于单核满负荷，throttled_periods 大于 0 | — |
+| 内存 | 64 MiB，分配并写入 200 MB | 容器被 OOM 终止，State.OOMKilled 为 true 或退出码为 137 | 1 GiB 时完成分配 |
+| 进程 | 16 个 PIDs，循环创建 100 个进程 | 创建失败并以非零状态退出 | 128 个 PIDs 时创建 100 个进程成功 |
+| 打开文件 | 64 个文件句柄，打开 200 个文件 | 打开失败并以非零状态退出，ulimit -n 为 64 | 1024 个句柄时打开 200 个文件成功 |
+
+测试结束停止并删除容器，逐个确认容器不存在，再按本次验收的环境标签确认没有遗留容器。宿主支持范围随测试日志输出，实际结果按环境记录：
+
+| 环境 | Docker Engine | cgroup | CPU | 内存 | PIDs | 打开文件 | 交换限制 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| WSL2 / Docker Desktop 4.99.0 | 29.9.3 linux/amd64 | v2 / cgroupfs | 支持 | 支持 | 支持 | 支持 | 支持 |
+
+CI 的 Containers 任务在标准 Linux Docker 中执行同一用例；其他平台的结果需要单独记录。
 
 ## 执行模块的业务验收
 

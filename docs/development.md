@@ -81,6 +81,8 @@ make dev 检查配置与端口，使用 compose.yaml 和 compose.dev.yaml 启动
 
 未指定 Docker 连接时使用当前 Docker context。本地开发支持 unix:// 连接，Go SDK 和 Testcontainers 使用同一引擎。数据库镜像版本与 digest 锁定在 configs/images.json。数据库端口和应用监听端口均绑定回环地址。
 
+配置管理数据库时，服务 JSON 需要设置 `site_storage_directory` 为平台独占的可写绝对路径。本地开发入口将其设为 `.local/实例名称/site-storage`。服务器部署需要为该路径提供持久化存储，并与数据库一起保留。目录下的 `archives` 保存原始 ZIP，`versions` 保存已解包文件。
+
 创建另一个实例时执行 make setup ENV_FILE=.env.feature.local，编辑该文件中的实例名称、数据库端口和四个服务端口，再运行：
 
 ```sh
@@ -118,3 +120,21 @@ Compose 部署已发布的应用镜像和 PostgreSQL，注入该环境的数据�
 发布前验证迁移，部署时执行对应版本的迁移，启动应用后检查就绪状态和业务接口。开发环境与服务器使用相同的 PostgreSQL 版本、运行时版本和迁移文件。
 
 具体技术见 [技术栈](technology-stack.md)，镜像与版本发布流程见 [交付与发布](releases.md)。Docker 的连接与环境配置说明见 [PostgreSQL 指南](https://docs.docker.com/guides/postgresql/) 和 [Compose 部署指南](https://docs.docker.com/compose/how-tos/production/)。
+
+## 本地启用 Browser Run 管理 API
+
+在仓库根目录构建并配置 Chromium 会话镜像，然后启动开发环境：
+
+```sh
+export CLOUDLET_BROWSER_IMAGE="$(docker build --quiet runtimes/browser)"
+export CLOUDLET_BROWSER_SECCOMP="$PWD/runtimes/browser/seccomp.json"
+make dev
+```
+
+使用登录会话在项目下向 `POST /api/v1/projects/{projectID}/browser-sessions` 发出请求。收到 201 后，响应的 endpoint 可用于查询会话。向 endpoint 后追加 `/navigate` 并提交 JSON 正文 `{"url":"http://可从容器访问的测试地址/"}`，核对响应中的页面地址和标题。使用另一项目的账号查询同一会话应返回 404。
+
+开发时管理进程需要连接本地 Docker Unix socket。测试页面需要监听容器能访问的接口。Linux 默认 Docker 网桥的网关地址可用 `docker network inspect bridge` 查看。不要把测试页面只绑定到宿主的 127.0.0.1。
+
+发起 `DELETE` 到会话 endpoint 可以主动关闭会话，响应状态为 `closed`，重复调用仍返回终态。要检查自动回收，可在启动 `make dev` 的终端执行 `export CLOUDLET_BROWSER_SESSION_SECONDS=15`。该值只影响随后创建的会话，有效范围为 5 到 300 秒，默认 300 秒。
+
+验收时分别创建一个主动关闭和一个等到期的会话。在会话运行时通过 `docker ps` 的 `io.cloudlet.resource=browser-<会话 ID>` 标签查到容器；关闭或到期后，对原容器执行 `docker inspect` 应查不到。在管理 API 查询会话应返回 `closed`，随后可在同一默认配额下创建新会话。

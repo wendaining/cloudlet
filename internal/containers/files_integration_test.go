@@ -32,7 +32,11 @@ func TestAdapterRemovesContainerWhenFileInstallationFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	ownership := containers.Ownership{Environment: "files", Project: uuid.NewString(), Resource: uuid.NewString(), Generation: 1}
-	spec := containers.Spec{Ownership: ownership, Image: image, User: "101", Port: 8080, Limits: containers.Limits{CPUMillis: 500, MemoryBytes: 128 << 20, PIDs: 64, OpenFiles: 1024}, Files: []containers.File{{Path: "etc/passwd/worker.mjs", Data: []byte("export default {}")}}}
+	spec := containers.Spec{
+		Ownership: ownership, Image: image, User: "101", Port: 8080, Access: containers.AccessPublished,
+		Limits: containers.Limits{CPUMillis: 500, MemoryBytes: 128 << 20, PIDs: 64, OpenFiles: 1024},
+		Files:  []containers.File{{Path: "etc/passwd/worker.mjs", Data: []byte("export default {}")}},
+	}
 	created, createErr := adapter.Create(ctx, spec)
 	if created.ID != "" {
 		t.Cleanup(func() {

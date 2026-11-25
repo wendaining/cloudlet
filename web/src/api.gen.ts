@@ -137,6 +137,25 @@ export interface paths {
         patch: operations["renameProject"];
         trace?: never;
     };
+    "/api/v1/projects/{projectID}/capacity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        /** @description 返回项目成员可见的项目额度、活动预留占用和剩余量；三个值来自同一数据库快照。 */
+        get: operations["getProjectCapacity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{projectID}/members": {
         parameters: {
             query?: never;
@@ -172,6 +191,123 @@ export interface paths {
         post?: never;
         /** @description 移除项目成员；仅项目所有者可以调用，项目所有者不可移除。 */
         delete: operations["removeProjectMember"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/browser-sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["createBrowserSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/browser-sessions/{sessionID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        get: operations["getBrowserSession"];
+        put?: never;
+        post?: never;
+        /** @description 停止容器并确认清理，释放容量后返回会话终态。重复关闭返回已有终态。 */
+        delete: operations["closeBrowserSession"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/browser-sessions/{sessionID}/navigate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["navigateBrowserSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/browser-sessions/{sessionID}/console": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        get: operations["getBrowserConsole"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/sites/{siteName}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["SiteProjectID"];
+                siteName: components["parameters"]["SiteName"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 项目所有者上传不超过 64 MiB 的 ZIP，站点首次上传时建立项目内的稳定标识。返回已验证的待激活版本。 */
+        post: operations["uploadStaticSiteVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["SiteProjectID"];
+                siteName: components["parameters"]["SiteName"];
+                versionID: string;
+            };
+            cookie?: never;
+        };
+        /** @description 项目成员按标识读取一个静态站点版本。 */
+        get: operations["getStaticSiteVersion"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -314,6 +450,31 @@ export interface components {
         };
         /** @enum {string} */
         ProjectRole: "owner" | "developer" | "viewer";
+        ResourceAmounts: {
+            /**
+             * Format: int64
+             * @description CPU 毫核。
+             */
+            cpu_millis: number;
+            /**
+             * Format: int64
+             * @description 内存字节。
+             */
+            memory_bytes: number;
+            /**
+             * Format: int64
+             * @description 实例数。
+             */
+            instances: number;
+        };
+        /** @description 项目配额与活动预留快照。used 可能超过 limit；remaining 是按资源钳制后的额度内余量，不表示超用标记。 */
+        ProjectCapacity: {
+            /** Format: uuid */
+            project_id: string;
+            limit: components["schemas"]["ResourceAmounts"];
+            used: components["schemas"]["ResourceAmounts"];
+            remaining: components["schemas"]["ResourceAmounts"];
+        };
         /** @enum {string} */
         ProjectMemberRole: "developer" | "viewer";
         ProjectMember: {
@@ -365,6 +526,53 @@ export interface components {
         Session: {
             user: components["schemas"]["User"];
             projects: components["schemas"]["Project"][];
+        };
+        BrowserConsoleEntry: {
+            /** @description console 表示控制台消息，page_error 表示未捕获的页面错误 */
+            kind: string;
+            level: string;
+            message: string;
+            truncated: boolean;
+        };
+        BrowserConsole: {
+            entries: components["schemas"]["BrowserConsoleEntry"][];
+            /**
+             * Format: int64
+             * @description 已从会话历史移除的旧记录数
+             */
+            dropped: number;
+        };
+        /** @enum {string} */
+        BrowserSessionStatus: "starting" | "ready" | "failed" | "closed";
+        BrowserSession: {
+            /** Format: uuid */
+            id: string;
+            /** @description 需要项目会话凭据的相对管理 API 地址 */
+            endpoint: string;
+            /** Format: date-time */
+            expires_at: string;
+            status: components["schemas"]["BrowserSessionStatus"];
+        };
+        NavigateBrowserSessionRequest: {
+            url: string;
+        };
+        BrowserNavigation: {
+            url: string;
+            title: string;
+        };
+        StaticSiteVersion: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            site_id: string;
+            artifact_digest: string;
+            /**
+             * @description 站点文件已通过校验并准备就绪，等待激活。
+             * @enum {string}
+             */
+            status: "ready";
+            /** Format: date-time */
+            created_at: string;
         };
         Operation: {
             /** Format: uuid */
@@ -426,6 +634,15 @@ export interface components {
         };
     };
     responses: {
+        /** @description 不可变静态站点版本 */
+        StaticSiteVersion: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["StaticSiteVersion"];
+            };
+        };
         /** @description 项目身份 */
         Project: {
             headers: {
@@ -481,7 +698,12 @@ export interface components {
             };
         };
     };
-    parameters: never;
+    parameters: {
+        BrowserProjectID: string;
+        BrowserSessionID: string;
+        SiteProjectID: string;
+        SiteName: string;
+    };
     requestBodies: never;
     headers: never;
     pathItems: never;
@@ -689,6 +911,31 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    getProjectCapacity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 项目 CPU、内存与实例容量使用快照 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectCapacity"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     listProjectMembers: {
         parameters: {
             query?: never;
@@ -761,6 +1008,187 @@ export interface operations {
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createBrowserSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 浏览器会话已就绪 */
+            201: {
+                headers: {
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrowserSession"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getBrowserSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 项目浏览器会话 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrowserSession"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    closeBrowserSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已结束的浏览器会话 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrowserSession"];
+                };
+            };
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    navigateBrowserSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NavigateBrowserSessionRequest"];
+            };
+        };
+        responses: {
+            /** @description 导航后的页面地址和标题 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrowserNavigation"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getBrowserConsole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 会话的最近控制台消息和页面错误 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrowserConsole"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    uploadStaticSiteVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["SiteProjectID"];
+                siteName: components["parameters"]["SiteName"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/zip": string;
+            };
+        };
+        responses: {
+            /** @description 已验证的待激活版本 */
+            201: {
+                headers: {
+                    /** @description 查询新版本的管理 API 路径 */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaticSiteVersion"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            413: components["responses"]["Error"];
+            415: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getStaticSiteVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["SiteProjectID"];
+                siteName: components["parameters"]["SiteName"];
+                versionID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: components["responses"]["StaticSiteVersion"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };

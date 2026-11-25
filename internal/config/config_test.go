@@ -1,10 +1,12 @@
 package config_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/wendaining/cloudlet/internal/config"
 )
@@ -39,7 +41,7 @@ func TestRepositoryConfigurations(t *testing.T) {
 
 func TestLoadSecretKey(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "cloudlet.json")
-	source := `{"environment":"development","instance":"default","public_origin":"http://localhost","api_address":"127.0.0.1:8080","gateway_address":"127.0.0.1:8081"}`
+	source := fmt.Sprintf(`{"environment":"development","instance":"default","public_origin":"http://localhost","api_address":"127.0.0.1:8080","gateway_address":"127.0.0.1:8081","site_storage_directory":%q}`, t.TempDir())
 	if err := os.WriteFile(file, []byte(source), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -55,6 +57,33 @@ func TestLoadSecretKey(t *testing.T) {
 	t.Setenv("CLOUDLET_SECRET_KEY", "not-a-key")
 	if _, err := config.Load(file); err == nil {
 		t.Fatal("invalid secret key was accepted")
+	}
+}
+
+func TestLoadBrowserSessionLifetime(t *testing.T) {
+	file := filepath.Join("..", "..", "configs", "cloudlet.json")
+	t.Setenv("CLOUDLET_DATABASE_URL", "")
+	t.Setenv("CLOUDLET_BROWSER_IMAGE", "")
+	t.Setenv("CLOUDLET_BROWSER_SECCOMP", "")
+	for _, test := range []struct {
+		value string
+		want  time.Duration
+		valid bool
+	}{
+		{"", 0, true},
+		{"5", 5 * time.Second, true},
+		{"300", 300 * time.Second, true},
+		{"0", 0, false},
+		{"4", 0, false},
+		{"301", 0, false},
+		{"1.5", 0, false},
+		{"99999999999", 0, false},
+	} {
+		t.Setenv("CLOUDLET_BROWSER_SESSION_SECONDS", test.value)
+		cfg, err := config.Load(file)
+		if (err == nil) != test.valid || cfg.BrowserSessionLifetime != test.want {
+			t.Errorf("lifetime %q = %s (%v), want %s, valid=%v", test.value, cfg.BrowserSessionLifetime, err, test.want, test.valid)
+		}
 	}
 }
 
@@ -130,5 +159,22 @@ func TestWorkerRuntimeConfiguration(t *testing.T) {
 	cfg := config.Config{APIAddress: "127.0.0.1:0", GatewayAddress: "127.0.0.1:0", Workers: &valid}
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("Worker runtime accepted without management dependencies")
+	}
+}
+
+func TestManagementRequiresAbsoluteSiteStorageDirectory(t *testing.T) {
+	cfg := config.Config{
+		Environment: "development", Instance: "test", DatabaseURL: "postgres://example", SecretKey: make([]byte, 32),
+		PublicOrigin: "http://localhost", APIAddress: "127.0.0.1:8080", GatewayAddress: "127.0.0.1:8081",
+	}
+	for _, directory := range []string{"", "relative/storage"} {
+		cfg.SiteStorageDirectory = directory
+		if err := cfg.Validate(); err == nil {
+			t.Fatalf("accepted storage directory %q", directory)
+		}
+	}
+	cfg.SiteStorageDirectory = t.TempDir()
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
 	}
 }

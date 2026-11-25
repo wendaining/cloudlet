@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/pressly/goose/v3"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
 	"github.com/wendaining/cloudlet/internal/apigen"
@@ -30,41 +31,16 @@ import (
 
 func TestPostgresMigrationAccountsSessionsAndProjects(t *testing.T) {
 	ctx := context.Background()
-	data, err := os.ReadFile(filepath.Join("..", "..", "configs", "images.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var images struct {
-		Postgres string `json:"postgres"`
-	}
-	if err := json.Unmarshal(data, &images); err != nil {
-		t.Fatal(err)
-	}
-	container, err := postgres.Run(ctx, images.Postgres,
-		postgres.WithDatabase("cloudlet"), postgres.WithUsername("cloudlet"),
-		postgres.WithPassword("integration-database-password"),
-		testcontainers.WithCmd("postgres"), postgres.BasicWaitStrategies())
-	if container != nil {
-		t.Cleanup(func() {
-			if err := container.Terminate(ctx); err != nil {
-				t.Error(err)
-			}
-		})
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	connection, err := container.ConnectionString(ctx, "sslmode=disable")
-	if err != nil {
-		t.Fatal(err)
-	}
-	store, err := database.Open(ctx, connection)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { store.SQL.Close() })
+	store, connection, container := openIntegrationDatabase(t, ctx)
 	if err := store.CheckVersion(ctx); err == nil {
 		t.Fatal("未迁移的数据库通过了版本检查")
+	}
+	provider, err := goose.NewProvider(goose.DialectPostgres, store.SQL, migrations.Files)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.UpTo(ctx, 9); err != nil {
+		t.Fatalf("迁移到浏览器会话版本 9: %v", err)
 	}
 	for range 2 {
 		if err := store.Migrate(ctx); err != nil {
@@ -595,4 +571,46 @@ func projectLifecycle(t *testing.T, api *httptest.Server, ownerClient *http.Clie
 		t.Fatal("测试账号必须不同")
 	}
 	return project
+}
+
+func openIntegrationDatabase(t *testing.T, ctx context.Context) (*database.Store, string, *postgres.PostgresContainer) {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("..", "..", "configs", "images.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var images struct {
+		Postgres string `json:"postgres"`
+	}
+	if err := json.Unmarshal(data, &images); err != nil {
+		t.Fatal(err)
+	}
+	container, err := postgres.Run(ctx, images.Postgres,
+		postgres.WithDatabase("cloudlet"), postgres.WithUsername("cloudlet"),
+		postgres.WithPassword("integration-database-password"),
+		testcontainers.WithCmd("postgres"), postgres.BasicWaitStrategies())
+	if container != nil {
+		t.Cleanup(func() {
+			if err := container.Terminate(context.WithoutCancel(ctx)); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection, err := container.ConnectionString(ctx, "sslmode=disable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := database.Open(ctx, connection)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := store.SQL.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	return store, connection, container
 }

@@ -17,9 +17,12 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/wendaining/cloudlet/internal/apigen"
+	"github.com/wendaining/cloudlet/internal/browser"
+	"github.com/wendaining/cloudlet/internal/capacity"
 	"github.com/wendaining/cloudlet/internal/config"
 	"github.com/wendaining/cloudlet/internal/database"
 	"github.com/wendaining/cloudlet/internal/mcpserver"
+	"github.com/wendaining/cloudlet/internal/staticdeploy"
 	"github.com/wendaining/cloudlet/internal/version"
 	"github.com/wendaining/cloudlet/internal/workerpublish"
 	"github.com/wendaining/cloudlet/migrations"
@@ -28,6 +31,8 @@ import (
 
 type handler struct {
 	store    *database.Store
+	sites    *staticdeploy.Service
+	browser  *browser.Service
 	sessions *scs.SessionManager
 	config   config.Config
 	logger   *slog.Logger
@@ -35,32 +40,32 @@ type handler struct {
 }
 
 func NewHandler(store *database.Store, cfg config.Config, logger *slog.Logger) (http.Handler, func()) {
-	return newHandler(store, cfg, logger, nil, nil)
+	return newHandler(store, nil, nil, cfg, logger, nil, nil)
 }
 
 // NewHandlerWithMCP mounts the read-only MCP endpoint on the management API.
-func NewHandlerWithMCP(store *database.Store, cfg config.Config, logger *slog.Logger, apiEndpoint string) (http.Handler, func(), error) {
-	return NewHandlerWithMCPAndWorkers(store, cfg, logger, apiEndpoint, nil)
+func NewHandlerWithMCP(store *database.Store, sites *staticdeploy.Service, browserService *browser.Service, cfg config.Config, logger *slog.Logger, apiEndpoint string) (http.Handler, func(), error) {
+	return NewHandlerWithMCPAndWorkers(store, sites, browserService, cfg, logger, apiEndpoint, nil)
 }
 
-// NewHandlerWithMCPAndWorkers mounts the management API and its runtime service.
-func NewHandlerWithMCPAndWorkers(store *database.Store, cfg config.Config, logger *slog.Logger, apiEndpoint string, publication *workerpublish.Service) (http.Handler, func(), error) {
+// NewHandlerWithMCPAndWorkers mounts the management API with Worker publication.
+func NewHandlerWithMCPAndWorkers(store *database.Store, sites *staticdeploy.Service, browserService *browser.Service, cfg config.Config, logger *slog.Logger, apiEndpoint string, publication *workerpublish.Service) (http.Handler, func(), error) {
 	mcpHandler, err := mcpserver.NewHandler(apiEndpoint)
 	if err != nil {
 		return nil, nil, err
 	}
-	handler, cleanup := newHandler(store, cfg, logger, mcpHandler, publication)
+	handler, cleanup := newHandler(store, sites, browserService, cfg, logger, mcpHandler, publication)
 	return handler, cleanup, nil
 }
 
 // NewHandlerWithWorkers mounts the shared Worker publication API. The caller
 // owns publication and must close it after the HTTP handler stops.
 func NewHandlerWithWorkers(store *database.Store, cfg config.Config, logger *slog.Logger, publication *workerpublish.Service) (http.Handler, func()) {
-	return newHandler(store, cfg, logger, nil, publication)
+	return newHandler(store, nil, nil, cfg, logger, nil, publication)
 }
 
-func newHandler(store *database.Store, cfg config.Config, logger *slog.Logger, mcpHandler http.Handler, publication *workerpublish.Service) (http.Handler, func()) {
-	h := &handler{store: store, config: cfg, logger: logger, workers: publication}
+func newHandler(store *database.Store, sites *staticdeploy.Service, browserService *browser.Service, cfg config.Config, logger *slog.Logger, mcpHandler http.Handler, publication *workerpublish.Service) (http.Handler, func()) {
+	h := &handler{store: store, sites: sites, browser: browserService, config: cfg, logger: logger, workers: publication}
 	router := gin.New()
 	router.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 	router.GET("/readyz", func(c *gin.Context) {
@@ -284,6 +289,35 @@ func (h *handler) RenameProject(c *gin.Context, projectID string) {
 		return
 	}
 	c.JSON(http.StatusOK, projectResponse(database.Project{ID: normalizedID, Name: name}))
+}
+
+// GetProjectCapacity exposes the project quota and active usage. Host budgets
+// remain internal because they aggregate usage across projects.
+func (h *handler) GetProjectCapacity(c *gin.Context, projectID string) {
+	_, normalizedID, _, ok := h.projectAccess(c, projectID)
+	if !ok {
+		return
+	}
+	capacityStore, err := capacity.NewStore(h.store.DB)
+	if err != nil {
+		h.failure(c, err)
+		return
+	}
+	usage, err := capacityStore.ProjectUsage(c.Request.Context(), uuid.MustParse(normalizedID))
+	if errors.Is(err, capacity.ErrProjectQuotaNotFound) {
+		c.JSON(http.StatusNotFound, apigen.Error{Message: "项目配额未配置"})
+		return
+	}
+	if err != nil {
+		h.failure(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, apigen.ProjectCapacity{
+		ProjectId: usage.ProjectID,
+		Limit:     resourceAmounts(usage.Limit),
+		Used:      resourceAmounts(usage.Used),
+		Remaining: resourceAmounts(usage.Remaining),
+	})
 }
 
 func (h *handler) ListProjectMembers(c *gin.Context, projectID string) {
@@ -576,6 +610,14 @@ func normalizeProjectName(name string) (string, bool) {
 
 func projectResponse(project database.Project) apigen.Project {
 	return apigen.Project{Id: uuid.MustParse(project.ID), Name: project.Name}
+}
+
+func resourceAmounts(resources capacity.Resources) apigen.ResourceAmounts {
+	return apigen.ResourceAmounts{
+		CpuMillis:   resources.CPUMillis,
+		MemoryBytes: resources.MemoryBytes,
+		Instances:   resources.Instances,
+	}
 }
 
 func projectSecretVersionResponse(version database.ProjectSecretVersion) apigen.ProjectSecretVersion {
