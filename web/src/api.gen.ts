@@ -137,6 +137,25 @@ export interface paths {
         patch: operations["renameProject"];
         trace?: never;
     };
+    "/api/v1/projects/{projectID}/capacity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        /** @description 返回项目成员可见的项目额度、活动预留占用和剩余量；三个值来自同一数据库快照。 */
+        get: operations["getProjectCapacity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{projectID}/members": {
         parameters: {
             query?: never;
@@ -371,6 +390,31 @@ export interface components {
         };
         /** @enum {string} */
         ProjectRole: "owner" | "developer" | "viewer";
+        ResourceAmounts: {
+            /**
+             * Format: int64
+             * @description CPU 毫核。
+             */
+            cpu_millis: number;
+            /**
+             * Format: int64
+             * @description 内存字节。
+             */
+            memory_bytes: number;
+            /**
+             * Format: int64
+             * @description 实例数。
+             */
+            instances: number;
+        };
+        /** @description 项目配额与活动预留快照。used 可能超过 limit；remaining 是按资源钳制后的额度内余量，不表示超用标记。 */
+        ProjectCapacity: {
+            /** Format: uuid */
+            project_id: string;
+            limit: components["schemas"]["ResourceAmounts"];
+            used: components["schemas"]["ResourceAmounts"];
+            remaining: components["schemas"]["ResourceAmounts"];
+        };
         /** @enum {string} */
         ProjectMemberRole: "developer" | "viewer";
         ProjectMember: {
@@ -744,6 +788,31 @@ export interface operations {
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getProjectCapacity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 项目 CPU、内存与实例容量使用快照 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectCapacity"];
+                };
+            };
+            401: components["responses"]["Error"];
             404: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };

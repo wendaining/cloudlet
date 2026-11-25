@@ -176,6 +176,31 @@ paths:
           $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/capacity:
+    parameters:
+      - name: projectID
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: getProjectCapacity
+      description: 返回项目成员可见的项目额度、活动预留占用和剩余量；三个值来自同一数据库快照。
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 项目 CPU、内存与实例容量使用快照
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectCapacity'
+        '401':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
   /api/v1/projects/{projectID}/members:
     parameters:
       - name: projectID
@@ -608,6 +633,39 @@ components:
     ProjectRole:
       type: string
       enum: [owner, developer, viewer]
+    ResourceAmounts:
+      type: object
+      required: [cpu_millis, memory_bytes, instances]
+      properties:
+        cpu_millis:
+          type: integer
+          format: int64
+          minimum: 0
+          description: CPU 毫核。
+        memory_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: 内存字节。
+        instances:
+          type: integer
+          format: int64
+          minimum: 0
+          description: 实例数。
+    ProjectCapacity:
+      type: object
+      description: 项目配额与活动预留快照。used 可能超过 limit；remaining 是按资源钳制后的额度内余量，不表示超用标记。
+      required: [project_id, limit, used, remaining]
+      properties:
+        project_id:
+          type: string
+          format: uuid
+        limit:
+          $ref: '#/components/schemas/ResourceAmounts'
+        used:
+          $ref: '#/components/schemas/ResourceAmounts'
+        remaining:
+          $ref: '#/components/schemas/ResourceAmounts'
     ProjectMemberRole:
       type: string
       enum: [developer, viewer]
