@@ -227,7 +227,8 @@ export interface paths {
         get: operations["getBrowserSession"];
         put?: never;
         post?: never;
-        delete?: never;
+        /** @description 停止容器并确认清理，释放容量后返回会话终态。重复关闭返回已有终态。 */
+        delete: operations["closeBrowserSession"];
         options?: never;
         head?: never;
         patch?: never;
@@ -937,6 +938,32 @@ export interface operations {
                     "application/json": components["schemas"]["BrowserSession"];
                 };
             };
+            default: components["responses"]["Error"];
+        };
+    };
+    closeBrowserSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已结束的浏览器会话 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrowserSession"];
+                };
+            };
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };

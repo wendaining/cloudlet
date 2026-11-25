@@ -321,6 +321,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BrowserSession'
+    delete:
+      operationId: closeBrowserSession
+      description: 停止容器并确认清理，释放容量后返回会话终态。重复关闭返回已有终态。
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 已结束的浏览器会话
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserSession'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
   /api/v1/projects/{projectID}/browser-sessions/{sessionID}/navigate:
     parameters:
       - $ref: '#/components/parameters/BrowserProjectID'
