@@ -81,19 +81,19 @@ func TestBrowserSessionHTTP(t *testing.T) {
 	}
 	session := start.JSON201
 	projectID := uuid.MustParse(owner.ID)
-	expire := func() error {
+	expire := func(id uuid.UUID) error {
 		cleanupCtx, stop := context.WithTimeout(context.Background(), 30*time.Second)
 		defer stop()
 		if err := store.DB.WithContext(cleanupCtx).Exec(
-			"UPDATE browser_sessions SET created_at = NOW() - INTERVAL '2 seconds', expires_at = NOW() - INTERVAL '1 second' WHERE id = ?", session.Id,
+			"UPDATE browser_sessions SET created_at = NOW() - INTERVAL '2 seconds', expires_at = NOW() - INTERVAL '1 second' WHERE id = ?", id,
 		).Error; err != nil {
 			return err
 		}
-		_, err := service.Session(cleanupCtx, projectID, session.Id)
+		_, err := service.Session(cleanupCtx, projectID, id)
 		return err
 	}
 	defer func() {
-		if err := expire(); err != nil {
+		if err := expire(session.Id); err != nil {
 			t.Error(err)
 		}
 	}()
@@ -114,7 +114,10 @@ func TestBrowserSessionHTTP(t *testing.T) {
 		}
 		return response
 	}
-	get(ownerAPI, owner.ID, http.StatusOK)
+	if detail := get(ownerAPI, owner.ID, http.StatusOK).JSON200; detail == nil ||
+		detail.DesiredStatus != apigen.BrowserSessionStatusReady || detail.ActualStatus != apigen.BrowserSessionStatusReady || detail.LastError != nil {
+		t.Fatalf("unexpected running session view: %+v", detail)
+	}
 	get(otherAPI, owner.ID, http.StatusNotFound)
 	get(otherAPI, other.ID, http.StatusNotFound)
 
@@ -143,10 +146,42 @@ func TestBrowserSessionHTTP(t *testing.T) {
 	if second.StatusCode() != http.StatusConflict {
 		t.Fatalf("capacity response = %d %s, want 409", second.StatusCode(), second.Body)
 	}
-	if err := expire(); err != nil {
+	list := func(api *apigen.ClientWithResponses, project string, params *apigen.ListBrowserSessionsParams, want int) *apigen.BrowserSessionPage {
+		t.Helper()
+		response, err := api.ListBrowserSessionsWithResponse(ctx, project, params)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if response.StatusCode() != want {
+			t.Fatalf("list sessions = %d %s, want %d", response.StatusCode(), response.Body, want)
+		}
+		return response.JSON200
+	}
+	invalid := 0
+	list(ownerAPI, owner.ID, &apigen.ListBrowserSessionsParams{Limit: &invalid}, http.StatusBadRequest)
+	list(otherAPI, owner.ID, nil, http.StatusNotFound)
+	if isolated := list(otherAPI, other.ID, nil, http.StatusOK); isolated == nil || len(isolated.Items) != 0 {
+		t.Fatalf("other project unexpectedly sees sessions: %+v", isolated)
+	}
+	one := 1
+	firstPage := list(ownerAPI, owner.ID, &apigen.ListBrowserSessionsParams{Limit: &one}, http.StatusOK)
+	if firstPage == nil || firstPage.NextCursor == nil || len(firstPage.Items) != 1 {
+		t.Fatalf("unexpected session page: %+v", firstPage)
+	}
+	failed := firstPage.Items[0]
+	if failed.ActualStatus != apigen.BrowserSessionStatusFailed || failed.LastError == nil || *failed.LastError != "浏览器会话容量不足" {
+		t.Fatalf("quota failure not recorded: %+v", failed)
+	}
+	secondPage := list(ownerAPI, owner.ID, &apigen.ListBrowserSessionsParams{Limit: &one, Before: firstPage.NextCursor}, http.StatusOK)
+	if secondPage == nil || secondPage.NextCursor != nil || len(secondPage.Items) != 1 || secondPage.Items[0].Id != session.Id {
+		t.Fatalf("unexpected second session page: %+v", secondPage)
+	}
+	list(otherAPI, other.ID, &apigen.ListBrowserSessionsParams{Before: firstPage.NextCursor}, http.StatusNotFound)
+	if err := expire(session.Id); err != nil {
 		t.Fatal(err)
 	}
-	if resolved := get(ownerAPI, owner.ID, http.StatusOK).JSON200; resolved == nil || string(resolved.Status) != "closed" {
+	if resolved := get(ownerAPI, owner.ID, http.StatusOK).JSON200; resolved == nil ||
+		resolved.ActualStatus != apigen.BrowserSessionStatusClosed || resolved.DesiredStatus != apigen.BrowserSessionStatusClosed {
 		t.Fatalf("expired session is not closed: %+v", resolved)
 	}
 	limits, err := capacity.NewStore(store.DB)
@@ -157,6 +192,22 @@ func TestBrowserSessionHTTP(t *testing.T) {
 	if err != nil || usage.HostUsed.Instances != 0 || usage.ProjectUsed.Instances != 0 {
 		t.Fatalf("expired session still holds capacity: %+v (%v)", usage, err)
 	}
+	replacement, err := ownerAPI.CreateBrowserSessionWithResponse(ctx, owner.ID)
+	if err != nil || replacement.StatusCode() != http.StatusCreated || replacement.JSON201 == nil {
+		t.Fatalf("create second real session: %v (%v)", replacement, err)
+	}
+	defer func() {
+		if err := expire(replacement.JSON201.Id); err != nil {
+			t.Error(err)
+		}
+	}()
+	pageWithHistory := list(ownerAPI, owner.ID, nil, http.StatusOK)
+	if len(pageWithHistory.Items) != 3 || pageWithHistory.Items[0].Id != replacement.JSON201.Id ||
+		pageWithHistory.Items[0].ActualStatus != apigen.BrowserSessionStatusReady ||
+		pageWithHistory.Items[2].ActualStatus != apigen.BrowserSessionStatusClosed {
+		t.Fatalf("wrong history after creating a second session: %+v", pageWithHistory)
+	}
+	t.Log("project list and detail expose ready, closed and failed state; bounded pagination and cross-project scope verified")
 }
 
 func chromiumPage(t *testing.T, ctx context.Context, docker *client.Client) string {

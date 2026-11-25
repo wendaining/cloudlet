@@ -186,7 +186,7 @@ export interface paths {
             };
             cookie?: never;
         };
-        get?: never;
+        get: operations["listBrowserSessions"];
         put?: never;
         post: operations["createBrowserSession"];
         delete?: never;
@@ -433,6 +433,15 @@ export interface components {
             /** Format: date-time */
             expires_at: string;
             status: components["schemas"]["BrowserSessionStatus"];
+            desired_status: components["schemas"]["BrowserSessionStatus"];
+            actual_status: components["schemas"]["BrowserSessionStatus"];
+            /** @description 最近一次平台错误摘要 */
+            last_error?: string;
+        };
+        BrowserSessionPage: {
+            items: components["schemas"]["BrowserSession"][];
+            /** Format: uuid */
+            next_cursor?: string;
         };
         NavigateBrowserSessionRequest: {
             url: string;
@@ -820,6 +829,32 @@ export interface operations {
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listBrowserSessions: {
+        parameters: {
+            query?: {
+                limit?: number;
+                before?: string;
+            };
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 按创建时间倒序排列的项目浏览器会话 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrowserSessionPage"];
+                };
+            };
             default: components["responses"]["Error"];
         };
     };

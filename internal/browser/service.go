@@ -144,7 +144,12 @@ func (s *Service) Create(ctx context.Context, projectID uuid.UUID) (database.Bro
 	if err != nil {
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
 		defer cancel()
-		return database.BrowserSession{}, errors.Join(err, s.finish(cleanupCtx, session, "failed"))
+		message := "浏览器会话启动失败"
+		if errors.Is(err, capacity.ErrInsufficientCapacity) {
+			message = "浏览器会话容量不足"
+		}
+		recordErr := s.store.RecordBrowserSessionError(cleanupCtx, projectID, session.ID, s.hostID, message)
+		return database.BrowserSession{}, errors.Join(err, recordErr, s.finish(cleanupCtx, session, "failed"))
 	}
 	session.Status = "ready"
 	return session, nil

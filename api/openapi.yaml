@@ -279,6 +279,32 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BrowserSession'
+    get:
+      operationId: listBrowserSessions
+      security:
+        - SessionCookie: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: before
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 按创建时间倒序排列的项目浏览器会话
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserSessionPage'
   /api/v1/projects/{projectID}/browser-sessions/{sessionID}:
     parameters:
       - $ref: '#/components/parameters/BrowserProjectID'
@@ -714,7 +740,7 @@ components:
       x-enum-varnames: [BrowserSessionStatusStarting, BrowserSessionStatusReady, BrowserSessionStatusFailed, BrowserSessionStatusClosed]
     BrowserSession:
       type: object
-      required: [id, endpoint, expires_at, status]
+      required: [id, endpoint, expires_at, status, desired_status, actual_status]
       properties:
         id:
           type: string
@@ -727,6 +753,24 @@ components:
           format: date-time
         status:
           $ref: '#/components/schemas/BrowserSessionStatus'
+        desired_status:
+          $ref: '#/components/schemas/BrowserSessionStatus'
+        actual_status:
+          $ref: '#/components/schemas/BrowserSessionStatus'
+        last_error:
+          type: string
+          description: 最近一次平台错误摘要
+    BrowserSessionPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/BrowserSession'
+        next_cursor:
+          type: string
+          format: uuid
     NavigateBrowserSessionRequest:
       type: object
       additionalProperties: false
