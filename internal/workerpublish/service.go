@@ -222,6 +222,12 @@ func (s *Service) Get(ctx context.Context, projectID, deploymentID uuid.UUID) (R
 	if err != nil {
 		return Result{}, err
 	}
+	if deployment.State == "active" && (execution.State == "running" || execution.LastExit.Reason != "") {
+		execution, err = s.observeExecution(ctx, deployment, execution)
+		if err != nil {
+			return Result{}, err
+		}
+	}
 	op, err := s.operations.Get(ctx, projectID, deployment.OperationID)
 	return Result{Deployment: deployment, Execution: execution, Operation: op}, err
 }

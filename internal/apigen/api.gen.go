@@ -350,28 +350,45 @@ type VersionInfo struct {
 
 // WorkerDeployment defines model for WorkerDeployment.
 type WorkerDeployment struct {
-	ArtifactDigest    string             `json:"artifact_digest"`
-	CompatibilityDate string             `json:"compatibility_date"`
-	ConfigDigest      string             `json:"config_digest"`
-	ContainerId       string             `json:"container_id"`
-	CpuMillis         int64              `json:"cpu_millis"`
-	CreatedAt         time.Time          `json:"created_at"`
-	Entry             string             `json:"entry"`
-	ExecutionId       openapi_types.UUID `json:"execution_id"`
-	ExecutionState    string             `json:"execution_state"`
-	Failure           string             `json:"failure"`
-	Generation        int64              `json:"generation"`
-	Hostname          string             `json:"hostname"`
-	Id                openapi_types.UUID `json:"id"`
-	MemoryBytes       int64              `json:"memory_bytes"`
-	OperationId       openapi_types.UUID `json:"operation_id"`
-	OperationOutcome  string             `json:"operation_outcome"`
-	OperationPhase    string             `json:"operation_phase"`
-	ProjectId         openapi_types.UUID `json:"project_id"`
-	RuntimeImage      string             `json:"runtime_image"`
-	RuntimeVersion    string             `json:"runtime_version"`
-	State             string             `json:"state"`
-	WorkerId          openapi_types.UUID `json:"worker_id"`
+	ArtifactDigest    string               `json:"artifact_digest"`
+	CompatibilityDate string               `json:"compatibility_date"`
+	ConfigDigest      string               `json:"config_digest"`
+	ContainerId       string               `json:"container_id"`
+	CpuMillis         int64                `json:"cpu_millis"`
+	CreatedAt         time.Time            `json:"created_at"`
+	Entry             string               `json:"entry"`
+	ExecutionId       openapi_types.UUID   `json:"execution_id"`
+	ExecutionState    string               `json:"execution_state"`
+	Failure           string               `json:"failure"`
+	Generation        int64                `json:"generation"`
+	Hostname          string               `json:"hostname"`
+	Id                openapi_types.UUID   `json:"id"`
+	LastExit          *WorkerExecutionExit `json:"last_exit,omitempty"`
+	MemoryBytes       int64                `json:"memory_bytes"`
+	OperationId       openapi_types.UUID   `json:"operation_id"`
+	OperationOutcome  string               `json:"operation_outcome"`
+	OperationPhase    string               `json:"operation_phase"`
+	ProjectId         openapi_types.UUID   `json:"project_id"`
+	RuntimeImage      string               `json:"runtime_image"`
+	RuntimeVersion    string               `json:"runtime_version"`
+	State             string               `json:"state"`
+	WorkerId          openapi_types.UUID   `json:"worker_id"`
+}
+
+// WorkerExecutionExit defines model for WorkerExecutionExit.
+type WorkerExecutionExit struct {
+	// Detail Docker 报告的错误或容器状态。
+	Detail *string `json:"detail,omitempty"`
+
+	// ExitCode Docker 报告的退出码。
+	ExitCode *int `json:"exit_code,omitempty"`
+
+	// FinishedAt Docker 报告的执行结束时间。
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
+	ObservedAt time.Time  `json:"observed_at"`
+
+	// Reason 退出观察结果，包括正常退出、非零退出、内存超限、Docker 错误、容器缺失或容器未运行。
+	Reason string `json:"reason"`
 }
 
 // BrowserProjectID defines model for BrowserProjectID.

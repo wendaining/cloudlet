@@ -188,6 +188,10 @@ type Observation struct {
 	Status      string
 	Running     bool
 	ExitCode    int
+	Restarting  bool
+	OOMKilled   bool
+	StateError  string
+	FinishedAt  time.Time
 	CPUMillis   int64
 	MemoryBytes int64
 	PIDs        int64
@@ -486,11 +490,21 @@ func observe(info container.InspectResponse) (Observation, error) {
 		return Observation{}, fmt.Errorf("observe container %s: state is missing: %w", info.ID, fs.ErrInvalid)
 	}
 	observation := Observation{
-		ID:       info.ID,
-		Name:     strings.TrimPrefix(info.Name, "/"),
-		Status:   string(info.State.Status),
-		Running:  info.State.Running,
-		ExitCode: info.State.ExitCode,
+		ID:         info.ID,
+		Name:       strings.TrimPrefix(info.Name, "/"),
+		Status:     string(info.State.Status),
+		Running:    info.State.Running,
+		ExitCode:   info.State.ExitCode,
+		Restarting: info.State.Restarting,
+		OOMKilled:  info.State.OOMKilled,
+		StateError: info.State.Error,
+	}
+	if info.State.FinishedAt != "" {
+		finishedAt, err := time.Parse(time.RFC3339Nano, info.State.FinishedAt)
+		if err != nil {
+			return Observation{}, fmt.Errorf("observe container %s finish time: %w", info.ID, err)
+		}
+		observation.FinishedAt = finishedAt
 	}
 	if info.Config != nil {
 		observation.Image = info.Config.Image

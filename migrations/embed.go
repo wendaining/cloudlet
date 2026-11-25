@@ -5,4 +5,4 @@ import "embed"
 //go:embed *.sql
 var Files embed.FS
 
-const Version int64 = 12
+const Version int64 = 16

@@ -117,7 +117,7 @@ func deploymentLocation(projectID string, id uuid.UUID) string {
 
 func workerDeploymentResponse(result workerpublish.Result) apigen.WorkerDeployment {
 	d, e, o := result.Deployment, result.Execution, result.Operation
-	return apigen.WorkerDeployment{
+	response := apigen.WorkerDeployment{
 		Id: d.ID, ProjectId: d.ProjectID, WorkerId: d.WorkerID, ExecutionId: e.ID, OperationId: d.OperationID,
 		ArtifactDigest: d.ArtifactDigest, ConfigDigest: d.ConfigDigest, Entry: d.Entry,
 		CompatibilityDate: d.CompatibilityDate, RuntimeVersion: d.RuntimeVersion, RuntimeImage: d.RuntimeImage,
@@ -125,4 +125,13 @@ func workerDeploymentResponse(result workerpublish.Result) apigen.WorkerDeployme
 		ContainerId: e.ContainerID, ExecutionState: e.State, Generation: int64(e.Generation),
 		OperationPhase: string(o.Phase), OperationOutcome: string(o.Outcome), CreatedAt: d.CreatedAt,
 	}
+	if e.LastExit.ObservedAt != nil {
+		response.LastExit = &apigen.WorkerExecutionExit{
+			Reason: e.LastExit.Reason, ExitCode: e.LastExit.Code, ObservedAt: *e.LastExit.ObservedAt, FinishedAt: e.LastExit.FinishedAt,
+		}
+		if e.LastExit.Detail != "" {
+			response.LastExit.Detail = &e.LastExit.Detail
+		}
+	}
+	return response
 }

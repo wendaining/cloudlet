@@ -44,13 +44,15 @@ type WorkerDeployment struct {
 }
 
 type WorkerExecution struct {
-	ID           uuid.UUID
-	ProjectID    uuid.UUID
-	WorkerID     uuid.UUID
-	DeploymentID uuid.UUID
-	Generation   uint64
-	ContainerID  string
-	State        string
+	ID                 uuid.UUID
+	ProjectID          uuid.UUID
+	WorkerID           uuid.UUID
+	DeploymentID       uuid.UUID
+	Generation         uint64
+	ContainerID        string
+	State              string
+	ObservationVersion int64
+	LastExit           WorkerExit `gorm:"embedded;embeddedPrefix:last_exit_"`
 }
 
 // CheckFirstWorkerPublication validates existing state before writing artifacts.

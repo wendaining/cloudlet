@@ -535,7 +535,7 @@ AND d.state = 'pending' AND o.phase = 'preparing' AND e.container_id <> ''`, pro
 	getPublic()
 	third := valid
 	third.Hostname = "third.localhost"
-	decode(request(developer, http.MethodPost, deployPath(project.ID, "third"), "third", third, http.StatusCreated))
+	thirdDeployment := decode(request(developer, http.MethodPost, deployPath(project.ID, "third"), "third", third, http.StatusCreated))
 	fourth := valid
 	fourth.Hostname = "fourth.localhost"
 	quotaFailure := decode(request(owner, http.MethodPost, deployPath(project.ID, "fourth"), "fourth", fourth, http.StatusTooManyRequests))
@@ -582,6 +582,62 @@ AND d.state = 'pending' AND o.phase = 'preparing' AND e.container_id <> ''`, pro
 	if metadata.ContainerId != initial.ContainerId || metadata.OperationOutcome != "succeeded" {
 		t.Fatalf("restart lost deployment: %+v", metadata)
 	}
+	t.Run("record a real Worker execution exit", func(t *testing.T) {
+		path := metadataPath(project.ID, thirdDeployment.Id)
+		healthy := decode(request(viewer, http.MethodGet, path, "", nil, http.StatusOK))
+		if healthy.ExecutionState != "running" || healthy.LastExit != nil {
+			t.Fatalf("newly active Worker has exit metadata: %+v", healthy)
+		}
+		if _, err := docker.ContainerStop(ctx, thirdDeployment.ContainerId, client.ContainerStopOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		stopped, err := docker.ContainerInspect(ctx, thirdDeployment.ContainerId, client.ContainerInspectOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		state := stopped.Container.State
+		expectedTime, err := time.Parse(time.RFC3339Nano, state.FinishedAt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		exitReason := "normal_exit"
+		if state.ExitCode != 0 {
+			exitReason = "nonzero_exit"
+		}
+		exited := decode(request(viewer, http.MethodGet, path, "", nil, http.StatusOK))
+		record := exited.LastExit
+		if exited.State != "active" || exited.ExecutionState != "stopped" || exited.OperationOutcome != "succeeded" ||
+			record == nil || record.Reason != exitReason || record.ExitCode == nil || *record.ExitCode != state.ExitCode ||
+			record.FinishedAt == nil || !record.FinishedAt.Equal(expectedTime.Truncate(time.Microsecond)) || record.ObservedAt.IsZero() {
+			t.Fatalf("Worker exit data differs from Docker: %+v, Docker %+v", record, state)
+		}
+		_, stored, err := store.WorkerDeployment(ctx, uuid.MustParse(project.ID), thirdDeployment.Id)
+		if err != nil || stored.LastExit.Code == nil || *stored.LastExit.Code != state.ExitCode ||
+			stored.LastExit.ObservedAt == nil || !stored.LastExit.ObservedAt.Equal(record.ObservedAt) || stored.State != "stopped" {
+			t.Fatalf("persistent Worker exit: %+v %v", stored, err)
+		}
+		repeated := decode(request(viewer, http.MethodGet, path, "", nil, http.StatusOK))
+		if repeated.LastExit == nil || !repeated.LastExit.ObservedAt.Equal(record.ObservedAt) {
+			t.Fatalf("repeated observation rewrote the exit time: %+v", repeated.LastExit)
+		}
+		if _, err := docker.ContainerStart(ctx, thirdDeployment.ContainerId, client.ContainerStartOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		running := decode(request(viewer, http.MethodGet, path, "", nil, http.StatusOK))
+		if running.ExecutionState != "running" || running.LastExit == nil || running.LastExit.Reason != exitReason {
+			t.Fatalf("restarted execution lost its previous exit: %+v", running)
+		}
+		if _, err := docker.ContainerRemove(ctx, retried.ContainerId, client.ContainerRemoveOptions{Force: true}); err != nil {
+			t.Fatal(err)
+		}
+		missing := decode(request(owner, http.MethodGet, metadataPath(project.ID, retried.Id), "", nil, http.StatusOK))
+		if missing.ExecutionState != "stopped" || missing.LastExit == nil || missing.LastExit.Reason != "container_missing" ||
+			missing.LastExit.ExitCode != nil || missing.LastExit.FinishedAt != nil {
+			t.Fatalf("missing execution should have no fabricated exit code or finish time: %+v", missing)
+		}
+		t.Logf("Worker %s execution %s reported Docker exit %d (%s)", thirdDeployment.WorkerId, exited.ExecutionId, state.ExitCode, record.Reason)
+	})
+	getPublic()
 	t.Logf("deployment=%s Worker=%s operation=%s digest=%s", initial.Id, initial.WorkerId, initial.OperationId, initial.ArtifactDigest)
 	var operationCount int64
 	if err := store.DB.Table("operations").Count(&operationCount).Error; err != nil {

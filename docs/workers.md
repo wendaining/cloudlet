@@ -59,6 +59,8 @@ GET /api/v1/projects/{projectID}/worker-deployments/{deploymentID}
 
 查询返回不可变版本、最近执行与操作结果。Go 客户端使用 `pkg/client.PublishWorker` 和 `GetWorkerDeployment` 调用相同接口。MCP 的发布工具由 #47 接入。
 
+读取活动版本时，管理 API 通过 Docker 核对原执行容器。容器退出后，`execution_state` 为 `stopped`，`last_exit` 记录原因、观察时间以及 Docker 提供的结束时间和退出码。容器重新运行后，执行状态更新为 `running`，最近退出记录仍可查询。发布 Operation 保留原终态。
+
 ## 验收
 
 运行 `make dev`，使用项目所有者或 developer 会话发送上述发布请求。然后通过 Gateway 访问所声明的域名，核对 Worker 正文。读取 `Location`，比较上传模块的 SHA-256 与 `artifact_digest`，并用 Docker inspect 核对容器标识、归属标签和资源限制。用另一项目会话查询同一版本，确认返回 404。

@@ -764,6 +764,7 @@ export interface components {
             failure: string;
             container_id: string;
             execution_state: string;
+            last_exit?: components["schemas"]["WorkerExecutionExit"];
             operation_phase: string;
             operation_outcome: string;
             /** Format: int64 */
@@ -774,6 +775,21 @@ export interface components {
             generation: number;
             /** Format: date-time */
             created_at: string;
+        };
+        WorkerExecutionExit: {
+            /** @description 退出观察结果，包括正常退出、非零退出、内存超限、Docker 错误、容器缺失或容器未运行。 */
+            reason: string;
+            /** @description Docker 报告的退出码。 */
+            exit_code?: number;
+            /**
+             * Format: date-time
+             * @description Docker 报告的执行结束时间。
+             */
+            finished_at?: string;
+            /** Format: date-time */
+            observed_at: string;
+            /** @description Docker 报告的错误或容器状态。 */
+            detail?: string;
         };
     };
     responses: {
