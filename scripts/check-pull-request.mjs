@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { validateTask } from './issue-task.mjs';
 
 const token = process.env.GITHUB_TOKEN;
 const repository = process.env.GITHUB_REPOSITORY;
@@ -88,23 +89,9 @@ assert.equal(labelsWithPrefix(pullRequestLabels, 'type:').length, 1, 'PR 必须�
 assert(labelsWithPrefix(pullRequestLabels, 'area:').length > 0, 'PR 至少需要一个 area 标签');
 
 const issue = linkedIssues[0];
-const issueLabels = issue.labels.nodes.map(label => label.name);
 const issueAssignees = issue.assignees.nodes.map(assignee => assignee.login).sort();
-const statusLabels = labelsWithPrefix(issueLabels, 'status:');
 
-assert.equal(issue.state, 'OPEN', '关联任务必须处于打开状态');
-assert.equal(labelsWithPrefix(issueLabels, 'type:').length, 1, '关联任务必须有一个 type 标签');
-assert(labelsWithPrefix(issueLabels, 'area:').length > 0, '关联任务至少需要一个 area 标签');
-assert.equal(labelsWithPrefix(issueLabels, 'priority:').length, 1, '关联任务必须有一个 priority 标签');
-assert.equal(statusLabels.length, 1, '关联任务必须有一个 status 标签');
-assert(
-  ['status:ready', 'status:in-progress'].includes(statusLabels[0]),
-  '关联任务必须处于 ready 或 in-progress 状态',
-);
+validateTask({ state: issue.state.toLowerCase(), labels: issue.labels.nodes });
 assert.deepEqual(pullRequestAssignees, issueAssignees, 'PR 与关联任务的负责人必须一致');
-
-if (pullRequestLabels.includes('agent:assisted')) {
-  assert(issueLabels.includes('agent:ready'), 'Agent 参与的 PR 要求关联任务具有 agent:ready 标签');
-}
 
 console.log(`PR #${pullRequestNumber} 策略检查通过`);

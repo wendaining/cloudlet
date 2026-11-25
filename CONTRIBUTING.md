@@ -22,9 +22,9 @@ make setup 安装锁定的依赖与测试浏览器，启用提交信息检查，
 
 ## 选择任务
 
-使用问题报告、功能提案或工程任务表单创建 Issue。维护者确认验收条件，指定负责人，并添加 type、area、priority 和 status 标签。
+使用问题报告、功能提案或工程任务表单创建 Issue。分诊时确认验收条件，并添加 type、area、priority 和 status 标签。负责人可以在分诊或领取时登记。
 
-status:ready 表示可以开始实施，status:in-progress 表示负责人正在执行。阻塞条件写入 Issue，并使用 status:blocked。详细规则见 [协作流程](docs/workflow.md)。
+status:ready 表示可以领取并交给 Agent 实施，status:in-progress 表示负责人正在执行。阻塞条件写入 Issue，并使用 status:blocked。详细规则见 [协作流程](docs/workflow.md)。
 
 ## 编写更改
 

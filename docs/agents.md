@@ -1,10 +1,10 @@
 # Agent 工作流程
 
-Agent 使用同一套 Issue、分支、提交和 PR 规则。维护者负责确认任务范围与最终更改。
+Agent 使用同一套 Issue、分支、提交和 PR 规则。其他协作者负责审查最终更改。
 
 ## 准备任务
 
-维护者确认实现范围、依赖与验收条件，指定负责人，设置 status:ready 或 status:in-progress，并添加 agent:ready。
+Agent 按 [Issue 协作 Skill](../.agents/skills/cloudlet-issue-workflow/SKILL.md) 复查依赖、领取任务和检查下游。status:ready 表示可以交给 Agent 实施，领取后更新为 status:in-progress。
 
 ```sh
 make agent-brief ISSUE=1
@@ -12,7 +12,7 @@ make agent-brief ISSUE=1
 
 该命令读取 GitHub 上的实际 Issue，检查标签，将任务资料写入 .local/agent-task.md。资料包含任务地址、负责人、分支建议、验收条件和 PR 建议。
 
-维护者也可以在 Actions 中手动运行 Agent handoff，填写 Issue 编号。生成的资料保留七天，可以从该次运行的产物下载。
+也可以在 Actions 中手动运行 Agent handoff，填写处于 ready 或 in-progress 状态的 Issue 编号。生成的资料保留七天，可以从该次运行的产物下载。
 
 ## 执行任务
 
