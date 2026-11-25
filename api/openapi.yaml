@@ -405,6 +405,51 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BrowserConsole'
+  /api/v1/projects/{projectID}/browser-sessions/{sessionID}/screenshots:
+    parameters:
+      - $ref: '#/components/parameters/BrowserProjectID'
+      - $ref: '#/components/parameters/BrowserSessionID'
+    post:
+      operationId: captureBrowserScreenshot
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '201':
+          description: 截图已保存
+          headers:
+            Location:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserScreenshot'
+  /api/v1/projects/{projectID}/browser-sessions/{sessionID}/screenshots/{screenshotID}:
+    parameters:
+      - $ref: '#/components/parameters/BrowserProjectID'
+      - $ref: '#/components/parameters/BrowserSessionID'
+      - name: screenshotID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: downloadBrowserScreenshot
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 原始 PNG 截图
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
   /api/v1/projects/{projectID}/sites/{siteName}/versions:
     parameters:
       - $ref: '#/components/parameters/SiteProjectID'
@@ -1006,6 +1051,28 @@ components:
           format: int64
           minimum: 0
           description: 已从会话历史移除的旧记录数
+    BrowserScreenshot:
+      type: object
+      required: [id, artifact_digest, size_bytes, download_url, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        artifact_digest:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+          description: 原始 PNG 的 SHA-256 摘要
+        size_bytes:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 2097152
+        download_url:
+          type: string
+          description: 需要项目会话凭据的相对下载地址
+        created_at:
+          type: string
+          format: date-time
     BrowserSessionStatus:
       type: string
       enum: [starting, ready, failed, closed]
