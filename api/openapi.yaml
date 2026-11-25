@@ -339,6 +339,25 @@ paths:
           $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/browser-sessions/{sessionID}/click:
+    parameters:
+      - $ref: '#/components/parameters/BrowserProjectID'
+      - $ref: '#/components/parameters/BrowserSessionID'
+    post:
+      operationId: clickBrowserPage
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClickBrowserPageRequest'
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '204':
+          description: 已点击当前页面的指定元素
   /api/v1/projects/{projectID}/browser-sessions/{sessionID}/navigate:
     parameters:
       - $ref: '#/components/parameters/BrowserProjectID'
@@ -424,6 +443,34 @@ paths:
               schema:
                 type: string
                 format: binary
+  /api/v1/projects/{projectID}/sites:
+    parameters:
+      - $ref: '#/components/parameters/SiteProjectID'
+    get:
+      operationId: listStaticSites
+      description: 按站点名称升序分页列出项目成员可见的静态站点。
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: '#/components/parameters/StaticSitePageLimit'
+        - $ref: '#/components/parameters/StaticSitePageCursor'
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 项目站点列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaticSitePage'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '503':
+          $ref: '#/components/responses/Error'
   /api/v1/projects/{projectID}/browser-sessions/{sessionID}/pages:
     parameters:
       - $ref: '#/components/parameters/BrowserProjectID'
@@ -519,6 +566,31 @@ paths:
           $ref: '#/components/responses/Error'
         '415':
           $ref: '#/components/responses/Error'
+    get:
+      operationId: listStaticSiteVersions
+      description: 按创建时间和版本标识降序分页列出站点版本摘要。
+      security:
+        - SessionCookie: []
+      parameters:
+        - $ref: '#/components/parameters/StaticSitePageLimit'
+        - $ref: '#/components/parameters/StaticSitePageCursor'
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 静态站点版本列表
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaticSiteVersionPage'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '503':
+          $ref: '#/components/responses/Error'
   /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}:
     parameters:
       - $ref: '#/components/parameters/SiteProjectID'
@@ -541,6 +613,48 @@ paths:
         '401':
           $ref: '#/components/responses/Error'
         '404':
+          $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/artifact:
+    parameters:
+      - $ref: '#/components/parameters/SiteProjectID'
+      - $ref: '#/components/parameters/SiteName'
+      - name: versionID
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: downloadStaticSiteArtifact
+      description: 项目成员下载指定站点版本的原始 ZIP。
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 原始 ZIP 的全部字节
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+            Content-Length:
+              schema:
+                type: integer
+                format: int64
+            Content-Digest:
+              description: ZIP 内容的 SHA-256 摘要。
+              schema:
+                type: string
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '503':
           $ref: '#/components/responses/Error'
   /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/publish:
     parameters:
@@ -872,6 +986,22 @@ components:
       schema:
         type: string
         format: uuid
+    StaticSitePageLimit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 50
+    StaticSitePageCursor:
+      name: cursor
+      in: query
+      description: 同一个列表接口上一页返回的 next_cursor。首次查询时省略。
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 63
     SiteProjectID:
       name: projectID
       in: path
@@ -930,6 +1060,21 @@ components:
         database_version:
           type: integer
           format: int64
+    ClickBrowserPageRequest:
+      type: object
+      additionalProperties: false
+      required: [selector]
+      properties:
+        selector:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          description: 唯一定位当前页面元素的 CSS 选择器
+        timeout_ms:
+          type: integer
+          minimum: 1
+          maximum: 30000
+          default: 10000
     CreateProjectRequest:
       type: object
       additionalProperties: false
@@ -1224,6 +1369,40 @@ components:
         url:
           type: string
           format: uri
+    StaticSiteSummary:
+      type: object
+      required: [id, name, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+    StaticSitePage:
+      type: object
+      required: [sites]
+      properties:
+        sites:
+          type: array
+          items:
+            $ref: '#/components/schemas/StaticSiteSummary'
+        next_cursor:
+          type: string
+          description: 有更多结果时返回，用于请求下一页。
+    StaticSiteVersionPage:
+      type: object
+      required: [versions]
+      properties:
+        versions:
+          type: array
+          items:
+            $ref: '#/components/schemas/StaticSiteVersion'
+        next_cursor:
+          type: string
+          description: 有更多结果时返回，用于请求下一页。
     StaticSiteVersion:
       type: object
       required: [id, site_id, artifact_digest, status, created_at]
