@@ -26,6 +26,12 @@ Gateway 域名验收构建并启动实际管理服务，以真实站点文件作
 go test -race -count=1 -run TestGatewayDomainRoutingAcceptance -v ./internal/server
 ```
 
+静态站点首次发布使用真实 PostgreSQL、管理 API 和 Gateway 验证。测试先上传真实 ZIP，再通过管理 API 激活版本并经 Gateway 读取首页和资源，同时检查未激活版本的资源、域名冲突、跨项目权限、重复请求和路由恢复。
+
+```sh
+go test -race -count=1 -tags=integration -run '^TestFirstStaticSitePublicationHTTP$' -v ./internal/database
+```
+
 开发流程测试创建独立配置与随机可用端口，通过与成员相同的开发入口运行 Go、Vite 和 PostgreSQL。测试验证同名控制器拒绝重复启动、错误的 reset 确认不会停止服务、真实 API 登录和 Gateway 转发。
 
 热重载检查在测试期间创建独立 Go 源文件，验证实际后端进程更换、会话保留，以及受管理 PostgreSQL 执行容器保持原始启动时间。随后验证真实编译错误会停止旧后端，修复源码后服务恢复。测试完成后删除该源文件。
