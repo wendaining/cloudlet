@@ -28,6 +28,7 @@ import (
 	"github.com/wendaining/cloudlet/internal/capacity"
 	"github.com/wendaining/cloudlet/internal/config"
 	"github.com/wendaining/cloudlet/internal/controlplane"
+	"github.com/wendaining/cloudlet/internal/database"
 )
 
 func TestBrowserSessionHTTP(t *testing.T) {
@@ -120,7 +121,7 @@ func TestBrowserSessionHTTP(t *testing.T) {
 
 	capture := func(api *apigen.ClientWithResponses, project string, want int) *apigen.CaptureBrowserScreenshotResponse {
 		t.Helper()
-		response, err := api.CaptureBrowserScreenshotWithResponse(ctx, project, session.Id)
+		response, err := api.CaptureBrowserScreenshotWithResponse(ctx, project, session.Id, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -246,6 +247,7 @@ func TestBrowserSessionHTTP(t *testing.T) {
 		t.Fatalf("invalid Chromium PNG: %v", err)
 	}
 	t.Logf("screenshot HTTP 201; download HTTP 200, %d bytes, PNG 1280x720, SHA-256 %s; cross-project download HTTP 404", screenshot.SizeBytes, hash)
+	verifyScreenshotModes(t, store, ownerAPI, owner.ID, session.Id, fixture)
 	second, err := ownerAPI.CreateBrowserSessionWithResponse(ctx, owner.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -303,6 +305,59 @@ func browserRuntimeImage(t *testing.T, ctx context.Context) (string, string) {
 	return runtimeDir, imageID
 }
 
+func verifyScreenshotModes(t *testing.T, store *database.Store, api *apigen.ClientWithResponses, projectID string, sessionID uuid.UUID, fixture string) {
+	t.Helper()
+	ctx := t.Context()
+	navigate := func(query string) {
+		t.Helper()
+		result, err := api.NavigateBrowserSessionWithResponse(ctx, projectID, sessionID,
+			apigen.NavigateBrowserSessionJSONRequestBody{Url: fixture + query})
+		if err != nil || result.StatusCode() != http.StatusOK {
+			t.Fatalf("navigate screenshot fixture: %v (%v)", result, err)
+		}
+	}
+	navigate("?screenshot-long")
+	for _, full := range []bool{false, true} {
+		capture, err := api.CaptureBrowserScreenshotWithResponse(ctx, projectID, sessionID, &apigen.CaptureBrowserScreenshotParams{FullPage: &full})
+		if err != nil || capture.StatusCode() != http.StatusCreated || capture.JSON201 == nil {
+			t.Fatalf("capture full_page=%v: %v (%v)", full, capture, err)
+		}
+		download, err := api.DownloadBrowserScreenshotWithResponse(ctx, projectID, sessionID, capture.JSON201.Id)
+		if err != nil || download.StatusCode() != http.StatusOK {
+			t.Fatalf("download full_page=%v: %v (%v)", full, download, err)
+		}
+		decoded, err := png.Decode(bytes.NewReader(download.Body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		height := 720
+		if full {
+			height = 1800
+		}
+		if decoded.Bounds().Dx() != 1280 || decoded.Bounds().Dy() != height {
+			t.Fatalf("PNG bounds for full_page=%v: %v, want 1280×%d", full, decoded.Bounds(), height)
+		}
+		r, g, b, _ := decoded.At(20, height-20).RGBA()
+		if full != (r == 0xe0e0 && g == 0 && b == 0) {
+			t.Fatalf("unexpected footer pixel for full_page=%v: %04x %04x %04x", full, r, g, b)
+		}
+	}
+	var before, after int64
+	if err := store.DB.Model(&database.BrowserScreenshot{}).Where("session_id = ?", sessionID).Count(&before).Error; err != nil {
+		t.Fatal(err)
+	}
+	navigate("?screenshot-too-large")
+	full := true
+	rejected, err := api.CaptureBrowserScreenshotWithResponse(ctx, projectID, sessionID, &apigen.CaptureBrowserScreenshotParams{FullPage: &full})
+	if err != nil || rejected.StatusCode() != http.StatusUnprocessableEntity {
+		t.Fatalf("oversized full-page screenshot: %v (%v), want HTTP 422", rejected, err)
+	}
+	if err := store.DB.Model(&database.BrowserScreenshot{}).Where("session_id = ?", sessionID).Count(&after).Error; err != nil || after != before {
+		t.Fatalf("oversized screenshot was registered: before=%d after=%d (%v)", before, after, err)
+	}
+	t.Log("viewport PNG 1280×720 and full-page PNG 1280×1800 decoded; only full-page PNG contains the red footer; oversized page returned HTTP 422 with no new artifact")
+}
+
 func chromiumPage(t *testing.T, ctx context.Context, docker *client.Client) string {
 	t.Helper()
 	bridge, err := docker.NetworkInspect(ctx, "bridge", client.NetworkInspectOptions{})
@@ -327,6 +382,14 @@ func chromiumPage(t *testing.T, ctx context.Context, docker *client.Client) stri
 		ReadHeaderTimeout: time.Second,
 		Handler: http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 			writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+			if request.URL.Query().Has("screenshot-too-large") {
+				fmt.Fprint(writer, `<!doctype html><title>Over pixel limit</title><div style="height:6000px"></div>`)
+				return
+			}
+			if request.URL.Query().Has("screenshot-long") {
+				fmt.Fprint(writer, `<!doctype html><title>Full screenshot fixture</title><body style="margin:0"><main style="height:1700px"></main><footer style="height:100px;background:#e00000">Page end</footer></body>`)
+				return
+			}
 			fmt.Fprint(writer, `<!doctype html><title>Cloudlet Browser Run</title><h1>Cloudlet Browser Run</h1>
 <script>
 for (let i = 0; i < 110; i++) console.log('entry ' + i);

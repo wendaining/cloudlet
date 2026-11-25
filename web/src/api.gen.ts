@@ -1336,7 +1336,10 @@ export interface operations {
     };
     captureBrowserScreenshot: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 截取整个可滚动页面，省略时截取当前视口。 */
+                full_page?: boolean;
+            };
             header?: never;
             path: {
                 projectID: components["parameters"]["BrowserProjectID"];
@@ -1354,6 +1357,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BrowserScreenshot"];
+                };
+            };
+            /** @description 截图超过 4194304 设备像素或 2 MiB */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
             default: components["responses"]["Error"];

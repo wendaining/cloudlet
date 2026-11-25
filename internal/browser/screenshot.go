@@ -26,7 +26,7 @@ const (
 
 var (
 	ErrScreenshotConflict = errors.New("当前页面无法截图或有浏览器命令正在运行")
-	ErrScreenshotTooLarge = errors.New("浏览器截图超过 2 MiB")
+	ErrScreenshotTooLarge = errors.New("浏览器截图超过像素或文件大小上限")
 	ErrScreenshotTimeout  = errors.New("浏览器截图超时")
 	ErrScreenshot         = errors.New("浏览器截图失败")
 )
@@ -55,7 +55,7 @@ func openScreenshotStore(directory string) (*artifacts.Store, error) {
 	return artifacts.New(directory, maxScreenshotBytes)
 }
 
-func (s *Service) CaptureScreenshot(ctx context.Context, projectID, sessionID uuid.UUID) (database.BrowserScreenshot, error) {
+func (s *Service) CaptureScreenshot(ctx context.Context, projectID, sessionID uuid.UUID, fullPage bool) (database.BrowserScreenshot, error) {
 	session, err := s.Session(ctx, projectID, sessionID)
 	if err != nil {
 		return database.BrowserScreenshot{}, err
@@ -64,7 +64,7 @@ func (s *Service) CaptureScreenshot(ctx context.Context, projectID, sessionID uu
 	if err != nil {
 		return database.BrowserScreenshot{}, err
 	}
-	image, err := s.capture(ctx, endpoint, sessionID)
+	image, err := s.capture(ctx, endpoint, sessionID, fullPage)
 	if err != nil {
 		return database.BrowserScreenshot{}, err
 	}
@@ -78,10 +78,14 @@ func (s *Service) CaptureScreenshot(ctx context.Context, projectID, sessionID uu
 	return s.store.RegisterBrowserScreenshot(ctx, sessionID, digest, int64(len(image)))
 }
 
-func (s *Service) capture(ctx context.Context, endpoint string, id uuid.UUID) ([]byte, error) {
+func (s *Service) capture(ctx context.Context, endpoint string, id uuid.UUID, fullPage bool) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
-	response, err := s.postRuntime(ctx, endpoint+"/screenshot", id, nil)
+	var body io.Reader
+	if fullPage {
+		body = bytes.NewBufferString(`{"full_page":true}`)
+	}
+	response, err := s.postRuntime(ctx, endpoint+"/screenshot", id, body)
 	if errors.Is(err, context.DeadlineExceeded) {
 		return nil, ErrScreenshotTimeout
 	}
