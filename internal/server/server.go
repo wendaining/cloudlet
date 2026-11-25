@@ -71,6 +71,12 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 				logger.Error("close browser screenshot storage", "error", err)
 			}
 		}()
+		recoveryCtx, stopRecovery := context.WithTimeout(ctx, time.Minute)
+		err = browserService.Restore(recoveryCtx)
+		stopRecovery()
+		if err != nil {
+			return fmt.Errorf("restore Browser Run sessions: %w", err)
+		}
 	}
 	proxy, err := gateway.NewHandler(cfg, logger)
 	if err != nil {
