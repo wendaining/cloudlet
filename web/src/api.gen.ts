@@ -233,6 +233,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{projectID}/browser-sessions/{sessionID}/click": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["clickBrowserPage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{projectID}/sites/{siteName}/versions": {
         parameters: {
             query?: never;
@@ -422,6 +441,12 @@ export interface components {
         Session: {
             user: components["schemas"]["User"];
             projects: components["schemas"]["Project"][];
+        };
+        ClickBrowserPageRequest: {
+            /** @description 唯一定位当前页面元素的 CSS 选择器 */
+            selector: string;
+            /** @default 10000 */
+            timeout_ms: number;
         };
         /** @enum {string} */
         BrowserSessionStatus: "starting" | "ready" | "failed" | "closed";
@@ -895,6 +920,32 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["BrowserNavigation"];
                 };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    clickBrowserPage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClickBrowserPageRequest"];
+            };
+        };
+        responses: {
+            /** @description 已点击当前页面的指定元素 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             default: components["responses"]["Error"];
         };
