@@ -233,6 +233,45 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{projectID}/browser-sessions/{sessionID}/pages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["openBrowserPage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/browser-sessions/{sessionID}/pages/{pageID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+                pageID: string;
+            };
+            cookie?: never;
+        };
+        get: operations["getBrowserPage"];
+        put?: never;
+        post?: never;
+        delete: operations["closeBrowserPage"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{projectID}/sites/{siteName}/versions": {
         parameters: {
             query?: never;
@@ -436,6 +475,17 @@ export interface components {
         };
         NavigateBrowserSessionRequest: {
             url: string;
+            /**
+             * Format: uuid
+             * @description 额外页面标识，省略时导航默认页面
+             */
+            page_id?: string;
+        };
+        BrowserPage: {
+            /** Format: uuid */
+            id: string;
+            url: string;
+            title: string;
         };
         BrowserNavigation: {
             url: string;
@@ -895,6 +945,79 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["BrowserNavigation"];
                 };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    openBrowserPage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已打开的额外页面 */
+            201: {
+                headers: {
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrowserPage"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getBrowserPage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+                pageID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 页面当前地址与标题 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrowserPage"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    closeBrowserPage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+                pageID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 额外页面已关闭 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             default: components["responses"]["Error"];
         };

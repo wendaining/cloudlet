@@ -136,6 +136,62 @@ func TestBrowserSessionHTTP(t *testing.T) {
 		t.Fatalf("unexpected Chromium page: %+v", page)
 	}
 	t.Logf("navigation HTTP 200, title=%q, url=%s; cross-project read and navigation HTTP 404", page.Title, page.Url)
+	openPage := func() uuid.UUID {
+		t.Helper()
+		result, err := ownerAPI.OpenBrowserPageWithResponse(ctx, owner.ID, session.Id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.StatusCode() != http.StatusCreated || result.JSON201 == nil ||
+			result.JSON201.Id == uuid.Nil || result.JSON201.Url != "about:blank" ||
+			result.HTTPResponse.Header.Get("Location") != endpoint+"/pages/"+result.JSON201.Id.String() {
+			t.Fatalf("open page = %d %s", result.StatusCode(), result.Body)
+		}
+		return result.JSON201.Id
+	}
+	firstPage, secondPage := openPage(), openPage()
+	if firstPage == secondPage {
+		t.Fatal("pages share an identifier")
+	}
+	navigatePage := func(id uuid.UUID, target string, want int) {
+		t.Helper()
+		result, err := ownerAPI.NavigateBrowserSessionWithResponse(ctx, owner.ID, session.Id,
+			apigen.NavigateBrowserSessionJSONRequestBody{PageId: &id, Url: target})
+		if err != nil || result.StatusCode() != want {
+			t.Fatalf("navigate named page = %v (%v), want %d", result, err, want)
+		}
+		if want == http.StatusOK && (result.JSON200 == nil || result.JSON200.Url != target) {
+			t.Fatalf("unexpected named-page navigation: %s", result.Body)
+		}
+	}
+	describePage := func(api *apigen.ClientWithResponses, id uuid.UUID, want int) *apigen.BrowserPage {
+		t.Helper()
+		result, err := api.GetBrowserPageWithResponse(ctx, owner.ID, session.Id, id)
+		if err != nil || result.StatusCode() != want {
+			t.Fatalf("read named page = %v (%v), want %d", result, err, want)
+		}
+		return result.JSON200
+	}
+	navigatePage(firstPage, fixture+"?tab=first", http.StatusOK)
+	navigatePage(secondPage, fixture+"?tab=second", http.StatusOK)
+	for _, tab := range []struct {
+		id    uuid.UUID
+		query string
+	}{{firstPage, "?tab=first"}, {secondPage, "?tab=second"}} {
+		got := describePage(ownerAPI, tab.id, http.StatusOK)
+		if got == nil || got.Id != tab.id || got.Url != fixture+tab.query || got.Title != "Cloudlet Browser Run" {
+			t.Fatalf("wrong independent page state: %+v", got)
+		}
+	}
+	describePage(otherAPI, firstPage, http.StatusNotFound)
+	closed, err := ownerAPI.CloseBrowserPageWithResponse(ctx, owner.ID, session.Id, firstPage)
+	if err != nil || closed.StatusCode() != http.StatusNoContent {
+		t.Fatalf("close page = %v (%v)", closed, err)
+	}
+	describePage(ownerAPI, firstPage, http.StatusNotFound)
+	navigatePage(firstPage, fixture, http.StatusNotFound)
+	navigatePage(secondPage, fixture+"?tab=after-close", http.StatusOK)
+	t.Log("two Chromium pages have independent IDs and addresses; closed ID HTTP 404; remaining page still navigates; other project HTTP 404")
 	second, err := ownerAPI.CreateBrowserSessionWithResponse(ctx, owner.ID)
 	if err != nil {
 		t.Fatal(err)

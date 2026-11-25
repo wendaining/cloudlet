@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/wendaining/cloudlet/internal/capacity"
 	"github.com/wendaining/cloudlet/internal/containers"
+	"github.com/wendaining/cloudlet/internal/database"
 )
 
 var (
@@ -33,7 +34,7 @@ func validURL(value string) bool {
 		(parsed.Scheme == "http" || parsed.Scheme == "https")
 }
 
-func (s *Service) Navigate(ctx context.Context, projectID, id uuid.UUID, value string) (Navigation, error) {
+func (s *Service) Navigate(ctx context.Context, projectID, id uuid.UUID, value string, pageID *uuid.UUID) (Navigation, error) {
 	session, err := s.Session(ctx, projectID, id)
 	if err != nil {
 		return Navigation{}, err
@@ -41,43 +42,52 @@ func (s *Service) Navigate(ctx context.Context, projectID, id uuid.UUID, value s
 	if !validURL(value) {
 		return Navigation{}, ErrInvalidURL
 	}
-	if session.Status != "ready" {
-		return Navigation{}, ErrSessionUnavailable
-	}
-	bound, err := s.capacity.GetReservation(ctx, projectID, id)
-	if errors.Is(err, capacity.ErrReservationNotFound) {
-		return Navigation{}, ErrSessionUnavailable
-	}
+	endpoint, err := s.runtimeEndpoint(ctx, session)
 	if err != nil {
 		return Navigation{}, err
 	}
-	if bound.ContainerID == "" {
-		return Navigation{}, ErrSessionUnavailable
+	return s.navigate(ctx, endpoint+"/navigate", id, value, pageID)
+}
+
+func (s *Service) runtimeEndpoint(ctx context.Context, session database.BrowserSession) (string, error) {
+	if session.Status != "ready" {
+		return "", ErrSessionUnavailable
+	}
+	bound, err := s.capacity.GetReservation(ctx, session.ProjectID, session.ID)
+	if errors.Is(err, capacity.ErrReservationNotFound) {
+		return "", ErrSessionUnavailable
+	}
+	if err != nil {
+		return "", err
+	}
+	if bound.State != capacity.Active || bound.ContainerID == "" {
+		return "", ErrSessionUnavailable
 	}
 	observation, err := s.adapter.Observe(ctx, ownership(session), bound.ContainerID)
 	if errors.Is(err, containers.ErrNotFound) {
-		return Navigation{}, ErrSessionUnavailable
+		return "", ErrSessionUnavailable
 	}
 	if err != nil {
-		return Navigation{}, err
+		return "", err
 	}
 	if !observation.Running {
-		return Navigation{}, ErrSessionUnavailable
+		return "", ErrSessionUnavailable
 	}
 	for _, port := range observation.Ports {
 		if port.Protocol == "tcp" && port.ContainerPort == runtimePort {
-			return s.navigate(ctx, "http://"+port.HostAddress()+"/navigate", id, value)
+			return "http://" + port.HostAddress(), nil
 		}
 	}
-	return Navigation{}, ErrSessionUnavailable
+	return "", ErrSessionUnavailable
 }
 
-func (s *Service) navigate(ctx context.Context, endpoint string, id uuid.UUID, value string) (Navigation, error) {
+func (s *Service) navigate(ctx context.Context, endpoint string, id uuid.UUID, value string, pageID *uuid.UUID) (Navigation, error) {
 	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
 	body, err := json.Marshal(struct {
-		URL string `json:"url"`
-	}{value})
+		URL    string     `json:"url"`
+		PageID *uuid.UUID `json:"page_id,omitempty"`
+	}{value, pageID})
 	if err != nil {
 		return Navigation{}, err
 	}
@@ -110,6 +120,11 @@ func (s *Service) navigate(ctx context.Context, endpoint string, id uuid.UUID, v
 		return result, nil
 	case http.StatusBadRequest:
 		return Navigation{}, ErrInvalidURL
+	case http.StatusNotFound:
+		if pageID != nil {
+			return Navigation{}, ErrPageNotFound
+		}
+		return Navigation{}, ErrNavigation
 	case http.StatusConflict, http.StatusGone:
 		return Navigation{}, ErrSessionUnavailable
 	case http.StatusGatewayTimeout:

@@ -103,6 +103,13 @@ type BrowserNavigation struct {
 	Url   string `json:"url"`
 }
 
+// BrowserPage defines model for BrowserPage.
+type BrowserPage struct {
+	Id    openapi_types.UUID `json:"id"`
+	Title string             `json:"title"`
+	Url   string             `json:"url"`
+}
+
 // BrowserSession defines model for BrowserSession.
 type BrowserSession struct {
 	// Endpoint 需要项目会话凭据的相对管理 API 地址
@@ -148,7 +155,9 @@ type LoginRequest struct {
 
 // NavigateBrowserSessionRequest defines model for NavigateBrowserSessionRequest.
 type NavigateBrowserSessionRequest struct {
-	Url string `json:"url"`
+	// PageId 额外页面标识，省略时导航默认页面
+	PageId *openapi_types.UUID `json:"page_id,omitempty"`
+	Url    string              `json:"url"`
 }
 
 // Operation defines model for Operation.
@@ -414,6 +423,15 @@ type ClientInterface interface {
 	// Takes a body of the `application/json` content type.
 	NavigateBrowserSession(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, body NavigateBrowserSessionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// OpenBrowserPage performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/pages (the `OpenBrowserPage` operationId) request.
+	OpenBrowserPage(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CloseBrowserPage performs a DELETE /api/v1/projects/{projectID}/browser-sessions/{sessionID}/pages/{pageID} (the `CloseBrowserPage` operationId) request.
+	CloseBrowserPage(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, pageID openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetBrowserPage performs a GET /api/v1/projects/{projectID}/browser-sessions/{sessionID}/pages/{pageID} (the `GetBrowserPage` operationId) request.
+	GetBrowserPage(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, pageID openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListProjectMembers performs a GET /api/v1/projects/{projectID}/members (the `ListProjectMembers` operationId) request.
 	//
 	// 返回项目成员及其角色，项目成员可以读取。.
@@ -678,6 +696,45 @@ func (c *Client) NavigateBrowserSessionWithBody(ctx context.Context, projectID B
 // Takes a body of the `application/json` content type.
 func (c *Client) NavigateBrowserSession(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, body NavigateBrowserSessionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewNavigateBrowserSessionRequest(c.Server, projectID, sessionID, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// OpenBrowserPage performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/pages (the `OpenBrowserPage` operationId) request.
+func (c *Client) OpenBrowserPage(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewOpenBrowserPageRequest(c.Server, projectID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CloseBrowserPage performs a DELETE /api/v1/projects/{projectID}/browser-sessions/{sessionID}/pages/{pageID} (the `CloseBrowserPage` operationId) request.
+func (c *Client) CloseBrowserPage(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, pageID openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCloseBrowserPageRequest(c.Server, projectID, sessionID, pageID)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetBrowserPage performs a GET /api/v1/projects/{projectID}/browser-sessions/{sessionID}/pages/{pageID} (the `GetBrowserPage` operationId) request.
+func (c *Client) GetBrowserPage(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, pageID openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetBrowserPageRequest(c.Server, projectID, sessionID, pageID)
 	if err != nil {
 		return nil, err
 	}
@@ -1282,6 +1339,143 @@ func NewNavigateBrowserSessionRequestWithBody(server string, projectID BrowserPr
 	return req, nil
 }
 
+// NewOpenBrowserPageRequest constructs an http.Request for the OpenBrowserPage method
+func NewOpenBrowserPageRequest(server string, projectID BrowserProjectID, sessionID BrowserSessionID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "sessionID", sessionID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/browser-sessions/%s/pages", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCloseBrowserPageRequest constructs an http.Request for the CloseBrowserPage method
+func NewCloseBrowserPageRequest(server string, projectID BrowserProjectID, sessionID BrowserSessionID, pageID openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "sessionID", sessionID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "pageID", pageID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/browser-sessions/%s/pages/%s", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetBrowserPageRequest constructs an http.Request for the GetBrowserPage method
+func NewGetBrowserPageRequest(server string, projectID BrowserProjectID, sessionID BrowserSessionID, pageID openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "sessionID", sessionID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "pageID", pageID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/browser-sessions/%s/pages/%s", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewListProjectMembersRequest constructs an http.Request for the ListProjectMembers method
 func NewListProjectMembersRequest(server string, projectID string) (*http.Request, error) {
 	var err error
@@ -1848,6 +2042,21 @@ type ClientWithResponsesInterface interface {
 	// NavigateBrowserSessionWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/navigate (the `NavigateBrowserSession` operationId) request.
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	NavigateBrowserSessionWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, body NavigateBrowserSessionJSONRequestBody, reqEditors ...RequestEditorFn) (*NavigateBrowserSessionResponse, error)
+
+	// OpenBrowserPageWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/pages (the `OpenBrowserPage` operationId) request.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	OpenBrowserPageWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, reqEditors ...RequestEditorFn) (*OpenBrowserPageResponse, error)
+
+	// CloseBrowserPageWithResponse performs a DELETE /api/v1/projects/{projectID}/browser-sessions/{sessionID}/pages/{pageID} (the `CloseBrowserPage` operationId) request.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	CloseBrowserPageWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, pageID openapi_types.UUID, reqEditors ...RequestEditorFn) (*CloseBrowserPageResponse, error)
+
+	// GetBrowserPageWithResponse performs a GET /api/v1/projects/{projectID}/browser-sessions/{sessionID}/pages/{pageID} (the `GetBrowserPage` operationId) request.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	GetBrowserPageWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, pageID openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetBrowserPageResponse, error)
 
 	// ListProjectMembersWithResponse performs a GET /api/v1/projects/{projectID}/members (the `ListProjectMembers` operationId) request.
 	//
@@ -2551,6 +2760,150 @@ func (r NavigateBrowserSessionResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r NavigateBrowserSessionResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// OpenBrowserPageResponse201Headers the declared response headers of an HTTP 201 response for OpenBrowserPage
+type OpenBrowserPageResponse201Headers struct {
+	Location *string
+}
+
+type OpenBrowserPageResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *BrowserPage
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+	// Headers201 the parsed response headers for an HTTP 201 response
+	Headers201 *OpenBrowserPageResponse201Headers
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r OpenBrowserPageResponse) GetJSON201() *BrowserPage {
+	return r.JSON201
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r OpenBrowserPageResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r OpenBrowserPageResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r OpenBrowserPageResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r OpenBrowserPageResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r OpenBrowserPageResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type CloseBrowserPageResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r CloseBrowserPageResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r CloseBrowserPageResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CloseBrowserPageResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CloseBrowserPageResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CloseBrowserPageResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetBrowserPageResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *BrowserPage
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetBrowserPageResponse) GetJSON200() *BrowserPage {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r GetBrowserPageResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r GetBrowserPageResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetBrowserPageResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetBrowserPageResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetBrowserPageResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -3478,6 +3831,39 @@ func (c *ClientWithResponses) NavigateBrowserSessionWithResponse(ctx context.Con
 	return ParseNavigateBrowserSessionResponse(rsp)
 }
 
+// OpenBrowserPageWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/pages (the `OpenBrowserPage` operationId) request.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) OpenBrowserPageWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, reqEditors ...RequestEditorFn) (*OpenBrowserPageResponse, error) {
+	rsp, err := c.OpenBrowserPage(ctx, projectID, sessionID, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseOpenBrowserPageResponse(rsp)
+}
+
+// CloseBrowserPageWithResponse performs a DELETE /api/v1/projects/{projectID}/browser-sessions/{sessionID}/pages/{pageID} (the `CloseBrowserPage` operationId) request.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) CloseBrowserPageWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, pageID openapi_types.UUID, reqEditors ...RequestEditorFn) (*CloseBrowserPageResponse, error) {
+	rsp, err := c.CloseBrowserPage(ctx, projectID, sessionID, pageID, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCloseBrowserPageResponse(rsp)
+}
+
+// GetBrowserPageWithResponse performs a GET /api/v1/projects/{projectID}/browser-sessions/{sessionID}/pages/{pageID} (the `GetBrowserPage` operationId) request.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) GetBrowserPageWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, pageID openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetBrowserPageResponse, error) {
+	rsp, err := c.GetBrowserPage(ctx, projectID, sessionID, pageID, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetBrowserPageResponse(rsp)
+}
+
 // ListProjectMembersWithResponse performs a GET /api/v1/projects/{projectID}/members (the `ListProjectMembers` operationId) request.
 //
 // 返回项目成员及其角色，项目成员可以读取。.
@@ -4090,6 +4476,114 @@ func ParseNavigateBrowserSessionResponse(rsp *http.Response) (*NavigateBrowserSe
 	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
 		var dest BrowserNavigation
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseOpenBrowserPageResponse parses an HTTP response from a OpenBrowserPageWithResponse call
+func ParseOpenBrowserPageResponse(rsp *http.Response) (*OpenBrowserPageResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &OpenBrowserPageResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest BrowserPage
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 201:
+		var headers OpenBrowserPageResponse201Headers
+		if values := rsp.Header.Values("Location"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Location", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.Location = &value
+		}
+		response.Headers201 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseCloseBrowserPageResponse parses an HTTP response from a CloseBrowserPageWithResponse call
+func ParseCloseBrowserPageResponse(rsp *http.Response) (*CloseBrowserPageResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CloseBrowserPageResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case rsp.StatusCode == 204:
+		break // No content-type
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetBrowserPageResponse parses an HTTP response from a GetBrowserPageWithResponse call
+func ParseGetBrowserPageResponse(rsp *http.Response) (*GetBrowserPageResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetBrowserPageResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest BrowserPage
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -4739,6 +5233,15 @@ type ServerInterface interface {
 	// (POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/navigate)
 	NavigateBrowserSession(c *gin.Context, projectID BrowserProjectID, sessionID BrowserSessionID)
 
+	// (POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/pages)
+	OpenBrowserPage(c *gin.Context, projectID BrowserProjectID, sessionID BrowserSessionID)
+
+	// (DELETE /api/v1/projects/{projectID}/browser-sessions/{sessionID}/pages/{pageID})
+	CloseBrowserPage(c *gin.Context, projectID BrowserProjectID, sessionID BrowserSessionID, pageID openapi_types.UUID)
+
+	// (GET /api/v1/projects/{projectID}/browser-sessions/{sessionID}/pages/{pageID})
+	GetBrowserPage(c *gin.Context, projectID BrowserProjectID, sessionID BrowserSessionID, pageID openapi_types.UUID)
+
 	// (GET /api/v1/projects/{projectID}/members)
 	ListProjectMembers(c *gin.Context, projectID string)
 
@@ -5001,6 +5504,126 @@ func (siw *ServerInterfaceWrapper) NavigateBrowserSession(c *gin.Context) {
 	}
 
 	siw.Handler.NavigateBrowserSession(c, projectID, sessionID)
+}
+
+// OpenBrowserPage operation middleware
+func (siw *ServerInterfaceWrapper) OpenBrowserPage(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID BrowserProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "sessionID" -------------
+	var sessionID BrowserSessionID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "sessionID", c.Param("sessionID"), &sessionID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter sessionID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.OpenBrowserPage(c, projectID, sessionID)
+}
+
+// CloseBrowserPage operation middleware
+func (siw *ServerInterfaceWrapper) CloseBrowserPage(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID BrowserProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "sessionID" -------------
+	var sessionID BrowserSessionID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "sessionID", c.Param("sessionID"), &sessionID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter sessionID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "pageID" -------------
+	var pageID openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "pageID", c.Param("pageID"), &pageID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter pageID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.CloseBrowserPage(c, projectID, sessionID, pageID)
+}
+
+// GetBrowserPage operation middleware
+func (siw *ServerInterfaceWrapper) GetBrowserPage(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID BrowserProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "sessionID" -------------
+	var sessionID BrowserSessionID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "sessionID", c.Param("sessionID"), &sessionID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter sessionID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "pageID" -------------
+	var pageID openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "pageID", c.Param("pageID"), &pageID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter pageID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetBrowserPage(c, projectID, sessionID, pageID)
 }
 
 // ListProjectMembers operation middleware
@@ -5372,6 +5995,9 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions", wrapper.CreateBrowserSession)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID", wrapper.GetBrowserSession)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID/navigate", wrapper.NavigateBrowserSession)
+	router.POST(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID/pages", wrapper.OpenBrowserPage)
+	router.DELETE(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID/pages/:pageID", wrapper.CloseBrowserPage)
+	router.GET(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID/pages/:pageID", wrapper.GetBrowserPage)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/sites/:siteName/versions", wrapper.UploadStaticSiteVersion)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/sites/:siteName/versions/:versionID", wrapper.GetStaticSiteVersion)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/secrets", wrapper.ListProjectSecrets)
