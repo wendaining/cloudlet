@@ -542,6 +542,48 @@ paths:
           $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/artifact:
+    parameters:
+      - $ref: '#/components/parameters/SiteProjectID'
+      - $ref: '#/components/parameters/SiteName'
+      - name: versionID
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: downloadStaticSiteArtifact
+      description: 项目成员下载指定站点版本的原始 ZIP。
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 原始 ZIP 的全部字节
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+            Content-Length:
+              schema:
+                type: integer
+                format: int64
+            Content-Digest:
+              description: ZIP 内容的 SHA-256 摘要。
+              schema:
+                type: string
+          content:
+            application/zip:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '503':
+          $ref: '#/components/responses/Error'
   /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/publish:
     parameters:
       - $ref: '#/components/parameters/SiteProjectID'

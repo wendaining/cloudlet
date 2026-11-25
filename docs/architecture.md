@@ -76,6 +76,7 @@ PostgreSQL 当前保存账号、登录会话、项目、操作记录、项目凭
 | /api/v1/projects/{projectID}/sites/{siteName}/versions | GET | 项目成员分页查询指定站点的版本摘要 |
 | /api/v1/projects/{projectID}/sites/{siteName}/versions | POST | 所有者上传 ZIP 并登记待激活版本 |
 | /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID} | GET | 项目成员查询指定版本及其产物摘要 |
+| /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/artifact | GET | 项目成员下载原始 ZIP 并读取内容摘要 |
 | /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/publish | POST | 所有者绑定域名、激活首个就绪版本并获取 Gateway 地址 |
 | /api/v1/projects/{projectID}/secrets | GET、POST | 列出项目凭据元数据；所有者追加加密版本 |
 | /api/v1/projects/{projectID}/secrets/{name} | GET | 列出项目凭据的版本元数据 |
@@ -101,6 +102,8 @@ Gateway 使用配置中的 `host` 匹配请求域名，匹配时忽略大小写�
 静态站点以项目和名称确定身份。所有者使用 `Content-Type: application/zip` 上传，服务保存原始 ZIP，再展开并登记版本。上传体上限为 64 MiB，展开上限为 256 MiB，ZIP 中央目录在完整解析前检查 10,000 个成员的上限。解包前拒绝超过 255 字节的路径分量。成功响应返回版本标识、SHA-256 摘要、`ready` 状态和用于查询的 `Location`。`ready` 表示文件已准备就绪。
 
 首次发布时，所有者提交一个不带端口的域名。服务先核对版本归属和入口文件，再在同一 PostgreSQL 事务中绑定域名根路由、记录激活版本并递增路由快照版本。快照生效后返回规范域名、版本标识和 Gateway 的 HTTP 地址。发布会保留该项目其他路由。启动配置保留的域名、其他项目已占用的域名和已有根路由均返回 409。相同版本和域名的请求可重试，首次发布接口拒绝切换已有发布的版本或域名。重启时从数据库恢复代理路由和静态站点路由。
+
+下载接口先验证项目成员权限和站点版本归属，再按版本摘要打开原始 ZIP 并流式返回。响应提供附件文件名、文件长度和 `Content-Digest`，并声明 `Cache-Control: private, no-store`。
 
 管理环境通过 PostgreSQL 保存账号与会话，使用 bcrypt 校验密码，使用 SCS 管理 HttpOnly 会话 Cookie。Cookie 名称包含实例名称，写入请求执行来源检查。开发账号经显式初始化流程创建，重复初始化保留已有密码。
 

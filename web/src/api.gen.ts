@@ -372,6 +372,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/artifact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["SiteProjectID"];
+                siteName: components["parameters"]["SiteName"];
+                versionID: string;
+            };
+            cookie?: never;
+        };
+        /** @description 项目成员下载指定站点版本的原始 ZIP。 */
+        get: operations["downloadStaticSiteArtifact"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/publish": {
         parameters: {
             query?: never;
@@ -1427,6 +1448,38 @@ export interface operations {
             200: components["responses"]["StaticSiteVersion"];
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    downloadStaticSiteArtifact: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["SiteProjectID"];
+                siteName: components["parameters"]["SiteName"];
+                versionID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 原始 ZIP 的全部字节 */
+            200: {
+                headers: {
+                    "Content-Disposition"?: string;
+                    "Content-Length"?: number;
+                    /** @description ZIP 内容的 SHA-256 摘要。 */
+                    "Content-Digest"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/zip": string;
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            503: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };

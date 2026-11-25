@@ -660,6 +660,11 @@ type ClientInterface interface {
 	// 项目成员按标识读取一个静态站点版本。.
 	GetStaticSiteVersion(ctx context.Context, projectID SiteProjectID, siteName SiteName, versionID string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// DownloadStaticSiteArtifact performs a GET /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/artifact (the `DownloadStaticSiteArtifact` operationId) request.
+	//
+	// 项目成员下载指定站点版本的原始 ZIP。.
+	DownloadStaticSiteArtifact(ctx context.Context, projectID SiteProjectID, siteName SiteName, versionID string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// PublishStaticSiteVersionWithBody performs a POST /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/publish (the `PublishStaticSiteVersion` operationId) request,
 	// with any type of body and a specified content type.
 	//
@@ -1172,6 +1177,21 @@ func (c *Client) UploadStaticSiteVersionWithBody(ctx context.Context, projectID 
 // 项目成员按标识读取一个静态站点版本。.
 func (c *Client) GetStaticSiteVersion(ctx context.Context, projectID SiteProjectID, siteName SiteName, versionID string, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetStaticSiteVersionRequest(c.Server, projectID, siteName, versionID)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// DownloadStaticSiteArtifact performs a GET /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/artifact (the `DownloadStaticSiteArtifact` operationId) request.
+//
+// 项目成员下载指定站点版本的原始 ZIP。.
+func (c *Client) DownloadStaticSiteArtifact(ctx context.Context, projectID SiteProjectID, siteName SiteName, versionID string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDownloadStaticSiteArtifactRequest(c.Server, projectID, siteName, versionID)
 	if err != nil {
 		return nil, err
 	}
@@ -2447,6 +2467,54 @@ func NewGetStaticSiteVersionRequest(server string, projectID SiteProjectID, site
 	return req, nil
 }
 
+// NewDownloadStaticSiteArtifactRequest constructs an http.Request for the DownloadStaticSiteArtifact method
+func NewDownloadStaticSiteArtifactRequest(server string, projectID SiteProjectID, siteName SiteName, versionID string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "siteName", siteName, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "versionID", versionID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/sites/%s/versions/%s/artifact", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewPublishStaticSiteVersionRequest calls the generic PublishStaticSiteVersion builder with application/json body
 func NewPublishStaticSiteVersionRequest(server string, projectID SiteProjectID, siteName SiteName, versionID string, body PublishStaticSiteVersionJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -2891,6 +2959,13 @@ type ClientWithResponsesInterface interface {
 	//
 	// Returns a wrapper object for the known response body format(s).
 	GetStaticSiteVersionWithResponse(ctx context.Context, projectID SiteProjectID, siteName SiteName, versionID string, reqEditors ...RequestEditorFn) (*GetStaticSiteVersionResponse, error)
+
+	// DownloadStaticSiteArtifactWithResponse performs a GET /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/artifact (the `DownloadStaticSiteArtifact` operationId) request.
+	//
+	// 项目成员下载指定站点版本的原始 ZIP。.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	DownloadStaticSiteArtifactWithResponse(ctx context.Context, projectID SiteProjectID, siteName SiteName, versionID string, reqEditors ...RequestEditorFn) (*DownloadStaticSiteArtifactResponse, error)
 
 	// PublishStaticSiteVersionWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/publish (the `PublishStaticSiteVersion` operationId) request,
 	// with any type of body and a specified content type.
@@ -4676,6 +4751,77 @@ func (r GetStaticSiteVersionResponse) ContentType() string {
 	return ""
 }
 
+// DownloadStaticSiteArtifactResponse200Headers the declared response headers of an HTTP 200 response for DownloadStaticSiteArtifact
+type DownloadStaticSiteArtifactResponse200Headers struct {
+	ContentDigest      *string
+	ContentDisposition *string
+	ContentLength      *int64
+}
+
+type DownloadStaticSiteArtifactResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Error
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *Error
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *Error
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+	// Headers200 the parsed response headers for an HTTP 200 response
+	Headers200 *DownloadStaticSiteArtifactResponse200Headers
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r DownloadStaticSiteArtifactResponse) GetJSON401() *Error {
+	return r.JSON401
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r DownloadStaticSiteArtifactResponse) GetJSON404() *Error {
+	return r.JSON404
+}
+
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r DownloadStaticSiteArtifactResponse) GetJSON503() *Error {
+	return r.JSON503
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r DownloadStaticSiteArtifactResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r DownloadStaticSiteArtifactResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r DownloadStaticSiteArtifactResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DownloadStaticSiteArtifactResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r DownloadStaticSiteArtifactResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type PublishStaticSiteVersionResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -5457,6 +5603,19 @@ func (c *ClientWithResponses) GetStaticSiteVersionWithResponse(ctx context.Conte
 		return nil, err
 	}
 	return ParseGetStaticSiteVersionResponse(rsp)
+}
+
+// DownloadStaticSiteArtifactWithResponse performs a GET /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/artifact (the `DownloadStaticSiteArtifact` operationId) request.
+//
+// 项目成员下载指定站点版本的原始 ZIP。.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) DownloadStaticSiteArtifactWithResponse(ctx context.Context, projectID SiteProjectID, siteName SiteName, versionID string, reqEditors ...RequestEditorFn) (*DownloadStaticSiteArtifactResponse, error) {
+	rsp, err := c.DownloadStaticSiteArtifact(ctx, projectID, siteName, versionID, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDownloadStaticSiteArtifactResponse(rsp)
 }
 
 // PublishStaticSiteVersionWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/publish (the `PublishStaticSiteVersion` operationId) request,
@@ -6882,6 +7041,80 @@ func ParseGetStaticSiteVersionResponse(rsp *http.Response) (*GetStaticSiteVersio
 	return response, nil
 }
 
+// ParseDownloadStaticSiteArtifactResponse parses an HTTP response from a DownloadStaticSiteArtifactWithResponse call
+func ParseDownloadStaticSiteArtifactResponse(rsp *http.Response) (*DownloadStaticSiteArtifactResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DownloadStaticSiteArtifactResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 200:
+		var headers DownloadStaticSiteArtifactResponse200Headers
+		if values := rsp.Header.Values("Content-Digest"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Content-Digest", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.ContentDigest = &value
+		}
+		if values := rsp.Header.Values("Content-Disposition"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Content-Disposition", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.ContentDisposition = &value
+		}
+		if values := rsp.Header.Values("Content-Length"); len(values) > 0 {
+			var value int64
+			if err := runtime.BindStyledParameterWithOptions("simple", "Content-Length", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: "int64"}); err != nil {
+				return nil, err
+			}
+			headers.ContentLength = &value
+		}
+		response.Headers200 = &headers
+	}
+
+	return response, nil
+}
+
 // ParsePublishStaticSiteVersionResponse parses an HTTP response from a PublishStaticSiteVersionWithResponse call
 func ParsePublishStaticSiteVersionResponse(rsp *http.Response) (*PublishStaticSiteVersionResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -7306,6 +7539,9 @@ type ServerInterface interface {
 
 	// (GET /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID})
 	GetStaticSiteVersion(c *gin.Context, projectID SiteProjectID, siteName SiteName, versionID string)
+
+	// (GET /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/artifact)
+	DownloadStaticSiteArtifact(c *gin.Context, projectID SiteProjectID, siteName SiteName, versionID string)
 
 	// (POST /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/publish)
 	PublishStaticSiteVersion(c *gin.Context, projectID SiteProjectID, siteName SiteName, versionID string)
@@ -8130,6 +8366,49 @@ func (siw *ServerInterfaceWrapper) GetStaticSiteVersion(c *gin.Context) {
 	siw.Handler.GetStaticSiteVersion(c, projectID, siteName, versionID)
 }
 
+// DownloadStaticSiteArtifact operation middleware
+func (siw *ServerInterfaceWrapper) DownloadStaticSiteArtifact(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID SiteProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "siteName" -------------
+	var siteName SiteName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "siteName", c.Param("siteName"), &siteName, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter siteName: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "versionID" -------------
+	var versionID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "versionID", c.Param("versionID"), &versionID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter versionID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.DownloadStaticSiteArtifact(c, projectID, siteName, versionID)
+}
+
 // PublishStaticSiteVersion operation middleware
 func (siw *ServerInterfaceWrapper) PublishStaticSiteVersion(c *gin.Context) {
 
@@ -8333,6 +8612,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/sites/:siteName/versions", wrapper.ListStaticSiteVersions)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/sites/:siteName/versions", wrapper.UploadStaticSiteVersion)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/sites/:siteName/versions/:versionID", wrapper.GetStaticSiteVersion)
+	router.GET(options.BaseURL+"/api/v1/projects/:projectID/sites/:siteName/versions/:versionID/artifact", wrapper.DownloadStaticSiteArtifact)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/sites/:siteName/versions/:versionID/publish", wrapper.PublishStaticSiteVersion)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/secrets", wrapper.ListProjectSecrets)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/secrets", wrapper.CreateProjectSecretVersion)
