@@ -21,7 +21,7 @@ func (h *handler) OpenBrowserPage(c *gin.Context, projectID string, sessionID uu
 		return
 	}
 	c.Header("Location", c.Request.URL.EscapedPath()+"/"+page.ID.String())
-	c.JSON(http.StatusCreated, apigen.BrowserPage{Id: page.ID, Url: page.URL, Title: page.Title})
+	c.JSON(http.StatusCreated, apigen.BrowserPage{Id: page.ID, Url: page.URL, Title: page.Title, UrlTruncated: page.URLTruncated, TitleTruncated: page.TitleTruncated})
 }
 
 func (h *handler) GetBrowserPage(c *gin.Context, projectID string, sessionID, pageID uuid.UUID) {
@@ -34,7 +34,7 @@ func (h *handler) GetBrowserPage(c *gin.Context, projectID string, sessionID, pa
 		h.pageFailure(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, apigen.BrowserPage{Id: page.ID, Url: page.URL, Title: page.Title})
+	c.JSON(http.StatusOK, apigen.BrowserPage{Id: page.ID, Url: page.URL, Title: page.Title, UrlTruncated: page.URLTruncated, TitleTruncated: page.TitleTruncated})
 }
 
 func (h *handler) CloseBrowserPage(c *gin.Context, projectID string, sessionID, pageID uuid.UUID) {

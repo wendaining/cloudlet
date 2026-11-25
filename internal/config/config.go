@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 )
 
@@ -24,17 +25,45 @@ type Route struct {
 }
 
 type Config struct {
-	Environment          string  `json:"environment,omitempty"`
-	Instance             string  `json:"instance,omitempty"`
-	PublicOrigin         string  `json:"public_origin,omitempty"`
-	SecretKey            []byte  `json:"-"`
-	BrowserImage         string  `json:"-"`
-	BrowserSeccomp       string  `json:"-"`
-	DatabaseURL          string  `json:"-"`
-	SiteStorageDirectory string  `json:"site_storage_directory,omitempty"`
-	APIAddress           string  `json:"api_address"`
-	GatewayAddress       string  `json:"gateway_address"`
-	Routes               []Route `json:"routes"`
+	Environment            string         `json:"environment,omitempty"`
+	Instance               string         `json:"instance,omitempty"`
+	PublicOrigin           string         `json:"public_origin,omitempty"`
+	SecretKey              []byte         `json:"-"`
+	BrowserImage           string         `json:"-"`
+	BrowserSeccomp         string         `json:"-"`
+	BrowserSessionLifetime time.Duration  `json:"-"`
+	DatabaseURL            string         `json:"-"`
+	SiteStorageDirectory   string         `json:"site_storage_directory,omitempty"`
+	APIAddress             string         `json:"api_address"`
+	GatewayAddress         string         `json:"gateway_address"`
+	Routes                 []Route        `json:"routes"`
+	Workers                *WorkerRuntime `json:"workers,omitempty"`
+}
+
+type ResourceBudget struct {
+	CPUMillis   int64 `json:"cpu_millis"`
+	MemoryBytes int64 `json:"memory_bytes"`
+	Instances   int64 `json:"instances"`
+}
+
+// WorkerRuntime explicitly configures runtime storage and admission budgets.
+type WorkerRuntime struct {
+	Directory    string         `json:"directory"`
+	HostID       string         `json:"host_id"`
+	HostBudget   ResourceBudget `json:"host_budget"`
+	ProjectQuota ResourceBudget `json:"project_quota"`
+}
+
+func (w WorkerRuntime) Validate() error {
+	if !filepath.IsAbs(w.Directory) || w.HostID == "" || len(w.HostID) > 64 || strings.TrimSpace(w.HostID) != w.HostID {
+		return errors.New("Worker runtime requires an absolute directory and a host identifier of 1 to 64 bytes")
+	}
+	for _, budget := range []ResourceBudget{w.HostBudget, w.ProjectQuota} {
+		if budget.CPUMillis < 1000 || budget.MemoryBytes < 256<<20 || budget.Instances < 1 {
+			return errors.New("Worker budgets must provide at least 1000 CPU millicores, 256 MiB memory and one instance")
+		}
+	}
+	return nil
 }
 
 func Load(path string) (Config, error) {
@@ -56,6 +85,13 @@ func Load(path string) (Config, error) {
 	cfg.DatabaseURL = os.Getenv("CLOUDLET_DATABASE_URL")
 	cfg.BrowserImage = os.Getenv("CLOUDLET_BROWSER_IMAGE")
 	cfg.BrowserSeccomp = os.Getenv("CLOUDLET_BROWSER_SECCOMP")
+	if value := os.Getenv("CLOUDLET_BROWSER_SESSION_SECONDS"); value != "" {
+		seconds, err := strconv.ParseUint(value, 10, 32)
+		if err != nil || seconds < 5 || seconds > 300 {
+			return Config{}, errors.New("CLOUDLET_BROWSER_SESSION_SECONDS must be an integer from 5 to 300")
+		}
+		cfg.BrowserSessionLifetime = time.Duration(seconds) * time.Second
+	}
 	if value := os.Getenv("CLOUDLET_SECRET_KEY"); value != "" {
 		key, err := hex.DecodeString(value)
 		if err != nil || len(key) != 32 {
@@ -70,6 +106,14 @@ func Load(path string) (Config, error) {
 }
 
 func (cfg Config) Validate() error {
+	if cfg.Workers != nil {
+		if cfg.DatabaseURL == "" || cfg.Instance == "" {
+			return errors.New("Worker runtime requires a management database and instance")
+		}
+		if err := cfg.Workers.Validate(); err != nil {
+			return err
+		}
+	}
 	if cfg.BrowserImage != "" || cfg.BrowserSeccomp != "" {
 		if cfg.DatabaseURL == "" || cfg.Instance == "" || cfg.BrowserImage == "" || !filepath.IsAbs(cfg.BrowserSeccomp) {
 			return errors.New("Browser Run requires a management database, instance, image ID and absolute seccomp profile path")

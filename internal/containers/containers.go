@@ -124,6 +124,8 @@ type Spec struct {
 	Access    AccessMode
 	Network   string
 	Limits    Limits
+	Files     []File
+
 	// ChromiumSeccompProfile enables the hardened Chromium container settings.
 	// It must come from platform configuration, not a management API request.
 	ChromiumSeccompProfile string
@@ -191,6 +193,7 @@ type Observation struct {
 	PIDs        int64
 	OpenFiles   int64
 	Ports       []PublishedPort
+	FilesDigest string
 	Endpoints   []NetworkEndpoint
 }
 
@@ -309,6 +312,9 @@ func (s Spec) Validate() error {
 }
 
 func (s Spec) validate() error {
+	if _, err := filesDigest(s.Files); err != nil {
+		return err
+	}
 	if err := s.Ownership.validate(); err != nil {
 		return err
 	}
@@ -488,6 +494,7 @@ func observe(info container.InspectResponse) (Observation, error) {
 	}
 	if info.Config != nil {
 		observation.Image = info.Config.Image
+		observation.FilesDigest = info.Config.Labels["io.cloudlet.files-digest"]
 	}
 	if observation.Image == "" {
 		observation.Image = info.Image

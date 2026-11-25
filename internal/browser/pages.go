@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"time"
+	"unicode/utf16"
 
 	"github.com/google/uuid"
 )
@@ -20,9 +21,11 @@ var (
 )
 
 type Page struct {
-	ID    uuid.UUID `json:"id"`
-	URL   string    `json:"url"`
-	Title string    `json:"title"`
+	ID             uuid.UUID `json:"id"`
+	URL            string    `json:"url"`
+	Title          string    `json:"title"`
+	TitleTruncated bool      `json:"title_truncated"`
+	URLTruncated   bool      `json:"url_truncated"`
 }
 
 func (s *Service) OpenPage(ctx context.Context, projectID, sessionID uuid.UUID) (Page, error) {
@@ -90,7 +93,7 @@ func (s *Service) pageRequest(ctx context.Context, projectID, sessionID uuid.UUI
 	var extra any
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) || reader.N == 0 ||
 		page.ID == uuid.Nil || (pageID != nil && page.ID != *pageID) ||
-		(page.URL != "about:blank" && !validURL(page.URL)) {
+		(page.URL != "about:blank" && !validURL(page.URL)) || len(utf16.Encode([]rune(page.Title))) > 512 {
 		return Page{}, ErrPageRuntime
 	}
 	return page, nil

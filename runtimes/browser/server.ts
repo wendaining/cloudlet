@@ -4,7 +4,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { chromium, errors } from 'playwright';
 import { readSessionDeadline } from './session-deadline.ts';
 import { readViewport } from './viewport.ts';
-import { pageIDPattern, sessionPages, type PageState } from './pages.ts';
+import { collectConsole } from './console-history.ts';
+import { limitPageTitle, pageIDPattern, sessionPages, type PageState } from './pages.ts';
 
 const token = process.env.CLOUDLET_BROWSER_TOKEN;
 if (!token || !/^[A-Za-z0-9_-]{32,}$/.test(token)) {
@@ -134,11 +135,13 @@ function checkExpiry() {
 checkExpiry();
 let defaultPage: PageState;
 let additionalPages: ReturnType<typeof sessionPages>;
+const consoleLog = collectConsole();
 if (!stopping) {
   try {
     const context = await browser.newContext(viewportOptions);
     defaultPage = { page: await context.newPage(), hasPage: false };
-    additionalPages = sessionPages(context);
+    consoleLog.attach(defaultPage.page);
+    additionalPages = sessionPages(context, consoleLog.attach);
   } catch (error) {
     if (!stopping) {
       await shutdown(1);
@@ -154,7 +157,7 @@ async function navigate(state: PageState, url: URL) {
   const title = await page.title();
   const currentURL = page.url();
   state.hasPage = isWebURL(currentURL);
-  return { url: currentURL, title };
+  return { url: currentURL, title: state === defaultPage ? title : limitPageTitle(title) };
 }
 
 async function handle(request: IncomingMessage, response: ServerResponse) {
@@ -164,11 +167,12 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
   }
   const screenshot = request.url === '/screenshot';
   const viewport = request.method === 'GET' && request.url === '/viewport';
+  const consoleHistory = request.method === 'GET' && request.url === '/console';
   const openPage = request.method === 'POST' && request.url === '/pages';
   const namedPage = request.url?.startsWith('/pages/') ? request.url.slice('/pages/'.length) : undefined;
   const pageRequest = openPage || (namedPage !== undefined && pageIDPattern.test(namedPage) &&
     (request.method === 'GET' || request.method === 'DELETE'));
-  if (!viewport && !pageRequest && (request.method !== 'POST' || (!screenshot && request.url !== '/navigate'))) {
+  if (!viewport && !consoleHistory && !pageRequest && (request.method !== 'POST' || (!screenshot && request.url !== '/navigate'))) {
     send(response, 404, { error: 'not_found' });
     return;
   }
@@ -177,6 +181,10 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
   if (provided.length !== credential.length || !timingSafeEqual(provided, credential)) {
     response.setHeader('WWW-Authenticate', 'Bearer');
     send(response, 401, { error: 'unauthorized' });
+    return;
+  }
+  if (consoleHistory) {
+    send(response, 200, consoleLog.read());
     return;
   }
   const command = viewport || pageRequest ? undefined : await readCommand(request, screenshot);

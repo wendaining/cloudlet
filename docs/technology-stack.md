@@ -67,6 +67,8 @@ Durable Objects 的 SQLite 存储由 workerd 管理。Browser Run 复用容器�
 
 项目的 workerd 容器承载其 Worker 与 DO，每个用户容器和浏览器会话拥有独立执行实例。Go 重启后通过元数据与实际观测重新接管。运行时版本、原生能力和资源限制经过验证后记录，要求未支持能力的部署返回错误。
 
+首个无状态 Worker 使用共享管理 API 发布。`pkg/client.PublishWorker` 调用生成的接口客户端，保留会话认证与重定向拒绝，提供 95 秒请求上限以涵盖发布和失败清理。`GetWorkerDeployment` 读取同一版本、执行与操作结果。模块与配置通过标准库 `archive/tar` 和 Docker Engine 的文件复制接口提供给容器，并以只读文件权限安装。
+
 CLI 使用 `cloudlet projects list` 列出当前会话可访问的项目，使用 `cloudlet projects get <project-id>` 查看单个项目。管理 API 地址通过项目命令的 `--endpoint` 配置；现有会话 Cookie 通过 `--cookie` 或 `CLOUDLET_COOKIE` 提供。默认表格输出适合终端阅读，`--output json` 输出供脚本处理的 JSON。项目查询复用 `pkg/client` 的生成 API 客户端，并由服务端执行项目访问控制。管理 API 客户端不跟随重定向，避免将会话 Cookie 转发至其他地址；健康检查保留原有行为。
 
 可以通过环境变量传入实例 Cookie，避免把会话值放入命令历史：
