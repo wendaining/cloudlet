@@ -718,6 +718,80 @@ paths:
           $ref: "#/components/responses/Error"
         default:
           $ref: "#/components/responses/Error"
+  /api/v1/projects/{projectID}/s3-bindings:
+    parameters:
+      - name: projectID
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      operationId: createS3Binding
+      description: 项目所有者登记 S3 绑定。连接验证成功后保存。
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/S3BindingInput'
+      responses:
+        '201':
+          description: 已验证的绑定
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/S3Binding'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+        '422':
+          $ref: '#/components/responses/Error'
+        '503':
+          $ref: '#/components/responses/Error'
+        default:
+          $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/s3-bindings/{name}:
+    parameters:
+      - name: projectID
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+          maxLength: 63
+    get:
+      operationId: getS3Binding
+      description: 项目成员查询 S3 绑定元数据与验证时间。
+      security:
+        - SessionCookie: []
+      responses:
+        '200':
+          description: 绑定元数据
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/S3Binding'
+        '401':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        default:
+          $ref: '#/components/responses/Error'
+
 components:
   parameters:
     BrowserProjectID:
@@ -816,6 +890,55 @@ components:
           format: uuid
         name:
           type: string
+    S3BindingInput:
+      type: object
+      required: [ name, endpoint, region, bucket, secret_version_id ]
+      properties:
+        name:
+          type: string
+          pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+          maxLength: 63
+        endpoint:
+          type: string
+          minLength: 1
+          maxLength: 512
+        region:
+          type: string
+          minLength: 1
+          maxLength: 63
+        bucket:
+          type: string
+          minLength: 3
+          maxLength: 63
+        secret_version_id:
+          type: string
+          format: uuid
+    S3Binding:
+      type: object
+      required: [ name, endpoint, region, bucket, secret_version_id, verified_at ]
+      properties:
+        name:
+          type: string
+          pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+          maxLength: 63
+        endpoint:
+          type: string
+          minLength: 1
+          maxLength: 512
+        region:
+          type: string
+          minLength: 1
+          maxLength: 63
+        bucket:
+          type: string
+          minLength: 3
+          maxLength: 63
+        secret_version_id:
+          type: string
+          format: uuid
+        verified_at:
+          type: string
+          format: date-time
     ProjectRole:
       type: string
       enum: [owner, developer, viewer]
