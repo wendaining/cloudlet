@@ -137,6 +137,25 @@ export interface paths {
         patch: operations["renameProject"];
         trace?: never;
     };
+    "/api/v1/projects/{projectID}/capacity": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        /** @description 返回项目成员可见的项目额度、活动预留占用和剩余量；三个值来自同一数据库快照。 */
+        get: operations["getProjectCapacity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{projectID}/members": {
         parameters: {
             query?: never;
@@ -208,7 +227,8 @@ export interface paths {
         get: operations["getBrowserSession"];
         put?: never;
         post?: never;
-        delete?: never;
+        /** @description 停止容器并确认清理，释放容量后返回会话终态。重复关闭返回已有终态。 */
+        delete: operations["closeBrowserSession"];
         options?: never;
         head?: never;
         patch?: never;
@@ -227,6 +247,25 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["navigateBrowserSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/browser-sessions/{sessionID}/console": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        get: operations["getBrowserConsole"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -354,6 +393,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{projectID}/workers/{name}/deployments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 发布首个无状态 Worker 版本，等待真实运行时就绪并激活域名。所有者和开发者可以调用。同一幂等键复用操作。 */
+        post: operations["deployWorker"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/worker-deployments/{deploymentID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+                deploymentID: string;
+            };
+            cookie?: never;
+        };
+        /** @description 项目成员查询不可变 Worker 版本、执行与操作结果。 */
+        get: operations["getWorkerDeployment"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -390,6 +469,31 @@ export interface components {
         };
         /** @enum {string} */
         ProjectRole: "owner" | "developer" | "viewer";
+        ResourceAmounts: {
+            /**
+             * Format: int64
+             * @description CPU 毫核。
+             */
+            cpu_millis: number;
+            /**
+             * Format: int64
+             * @description 内存字节。
+             */
+            memory_bytes: number;
+            /**
+             * Format: int64
+             * @description 实例数。
+             */
+            instances: number;
+        };
+        /** @description 项目配额与活动预留快照。used 可能超过 limit；remaining 是按资源钳制后的额度内余量，不表示超用标记。 */
+        ProjectCapacity: {
+            /** Format: uuid */
+            project_id: string;
+            limit: components["schemas"]["ResourceAmounts"];
+            used: components["schemas"]["ResourceAmounts"];
+            remaining: components["schemas"]["ResourceAmounts"];
+        };
         /** @enum {string} */
         ProjectMemberRole: "developer" | "viewer";
         ProjectMember: {
@@ -442,6 +546,21 @@ export interface components {
             user: components["schemas"]["User"];
             projects: components["schemas"]["Project"][];
         };
+        BrowserConsoleEntry: {
+            /** @description console 表示控制台消息，page_error 表示未捕获的页面错误 */
+            kind: string;
+            level: string;
+            message: string;
+            truncated: boolean;
+        };
+        BrowserConsole: {
+            entries: components["schemas"]["BrowserConsoleEntry"][];
+            /**
+             * Format: int64
+             * @description 已从会话历史移除的旧记录数
+             */
+            dropped: number;
+        };
         BrowserPageText: {
             title: string;
             title_truncated: boolean;
@@ -493,6 +612,50 @@ export interface components {
         };
         Error: {
             message: string;
+        };
+        DeployWorkerRequest: {
+            /** @description 已打包的单文件 JavaScript ES Module，UTF-8 编码后最多 1048576 字节。入口固定为 index.mjs。 */
+            module: string;
+            /**
+             * Format: date
+             * @description 固定 workerd 支持的兼容日期。
+             */
+            compatibility_date: string;
+            /** @description 无端口的公开域名。 */
+            hostname: string;
+        };
+        WorkerDeployment: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            project_id: string;
+            /** Format: uuid */
+            worker_id: string;
+            /** Format: uuid */
+            execution_id: string;
+            /** Format: uuid */
+            operation_id: string;
+            artifact_digest: string;
+            config_digest: string;
+            entry: string;
+            compatibility_date: string;
+            runtime_version: string;
+            runtime_image: string;
+            hostname: string;
+            state: string;
+            failure: string;
+            container_id: string;
+            execution_state: string;
+            operation_phase: string;
+            operation_outcome: string;
+            /** Format: int64 */
+            cpu_millis: number;
+            /** Format: int64 */
+            memory_bytes: number;
+            /** Format: int64 */
+            generation: number;
+            /** Format: date-time */
+            created_at: string;
         };
     };
     responses: {
@@ -773,6 +936,31 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    getProjectCapacity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 项目 CPU、内存与实例容量使用快照 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectCapacity"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     listProjectMembers: {
         parameters: {
             query?: never;
@@ -896,6 +1084,32 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    closeBrowserSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已结束的浏览器会话 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrowserSession"];
+                };
+            };
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
     navigateBrowserSession: {
         parameters: {
             query?: never;
@@ -919,6 +1133,30 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BrowserNavigation"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getBrowserConsole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 会话的最近控制台消息和页面错误 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrowserConsole"];
                 };
             };
             default: components["responses"]["Error"];
@@ -1105,6 +1343,135 @@ export interface operations {
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    deployWorker: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                projectID: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeployWorkerRequest"];
+            };
+        };
+        responses: {
+            /** @description 已存在的发布结果 */
+            200: {
+                headers: {
+                    /** @description 已登记版本的项目内查询地址。版本尚未登记时省略。 */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerDeployment"];
+                };
+            };
+            /** @description 新 Worker 发布结果 */
+            201: {
+                headers: {
+                    /** @description 已登记版本的项目内查询地址。版本尚未登记时省略。 */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerDeployment"];
+                };
+            };
+            /** @description Worker 发布请求参数无效 */
+            400: {
+                headers: {
+                    /** @description 已登记版本的项目内查询地址。版本尚未登记时省略。 */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            /** @description Worker 发布请求冲突 */
+            409: {
+                headers: {
+                    /** @description 已登记版本的项目内查询地址。版本尚未登记时省略。 */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 运行时预检或就绪检查失败 */
+            422: {
+                headers: {
+                    /** @description 已登记版本的项目内查询地址。版本尚未登记时省略。 */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerDeployment"];
+                };
+            };
+            /** @description 容量不足 */
+            429: {
+                headers: {
+                    /** @description 已登记版本的项目内查询地址。版本尚未登记时省略。 */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerDeployment"];
+                };
+            };
+            /** @description Worker 发布步骤失败 */
+            500: {
+                headers: {
+                    /** @description 已登记版本的项目内查询地址。版本尚未登记时省略。 */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getWorkerDeployment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+                deploymentID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Worker 发布结果 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerDeployment"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            503: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };

@@ -196,6 +196,15 @@ type Usage struct {
 	ProjectUsed  Resources
 }
 
+// ProjectUsage reports the configured project quota, the resources held by
+// active reservations, and the quota still available to the project.
+type ProjectUsage struct {
+	ProjectID uuid.UUID
+	Limit     Resources
+	Used      Resources
+	Remaining Resources
+}
+
 // Store reserves capacity in PostgreSQL. It is safe for concurrent use.
 type Store struct {
 	db *gorm.DB
@@ -848,6 +857,40 @@ func (s *Store) Usage(ctx context.Context, hostID string, projectID uuid.UUID) (
 	return result, nil
 }
 
+// ProjectUsage returns the project quota and active usage from one
+// repeatable-read snapshot. Remaining is clamped at zero for each resource.
+func (s *Store) ProjectUsage(ctx context.Context, projectID uuid.UUID) (ProjectUsage, error) {
+	if projectID == uuid.Nil {
+		return ProjectUsage{}, fmt.Errorf("查询项目容量占用需要项目标识: %w", fs.ErrInvalid)
+	}
+	var result ProjectUsage
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var quota projectQuotaRow
+		if err := tx.Where("project_id = ?", projectID).Take(&quota).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("%w: %s", ErrProjectQuotaNotFound, projectID)
+			}
+			return fmt.Errorf("读取项目 %s 的配额: %w", projectID, err)
+		}
+		used, err := projectUsage(tx, projectID, uuid.Nil)
+		if err != nil {
+			return err
+		}
+		limit := quota.resources()
+		result = ProjectUsage{
+			ProjectID: projectID,
+			Limit:     limit,
+			Used:      used,
+			Remaining: remainingResources(limit, used),
+		}
+		return nil
+	}, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		return ProjectUsage{}, err
+	}
+	return result, nil
+}
+
 func hostUsage(tx *gorm.DB, hostID string, exclude uuid.UUID) (Resources, error) {
 	query := `SELECT COALESCE(SUM(cpu_millis), 0)::bigint AS cpu_millis,
 		COALESCE(SUM(memory_bytes), 0)::bigint AS memory_bytes,
@@ -904,6 +947,14 @@ func available(limit, used int64) int64 {
 		return 0
 	}
 	return limit - used
+}
+
+func remainingResources(limit, used Resources) Resources {
+	return Resources{
+		CPUMillis:   available(limit.CPUMillis, used.CPUMillis),
+		MemoryBytes: available(limit.MemoryBytes, used.MemoryBytes),
+		Instances:   available(limit.Instances, used.Instances),
+	}
 }
 
 func ensureCapacityAtLeast(scope, id string, limit, used Resources) error {

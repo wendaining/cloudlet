@@ -11,13 +11,14 @@ export async function readPageText(page: Page, selector: string | null) {
       } catch {
         return { error: 'invalid_scope' } as const;
       }
-      const visibility = getComputedStyle(element).visibility;
-      if (!element.getClientRects().length || visibility !== 'visible') {
-        return { error: 'scope_unavailable' } as const;
-      }
     }
     const title = document.title;
-    const text = element?.innerText ?? '';
+    const rendered = element !== null && element.checkVisibility({ visibilityProperty: true });
+    if (!rendered && scope !== null) {
+      return { error: 'scope_unavailable' } as const;
+    }
+    // innerText falls back to textContent when the element is not rendered.
+    const text = rendered ? (element.innerText ?? '') : '';
     return {
       title: title.slice(0, 512).toWellFormed(),
       title_truncated: title.length > 512,
