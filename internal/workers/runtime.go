@@ -81,13 +81,25 @@ func prepare(bundleDir, entry, compatibilityDate string, namespaces []durableobj
 	if err != nil {
 		return RuntimeConfig{}, fmt.Errorf("read entry %q in bundle %q: %w", entry, bundleDir, err)
 	}
+	return prepareModule(entry, module, compatibilityDate, namespaces)
+}
+
+// PrepareModule prepares a bundled ES module already read from an upload.
+func PrepareModule(module []byte, compatibilityDate string) (RuntimeConfig, error) {
+	return prepareModule("index.mjs", module, compatibilityDate, nil)
+}
+
+func prepareModule(entry string, module []byte, compatibilityDate string, namespaces []durableobjects.Namespace) (RuntimeConfig, error) {
+	if err := validateCompatibilityDate(compatibilityDate, time.Now()); err != nil {
+		return RuntimeConfig{}, err
+	}
 	if !utf8.Valid(module) || len(bytes.TrimSpace(module)) == 0 {
-		return RuntimeConfig{}, fmt.Errorf("entry %q in bundle %q must contain non-empty UTF-8 JavaScript", entry, bundleDir)
+		return RuntimeConfig{}, fmt.Errorf("entry %q must contain non-empty UTF-8 JavaScript", entry)
 	}
 
 	return RuntimeConfig{
 		Config:            renderConfig(entry, compatibilityDate, namespaces),
-		Module:            module,
+		Module:            bytes.Clone(module),
 		Entry:             entry,
 		CompatibilityDate: compatibilityDate,
 	}, nil

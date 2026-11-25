@@ -20,9 +20,10 @@ import (
 	"github.com/wendaining/cloudlet/internal/gateway"
 	"github.com/wendaining/cloudlet/internal/routes"
 	"github.com/wendaining/cloudlet/internal/staticdeploy"
+	"github.com/wendaining/cloudlet/internal/workerpublish"
 )
 
-func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
+func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr error) {
 	var store *database.Store
 	var sites *staticdeploy.Service
 	if cfg.DatabaseURL != "" {
@@ -34,7 +35,7 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		if err != nil {
 			return err
 		}
-		defer store.SQL.Close()
+		defer func() { runErr = errors.Join(runErr, store.SQL.Close()) }()
 		if err := store.CheckVersion(ctx); err != nil {
 			return err
 		}
@@ -84,6 +85,21 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 			return fmt.Errorf("restore Gateway routes: %w", err)
 		}
 	}
+	var publication *workerpublish.Service
+	if cfg.Workers != nil {
+		docker, err := client.New(client.FromEnv, client.WithAPIVersionNegotiation())
+		if err != nil {
+			return fmt.Errorf("configure Worker Docker client: %w", err)
+		}
+		defer func() { runErr = errors.Join(runErr, docker.Close()) }()
+		startupCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+		publication, err = workerpublish.NewService(startupCtx, store, docker, proxy, *cfg.Workers, cfg.Instance)
+		cancel()
+		if err != nil {
+			return fmt.Errorf("configure Worker publication: %w", err)
+		}
+		defer func() { runErr = errors.Join(runErr, publication.Close()) }()
+	}
 	apiListener, err := net.Listen("tcp", cfg.APIAddress)
 	if err != nil {
 		return fmt.Errorf("listen management API: %w", err)
@@ -98,7 +114,7 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("resolve management API endpoint: %w", err)
 	}
-	management, closeSessions, err := controlplane.NewHandlerWithMCP(store, sites, browserService, cfg, logger, endpoint)
+	management, closeSessions, err := controlplane.NewHandlerWithMCPAndWorkers(store, sites, browserService, cfg, logger, endpoint, publication)
 	if err != nil {
 		return fmt.Errorf("configure management API: %w", err)
 	}

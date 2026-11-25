@@ -16,6 +16,7 @@ type Client struct {
 	endpoint *url.URL
 	http     *http.Client
 	api      *apigen.ClientWithResponses
+	apiHTTP  *http.Client
 	cookie   string
 }
 
@@ -39,6 +40,7 @@ func New(endpoint string) (*Client, error) {
 		return nil, fmt.Errorf("create management API client: %w", err)
 	}
 	client.api = api
+	client.apiHTTP = apiHTTP
 	return client, nil
 }
 
