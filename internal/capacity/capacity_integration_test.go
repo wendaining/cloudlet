@@ -140,6 +140,12 @@ func TestCapacityReservation(t *testing.T) {
 		ProjectLimit: hostCapacity,
 		ProjectUsed:  request1.Resources,
 	})
+	assertProjectUsage(t, ctx, store, projectA, capacity.ProjectUsage{
+		ProjectID: projectA,
+		Limit:     hostCapacity,
+		Used:      request1.Resources,
+		Remaining: capacity.Resources{CPUMillis: 3000, MemoryBytes: 3 << 30, Instances: 3},
+	})
 
 	// The host budget is shared by all projects.
 	request2 := capacity.Request{
@@ -205,6 +211,12 @@ func TestCapacityReservation(t *testing.T) {
 		ProjectID:    projectA,
 		ProjectLimit: hostCapacity,
 		ProjectUsed:  request2.Resources,
+	})
+	assertProjectUsage(t, ctx, store, projectA, capacity.ProjectUsage{
+		ProjectID: projectA,
+		Limit:     hostCapacity,
+		Used:      request2.Resources,
+		Remaining: capacity.Resources{CPUMillis: 2000, MemoryBytes: 2 << 30, Instances: 3},
 	})
 
 	if _, err := store.SetProjectQuota(ctx, projectA, capacity.Resources{CPUMillis: 1000, MemoryBytes: 1 << 30, Instances: 1}); !errors.Is(err, capacity.ErrQuotaInUse) {
@@ -696,6 +708,17 @@ func assertUsage(t *testing.T, ctx context.Context, store *capacity.Store, hostI
 	}
 }
 
+func assertProjectUsage(t *testing.T, ctx context.Context, store *capacity.Store, projectID uuid.UUID, expected capacity.ProjectUsage) {
+	t.Helper()
+	actual, err := store.ProjectUsage(ctx, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(actual, expected) {
+		t.Fatalf("项目容量占用返回 %+v，预期 %+v", actual, expected)
+	}
+}
+
 func testUnconfiguredBudgets(t *testing.T, ctx context.Context, store *capacity.Store, databaseStore *database.Store, ownerID string) {
 	t.Helper()
 	projectID := createProject(t, ctx, databaseStore, ownerID, "未配置预算项目")
@@ -712,6 +735,9 @@ func testUnconfiguredBudgets(t *testing.T, ctx context.Context, store *capacity.
 	}
 	if _, err := store.Usage(ctx, request.HostID, projectID); !errors.Is(err, capacity.ErrProjectQuotaNotFound) {
 		t.Fatalf("未配置项目配额查询占用返回 %v，要求 ErrProjectQuotaNotFound", err)
+	}
+	if _, err := store.ProjectUsage(ctx, projectID); !errors.Is(err, capacity.ErrProjectQuotaNotFound) {
+		t.Fatalf("未配置项目配额查询项目占用返回 %v，要求 ErrProjectQuotaNotFound", err)
 	}
 	if _, err := store.SetProjectQuota(ctx, uuid.New(), capacity.Resources{CPUMillis: 1, MemoryBytes: 1, Instances: 1}); !errors.Is(err, capacity.ErrProjectNotFound) {
 		t.Fatalf("未知项目配置配额返回 %v，要求 ErrProjectNotFound", err)

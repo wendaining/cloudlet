@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/wendaining/cloudlet/internal/config"
 )
@@ -56,6 +57,33 @@ func TestLoadSecretKey(t *testing.T) {
 	t.Setenv("CLOUDLET_SECRET_KEY", "not-a-key")
 	if _, err := config.Load(file); err == nil {
 		t.Fatal("invalid secret key was accepted")
+	}
+}
+
+func TestLoadBrowserSessionLifetime(t *testing.T) {
+	file := filepath.Join("..", "..", "configs", "cloudlet.json")
+	t.Setenv("CLOUDLET_DATABASE_URL", "")
+	t.Setenv("CLOUDLET_BROWSER_IMAGE", "")
+	t.Setenv("CLOUDLET_BROWSER_SECCOMP", "")
+	for _, test := range []struct {
+		value string
+		want  time.Duration
+		valid bool
+	}{
+		{"", 0, true},
+		{"5", 5 * time.Second, true},
+		{"300", 300 * time.Second, true},
+		{"0", 0, false},
+		{"4", 0, false},
+		{"301", 0, false},
+		{"1.5", 0, false},
+		{"99999999999", 0, false},
+	} {
+		t.Setenv("CLOUDLET_BROWSER_SESSION_SECONDS", test.value)
+		cfg, err := config.Load(file)
+		if (err == nil) != test.valid || cfg.BrowserSessionLifetime != test.want {
+			t.Errorf("lifetime %q = %s (%v), want %s, valid=%v", test.value, cfg.BrowserSessionLifetime, err, test.want, test.valid)
+		}
 	}
 }
 

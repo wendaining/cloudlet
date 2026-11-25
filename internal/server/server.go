@@ -103,6 +103,18 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 		return fmt.Errorf("configure management API: %w", err)
 	}
 	defer closeSessions()
+	if browserService != nil {
+		reaperCtx, cancelReaper := context.WithCancel(ctx)
+		reaperDone := make(chan struct{})
+		go func() {
+			defer close(reaperDone)
+			browserService.RunReaper(reaperCtx, logger)
+		}()
+		defer func() {
+			cancelReaper()
+			<-reaperDone
+		}()
+	}
 	api := newServer(management)
 	front := newServer(proxy)
 	results := make(chan error, 2)

@@ -60,7 +60,7 @@ func (s *Service) runtimeEndpoint(ctx context.Context, session database.BrowserS
 	if err != nil {
 		return "", err
 	}
-	if bound.ContainerID == "" {
+	if bound.State != capacity.Active || bound.ContainerID == "" {
 		return "", ErrSessionUnavailable
 	}
 	observation, err := s.adapter.Observe(ctx, ownership(session), bound.ContainerID)

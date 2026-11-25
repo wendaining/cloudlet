@@ -134,3 +134,7 @@ make dev
 开发时管理进程需要连接本地 Docker Unix socket。测试页面需要监听容器能访问的接口。Linux 默认 Docker 网桥的网关地址可用 `docker network inspect bridge` 查看。不要把测试页面只绑定到宿主的 127.0.0.1。
 
 导航成功后，向会话 endpoint 后追加 `/screenshots` 发送 POST 请求。响应 201 后，使用项目登录会话请求 `download_url`，把返回内容保存为 PNG。打开图片，用 `sha256sum` 和 `wc -c` 核对响应中的 `artifact_digest` 与 `size_bytes`。使用另一项目账号请求同一下载地址，预期返回 404。
+
+发起 `DELETE` 到会话 endpoint 可以主动关闭会话，响应状态为 `closed`，重复调用仍返回终态。要检查自动回收，可在启动 `make dev` 的终端执行 `export CLOUDLET_BROWSER_SESSION_SECONDS=15`。该值只影响随后创建的会话，有效范围为 5 到 300 秒，默认 300 秒。
+
+验收时分别创建一个主动关闭和一个等到期的会话。在会话运行时通过 `docker ps` 的 `io.cloudlet.resource=browser-<会话 ID>` 标签查到容器；关闭或到期后，对原容器执行 `docker inspect` 应查不到。在管理 API 查询会话应返回 `closed`，随后可在同一默认配额下创建新会话。
