@@ -44,7 +44,7 @@ Cloudlet 在一台 Linux 服务器上管理计算资源。本地开发在成员�
 | internal/workers | ES Module 与 Durable Objects 的 workerd 配置、启动参数和镜像引用 |
 | internal/durableobjects | SQLite 命名空间、类绑定和存储挂载路径 |
 | runtimes/workers | TypeScript Worker 构建命令与示例入口 |
-| internal/containers | Docker Engine 镜像摘要准备、容器生命周期与回环端口或内部网络端点观测 |
+| internal/containers | Docker Engine 镜像摘要准备、容器生命周期、回环端口或内部网络端点观测、HTTP 就绪探测与宿主配额支持报告 |
 | internal/browser | 复用容器管理的 Playwright 会话 |
 | pkg/client | CLI 与其他客户端共享的 API 客户端 |
 | internal/mcpserver | 只读 MCP 项目与操作查询，复用管理 API 会话权限 |
@@ -116,6 +116,6 @@ API 与 Gateway 使用 HTTP 头读取超时和空闲连接超时。收到 SIGTER
 
 ## 执行环境
 
-Workers 集成 workerd，支持原生 Durable Object SQLite 绑定。真实运行时测试验证对象隔离和重启后的持久化。workers.Preflight 使用固定 workerd 在发布前验证模块载入和初始化阶段。容器管理使用 Docker Engine API。internal/containers 按不可变摘要准备镜像，核对本地镜像报告的摘要后才用于创建容器，已缓存且摘要一致的镜像直接复用。适配器提供创建、启动、观测、停止和删除受管理容器的操作，按环境、项目、资源和执行序号写入归属标签与确定性名称，在启动、观测、停止和删除前核对名称和标签，并可按确定性名称查找已有容器。published 模式在启动后读取实际发布的回环端口，并可按实际发布的回环端点、接受状态码与截止时间等待 HTTP 就绪。network 模式加入已有的用户定义 bridge 网络，为执行注册稳定的网络别名，并读取容器在该网络中的实际地址与端口。超时、容器退出或端点未发布时返回失败观测。internal/executions 在该适配器之上完成容量准入、失败清理与确认释放。管理 API 与 Gateway 注册由上层任务接入。Browser Run 复用容器生命周期，并通过 Playwright 实现浏览器操作。
+Workers 集成 workerd，支持原生 Durable Object SQLite 绑定。真实运行时测试验证对象隔离和重启后的持久化。workers.Preflight 使用固定 workerd 在发布前验证模块载入和初始化阶段。容器管理使用 Docker Engine API。internal/containers 按不可变摘要准备镜像，核对本地镜像报告的摘要后才用于创建容器，已缓存且摘要一致的镜像直接复用。适配器提供创建、启动、观测、停止和删除受管理容器的操作，按环境、项目、资源和执行序号写入归属标签与确定性名称，在启动、观测、停止和删除前核对名称和标签，并可按确定性名称查找已有容器。published 模式在启动后读取实际发布的回环端口，并可按实际发布的回环端点、接受状态码与截止时间等待 HTTP 就绪。network 模式加入已有的用户定义 bridge 网络，为执行注册稳定的网络别名，并读取容器在该网络中的实际地址与端口。超时、容器退出或端点未发布时返回失败观测。`containers.ProbeHostLimits` 读取 Docker Engine 报告的主机信息，按 CPU CFS 配额与周期、内存、PIDs 和 nofile 报告宿主支持范围；真实 Docker 验收在受限容器中运行有限负载，核对各项触发结果与清理。internal/executions 在该适配器之上完成容量准入、失败清理与确认释放。管理 API 与 Gateway 注册由上层任务接入。Browser Run 复用容器生命周期，并通过 Playwright 实现浏览器操作。
 
 执行单元、配额、隔离、状态恢复与独占交接遵循执行环境设计。对应模块完成时，同步提供 [真实业务验收](testing.md)。
