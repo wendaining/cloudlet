@@ -11,6 +11,9 @@ import (
 // The caller must grant access to only one running execution at a time.
 const StoragePath = "/durable-objects"
 
+// StorageDirectory is the writable child owned by the managed runtime user.
+const StorageDirectory = "sqlite"
+
 var identifier = regexp.MustCompile(`^[a-zA-Z_$][a-zA-Z0-9_$]*$`)
 
 // Namespace binds a named JavaScript class export in the Worker to a stable ID.

@@ -14,6 +14,7 @@ import (
 
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/api/types/network"
 	"github.com/moby/moby/client"
 )
@@ -75,6 +76,13 @@ func (a *Adapter) Create(ctx context.Context, spec Spec) (Container, error) {
 	created := Container{ID: result.ID, Name: options.Name}
 	if len(spec.Files) > 0 {
 		if err := a.installFiles(ctx, created, spec); err != nil {
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+			defer cancel()
+			return created, errors.Join(err, a.Remove(cleanupCtx, spec.Ownership, created.ID))
+		}
+	}
+	if spec.DataVolume != nil {
+		if err := a.initializeVolumeDirectory(ctx, created.ID, *spec.DataVolume, spec.User); err != nil {
 			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 			defer cancel()
 			return created, errors.Join(err, a.Remove(cleanupCtx, spec.Ownership, created.ID))
@@ -353,6 +361,11 @@ func (s Spec) createOptions() (client.ContainerCreateOptions, error) {
 				}},
 			},
 		},
+	}
+	if s.DataVolume != nil {
+		options.HostConfig.Mounts = []mount.Mount{{
+			Type: mount.TypeVolume, Source: s.DataVolume.Name, Target: s.DataVolume.MountPath, VolumeOptions: &mount.VolumeOptions{NoCopy: true},
+		}}
 	}
 	if s.ChromiumSeccompProfile != "" {
 		init := true

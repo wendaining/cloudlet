@@ -42,6 +42,8 @@ workerd 常驻执行 Worker isolate。请求复用已准备的运行环境。运
 
 配置使用命名空间 UUID 作为 workerd 的 `uniqueKey`，通过 `enableSql` 开启 `ctx.storage.sql`，通过 `localDisk` 写入持久化存储。调用方将专用的可写数据卷挂载到容器内的 `durableobjects.StoragePath`（`/durable-objects`）。每次启动只将该卷交给一个运行中的执行。重启时先停止原执行，再将原数据卷挂载到新执行，并保留命名空间 UUID。
 
+首发管理 API 接受 `durable_objects` 声明。每项包含 `class_name` 和 `bindings`，类必须是 Worker 模块的命名导出。平台按项目、Worker 和类生成稳定的命名空间 UUID。PostgreSQL 记录命名空间、Worker 数据卷及当前执行所有者。Workerd 以 UID 和 GID 1000 使用数据卷内的 SQLite 目录。发布失败时，平台确认执行容器已删除后释放写入所有权，并保留已登记的数据卷。
+
 namespace_id 是稳定业务标识。Worker 的绑定名称和类声明引用该标识，代码版本变更保留命名空间身份。对象标识、对象调度、storage 事务和输出门由 workerd 执行。
 
 每个命名空间关联独立存储标识、项目和唯一执行所有者。存储路径由平台根据标识生成。对象 SQLite 文件置于持久化数据卷，Go 服务保存归属与迁移信息。

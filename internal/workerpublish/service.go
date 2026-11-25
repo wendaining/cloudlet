@@ -27,6 +27,7 @@ import (
 	"github.com/wendaining/cloudlet/internal/config"
 	"github.com/wendaining/cloudlet/internal/containers"
 	"github.com/wendaining/cloudlet/internal/database"
+	"github.com/wendaining/cloudlet/internal/durableobjects"
 	"github.com/wendaining/cloudlet/internal/executions"
 	"github.com/wendaining/cloudlet/internal/gateway"
 	"github.com/wendaining/cloudlet/internal/operations"
@@ -43,9 +44,35 @@ var (
 )
 
 type Request struct {
-	Module            string `json:"module"`
-	CompatibilityDate string `json:"compatibility_date"`
-	Hostname          string `json:"hostname"`
+	Module            string                 `json:"module"`
+	CompatibilityDate string                 `json:"compatibility_date"`
+	Hostname          string                 `json:"hostname"`
+	DurableObjects    []DurableObjectBinding `json:"durable_objects,omitempty"`
+}
+
+type DurableObjectBinding struct {
+	ClassName string   `json:"class_name"`
+	Bindings  []string `json:"bindings"`
+}
+
+func (r Request) namespaces(projectID uuid.UUID, worker string) ([]durableobjects.Namespace, error) {
+	if len(r.DurableObjects) > 16 {
+		return nil, fmt.Errorf("Worker supports up to 16 Durable Object classes: %w", fs.ErrInvalid)
+	}
+	var namespaces []durableobjects.Namespace
+	for _, binding := range r.DurableObjects {
+		if len(binding.ClassName) > 128 || len(binding.Bindings) > 16 {
+			return nil, fmt.Errorf("Durable Object class or bindings exceed their limits: %w", fs.ErrInvalid)
+		}
+		for _, name := range binding.Bindings {
+			if len(name) > 128 {
+				return nil, fmt.Errorf("Durable Object binding exceeds 128 bytes: %w", fs.ErrInvalid)
+			}
+		}
+		id := uuid.NewSHA1(projectID, []byte("cloudlet/durable-object/"+worker+"/"+binding.ClassName))
+		namespaces = append(namespaces, durableobjects.Namespace{ID: id, ClassName: binding.ClassName, Bindings: binding.Bindings})
+	}
+	return namespaces, nil
 }
 
 func ValidateRequest(name, key string, request Request) (workers.RuntimeConfig, error) {
@@ -236,6 +263,16 @@ func (s *Service) Deploy(ctx context.Context, projectID uuid.UUID, name, key str
 	if projectID == uuid.Nil || s.publisher.ReservedHost(request.Hostname) {
 		return result, false, fmt.Errorf("Worker project or hostname is unavailable: %w", fs.ErrInvalid)
 	}
+	namespaces, err := request.namespaces(projectID, name)
+	if err != nil {
+		return result, false, err
+	}
+	if len(namespaces) > 0 {
+		prepared, err = workers.PrepareDurableModule(prepared.Module, prepared.CompatibilityDate, namespaces)
+		if err != nil {
+			return result, false, fmt.Errorf("validate Durable Object bindings: %w: %w", fs.ErrInvalid, err)
+		}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
@@ -349,10 +386,18 @@ func (s *Service) Deploy(ctx context.Context, projectID uuid.UUID, name, key str
 	if err = s.advance(ctx, &result, operations.Progress{Phase: operations.Preparing, Outcome: operations.InProgress}); err != nil {
 		return result, true, err
 	}
+	var dataVolume *containers.DataVolume
+	if len(namespaces) != 0 {
+		dataVolume, err = s.claimDurableVolume(ctx, result.Execution, namespaces)
+		if err != nil {
+			return result, true, err
+		}
+	}
 	execution, err := s.executions.Start(ctx, executions.StartRequest{ExecutionID: result.Execution.ID, ProjectID: projectID, Spec: containers.Spec{
 		Ownership: ownership, Image: s.image, User: "1000:1000", Port: workers.HTTPPort, Access: containers.AccessPublished, Command: workers.ServeArgs(),
-		Limits: containers.Limits{CPUMillis: 1000, MemoryBytes: 256 << 20, PIDs: 128, OpenFiles: 1024},
-		Files:  []containers.File{{Path: "worker/config.capnp", Data: prepared.Config}, {Path: "worker/worker.mjs", Data: prepared.Module}},
+		Limits:     containers.Limits{CPUMillis: 1000, MemoryBytes: 256 << 20, PIDs: 128, OpenFiles: 1024},
+		Files:      []containers.File{{Path: "worker/config.capnp", Data: prepared.Config}, {Path: "worker/worker.mjs", Data: prepared.Module}},
+		DataVolume: dataVolume,
 	}})
 	result.Execution.ContainerID = execution.Container.ID
 	if result.Execution.ContainerID != "" {

@@ -32,6 +32,7 @@ import (
 	"github.com/wendaining/cloudlet/internal/apigen"
 	"github.com/wendaining/cloudlet/internal/capacity"
 	"github.com/wendaining/cloudlet/internal/config"
+	"github.com/wendaining/cloudlet/internal/containers"
 	"github.com/wendaining/cloudlet/internal/controlplane"
 	"github.com/wendaining/cloudlet/internal/database"
 	"github.com/wendaining/cloudlet/internal/gateway"
@@ -83,6 +84,21 @@ func TestWorkerPublicationHTTP(t *testing.T) {
 	t.Cleanup(func() {
 		if err := docker.Close(); err != nil {
 			t.Error(err)
+		}
+	})
+	t.Cleanup(func() {
+		var volumes []database.WorkerDurableStorage
+		if err := store.DB.Find(&volumes).Error; err != nil {
+			t.Error(err)
+			return
+		}
+		for _, volume := range volumes {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			_, err := docker.VolumeRemove(cleanupCtx, volume.VolumeName, client.VolumeRemoveOptions{})
+			cancel()
+			if err != nil && !cerrdefs.IsNotFound(err) {
+				t.Error(err)
+			}
 		}
 	})
 	t.Cleanup(func() {
@@ -553,6 +569,142 @@ AND d.state = 'pending' AND o.phase = 'preparing' AND e.container_id <> ''`, pro
 	if usage.ProjectUsed.CPUMillis != 3000 || usage.ProjectUsed.Instances != 3 {
 		t.Fatalf("failed publication leaked capacity: %+v", usage)
 	}
+	t.Run("publish and restart a Worker with Durable Objects", func(t *testing.T) {
+		const hostname = "objects.localhost"
+		module := `import { DurableObject } from "cloudflare:workers";
+export class ObjectStore extends DurableObject {
+  constructor(ctx, env) {
+    super(ctx, env);
+    this.sql = ctx.storage.sql;
+    this.sql.exec("CREATE TABLE IF NOT EXISTS data (value TEXT PRIMARY KEY)");
+  }
+  set(value, commit) {
+    try {
+      this.ctx.storage.transactionSync(() => {
+        this.sql.exec("DELETE FROM data");
+        this.sql.exec("INSERT INTO data VALUES (?)", value);
+        if (!commit) throw new Error("rollback");
+      });
+    } catch (err) {
+      if (commit || err.message !== "rollback") throw err;
+    }
+  }
+  get() {
+    return this.sql.exec("SELECT value FROM data").toArray()[0]?.value ?? null;
+  }
+}
+export default {
+  async fetch(request, env) {
+    const name = new URL(request.url).pathname.slice(1);
+    if (!name) return new Response("ready");
+    const id = env.STORE.idFromName(name);
+    const object = env.STORE.get(id);
+    if (request.method === "PUT") await object.set(await request.text(), true);
+    if (request.method === "PATCH") await object.set(await request.text(), false);
+    return Response.json({ id: id.toString(), value: await object.get() });
+  }
+};`
+		declared := []workerpublish.DurableObjectBinding{{ClassName: "ObjectStore", Bindings: []string{"STORE"}}}
+		input := workerpublish.Request{Module: module, CompatibilityDate: valid.CompatibilityDate, Hostname: hostname, DurableObjects: declared}
+		path := deployPath(otherProject.ID, "objects")
+		missingClass := input
+		missingClass.DurableObjects = []workerpublish.DurableObjectBinding{{ClassName: "Missing", Bindings: []string{"STORE"}}}
+		invalid := decode(request(outsider, http.MethodPost, path, "missing-class", missingClass, http.StatusUnprocessableEntity))
+		if invalid.OperationOutcome != "failed" || !strings.Contains(invalid.Failure, "Missing Durable Object class export: Missing") {
+			t.Fatalf("missing class preflight result: %+v", invalid)
+		}
+		badBinding := input
+		badBinding.DurableObjects = []workerpublish.DurableObjectBinding{{ClassName: "ObjectStore", Bindings: []string{"STORE", "STORE"}}}
+		request(outsider, http.MethodPost, path, "invalid-binding", badBinding, http.StatusBadRequest)
+		published := decode(request(outsider, http.MethodPost, path, "with-objects", input, http.StatusCreated))
+		if published.State != "active" || published.OperationOutcome != "succeeded" {
+			t.Fatalf("publish Durable Objects: %+v", published)
+		}
+		request(outsider, http.MethodPost, path, "second-writer", input, http.StatusConflict)
+		var ownership database.WorkerDurableStorage
+		if err := store.DB.Where("worker_id = ?", published.WorkerId).Take(&ownership).Error; err != nil {
+			t.Fatal(err)
+		}
+		var namespace database.WorkerDurableNamespace
+		if err := store.DB.Where("worker_id = ?", published.WorkerId).Take(&namespace).Error; err != nil {
+			t.Fatal(err)
+		}
+		if ownership.ProjectID.String() != otherProject.ID || ownership.OwnerExecutionID == nil || *ownership.OwnerExecutionID != published.ExecutionId ||
+			namespace.ProjectID != ownership.ProjectID || namespace.WorkerID != ownership.WorkerID || namespace.ClassName != "ObjectStore" || namespace.ID == uuid.Nil {
+			t.Fatalf("Durable Object registration: %+v %+v", ownership, namespace)
+		}
+		worker, err := docker.ContainerInspect(ctx, published.ContainerId, client.ContainerInspectOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if worker.Container.Config.User != "1000:1000" || len(worker.Container.Mounts) != 1 || worker.Container.Mounts[0].Name != ownership.VolumeName || !worker.Container.Mounts[0].RW {
+			t.Fatalf("unexpected mounted storage: %+v", worker.Container.Mounts)
+		}
+		type objectValue struct {
+			ID    string
+			Value *string
+		}
+		call := func(endpoint, method, name, value string) objectValue {
+			t.Helper()
+			req, err := http.NewRequestWithContext(ctx, method, endpoint+"/"+name, strings.NewReader(value))
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Host = hostname
+			response, err := outsider.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			body, err := io.ReadAll(response.Body)
+			if err != nil || response.StatusCode != http.StatusOK {
+				t.Fatalf("Durable Object %s returned HTTP %d: %s (%v)", name, response.StatusCode, body, err)
+			}
+			var result objectValue
+			if err := json.Unmarshal(body, &result); err != nil || result.ID == "" {
+				t.Fatalf("decode object %s: %s (%v)", name, body, err)
+			}
+			return result
+		}
+		assertValue := func(object objectValue, id, value string) {
+			t.Helper()
+			if object.ID != id || object.Value == nil || *object.Value != value {
+				t.Fatalf("object ID and committed value: %+v, want %s and %s", object, id, value)
+			}
+		}
+		alpha := call(public.URL, http.MethodPut, "alpha", "first")
+		if empty := call(public.URL, http.MethodGet, "beta", ""); empty.ID == alpha.ID || empty.Value != nil {
+			t.Fatalf("object IDs share state: %+v %+v", alpha, empty)
+		}
+		beta := call(public.URL, http.MethodPut, "beta", "second")
+		assertValue(call(public.URL, http.MethodPatch, "alpha", "rolled back"), alpha.ID, "first")
+		if _, err := docker.ContainerRestart(ctx, published.ContainerId, client.ContainerRestartOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		restarted, err := docker.ContainerInspect(ctx, published.ContainerId, client.ContainerInspectOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !restarted.Container.State.Running || restarted.Container.State.StartedAt == worker.Container.State.StartedAt {
+			t.Fatalf("Docker did not restart the Worker: %+v", restarted.Container.State)
+		}
+		executor, err := containers.New(ctx, docker)
+		if err != nil {
+			t.Fatal(err)
+		}
+		readiness, err := executor.WaitReady(ctx, containers.Ownership{
+			Environment: "publication", Project: otherProject.ID, Resource: published.WorkerId.String(), Generation: uint64(published.Generation),
+		}, published.ContainerId, containers.ReadinessProbe{
+			Port: workers.HTTPPort, Path: "/", Timeout: 10 * time.Second, Interval: 50 * time.Millisecond, Statuses: []int{http.StatusOK},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		endpoint := strings.TrimSuffix(readiness.Endpoint, "/")
+		assertValue(call(endpoint, http.MethodGet, "alpha", ""), alpha.ID, "first")
+		assertValue(call(endpoint, http.MethodGet, "beta", ""), beta.ID, "second")
+		t.Logf("Durable Object namespace %s preserved separate SQLite values and rejected rolled-back writes after restarting container %s", namespace.ID, published.ContainerId)
+	})
 	if err := os.Chmod(configuration.Directory, 0o500); err != nil {
 		t.Fatal(err)
 	}

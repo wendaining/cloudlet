@@ -162,6 +162,9 @@ type DeployWorkerRequest struct {
 	// CompatibilityDate 固定 workerd 支持的兼容日期。
 	CompatibilityDate openapi_types.Date `json:"compatibility_date"`
 
+	// DurableObjects SQLite Durable Object 类及其环境绑定，命名空间由项目和 Worker 自动分配。
+	DurableObjects *[]WorkerDurableObjectBinding `json:"durable_objects,omitempty"`
+
 	// Hostname 无端口的公开域名。
 	Hostname string `json:"hostname"`
 
@@ -372,6 +375,14 @@ type WorkerDeployment struct {
 	RuntimeVersion    string             `json:"runtime_version"`
 	State             string             `json:"state"`
 	WorkerId          openapi_types.UUID `json:"worker_id"`
+}
+
+// WorkerDurableObjectBinding defines model for WorkerDurableObjectBinding.
+type WorkerDurableObjectBinding struct {
+	Bindings []string `json:"bindings"`
+
+	// ClassName 模块中导出的 Durable Object 类名。
+	ClassName string `json:"class_name"`
 }
 
 // BrowserProjectID defines model for BrowserProjectID.

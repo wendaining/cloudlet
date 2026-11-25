@@ -741,6 +741,13 @@ export interface components {
             compatibility_date: string;
             /** @description 无端口的公开域名。 */
             hostname: string;
+            /** @description SQLite Durable Object 类及其环境绑定，命名空间由项目和 Worker 自动分配。 */
+            durable_objects?: components["schemas"]["WorkerDurableObjectBinding"][];
+        };
+        WorkerDurableObjectBinding: {
+            /** @description 模块中导出的 Durable Object 类名。 */
+            class_name: string;
+            bindings: string[];
         };
         WorkerDeployment: {
             /** Format: uuid */

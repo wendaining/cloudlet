@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -79,9 +80,13 @@ func Preflight(ctx context.Context, docker *client.Client, prepared RuntimeConfi
 	ctx, cancel := context.WithTimeout(ctx, preflightTimeout)
 	defer cancel()
 	config := preflightConfig(prepared.CompatibilityDate)
+	classes, err := json.Marshal(prepared.DurableClasses)
+	if err != nil {
+		return PreflightResult{}, fmt.Errorf("preflight Worker %q: encode Durable Object classes: %w", prepared.Entry, err)
+	}
 	archive, err := preflightArchive(map[string][]byte{
 		"config.capnp": config,
-		"wrapper.mjs":  []byte(preflightWrapper),
+		"wrapper.mjs":  fmt.Appendf(nil, preflightWrapper, classes),
 		"user.mjs":     prepared.Module,
 	})
 	if err != nil {
@@ -285,7 +290,10 @@ const preflightWrapper = `export default {
   async test() {
     console.error("cloudlet-preflight:loading");
     try {
-      await import("./user.mjs");
+      const worker = await import("./user.mjs");
+      for (const name of (%s ?? [])) {
+        if (typeof worker[name] !== "function") throw new Error("Missing Durable Object class export: " + name);
+      }
     } catch (error) {
       const phase = typeof error?.message === "string" && error.message.startsWith('No such module "')
         ? "load" : "initialize";

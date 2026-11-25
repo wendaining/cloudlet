@@ -1358,6 +1358,32 @@ components:
           type: string
           maxLength: 253
           description: 无端口的公开域名。
+        durable_objects:
+          type: array
+          maxItems: 16
+          description: SQLite Durable Object 类及其环境绑定，命名空间由项目和 Worker 自动分配。
+          items:
+            $ref: "#/components/schemas/WorkerDurableObjectBinding"
+    WorkerDurableObjectBinding:
+      type: object
+      additionalProperties: false
+      required: [class_name, bindings]
+      properties:
+        class_name:
+          type: string
+          minLength: 1
+          maxLength: 128
+          pattern: '^[a-zA-Z_$][a-zA-Z0-9_$]*$'
+          description: 模块中导出的 Durable Object 类名。
+        bindings:
+          type: array
+          minItems: 1
+          maxItems: 16
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: '^[a-zA-Z_$][a-zA-Z0-9_$]*$'
     WorkerDeployment:
       type: object
       required:
