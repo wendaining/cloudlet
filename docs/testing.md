@@ -18,6 +18,12 @@
 
 make generate 从 api/openapi.yaml 同时生成 Go 类型、Gin 接口、客户端和前端类型，生成文件随实现提交。Go 和前端的检查分别比较临时生成结果。
 
+静态站点分页集成测试通过管理 API 上传真实 ZIP，验证站点和版本各读取两页、相同创建时间的版本排序、翻页期间新增版本，以及不同项目之间的隔离。
+
+```sh
+go test -race -count=1 -tags=integration -run '^TestStaticSiteListsHTTP$' ./internal/database
+```
+
 ## 开发流程验证
 
 Gateway 域名验收构建并启动实际管理服务，以真实站点文件作为 HTTP 上游。用例验证域名大小写、末尾句点与端口规范化，GET 与 HEAD 正常转发，未知域名返回 404。停止上游后，该域名返回 502 并记录失败域名，其他上游继续可用。
