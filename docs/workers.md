@@ -59,6 +59,10 @@ GET /api/v1/projects/{projectID}/worker-deployments/{deploymentID}
 
 查询返回不可变版本、最近执行与操作结果。Go 客户端使用 `pkg/client.PublishWorker` 和 `GetWorkerDeployment` 调用相同接口。MCP 的发布工具由 #47 接入。
 
+### Durable Object 存储
+
+首次发布可声明 SQLite Durable Object 类与绑定。持久卷只授予一个执行写入权限，原容器重启后继续使用原卷。带持久状态的版本升级由 #51 交付，交接时须确认原执行停止后才授予新执行写入权限。
+
 ## 验收
 
 运行 `make dev`，使用项目所有者或 developer 会话发送上述发布请求。然后通过 Gateway 访问所声明的域名，核对 Worker 正文。读取 `Location`，比较上传模块的 SHA-256 与 `artifact_digest`，并用 Docker inspect 核对容器标识、归属标签和资源限制。用另一项目会话查询同一版本，确认返回 404。

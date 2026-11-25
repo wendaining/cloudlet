@@ -633,6 +633,38 @@ export default {
 			namespace.ProjectID != ownership.ProjectID || namespace.WorkerID != ownership.WorkerID || namespace.ClassName != "ObjectStore" || namespace.ID == uuid.Nil {
 			t.Fatalf("Durable Object registration: %+v %+v", ownership, namespace)
 		}
+		// Exercise the storage guard directly. The first-publication API rejects
+		// another deployment before it reaches the storage claim.
+		competingOperation, _, err := operationStore.Register(ctx, operations.Registration{
+			ProjectID: ownership.ProjectID, Action: "worker.deploy:objects", IdempotencyKey: "competing-claim",
+			RequestFingerprint: "competing-claim",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		competingDeployment, competingExecution, err := store.WorkerDeployment(ctx, ownership.ProjectID, published.Id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		competingDeployment.ID, competingDeployment.OperationID, competingDeployment.State = uuid.New(), competingOperation.ID, "pending"
+		competingExecution.ID, competingExecution.DeploymentID = uuid.New(), competingDeployment.ID
+		competingExecution.Generation++
+		competingExecution.ContainerID, competingExecution.State = "", "pending"
+		if err := store.DB.Create(&competingDeployment).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := store.DB.Create(&competingExecution).Error; err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.ClaimWorkerDurableStorage(ctx, competingExecution, nil); !errors.Is(err, database.ErrWorkerStorageOwned) {
+			t.Fatalf("competing execution claimed a writable volume: %v", err)
+		}
+		if err := store.DB.Where("worker_id = ?", published.WorkerId).Take(&ownership).Error; err != nil {
+			t.Fatal(err)
+		}
+		if ownership.OwnerExecutionID == nil || *ownership.OwnerExecutionID != published.ExecutionId {
+			t.Fatalf("competing claim changed the storage owner: %+v", ownership)
+		}
 		worker, err := docker.ContainerInspect(ctx, published.ContainerId, client.ContainerInspectOptions{})
 		if err != nil {
 			t.Fatal(err)
