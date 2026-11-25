@@ -27,7 +27,7 @@ function send(response: ServerResponse, status: number, body: object) {
   }).end(JSON.stringify(body));
 }
 
-async function readCommand(request: IncomingMessage, screenshot: boolean) {
+async function readCommand(request: IncomingMessage, screenshot: boolean, click: boolean) {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request.iterator({ destroyOnReturn: false })) {
@@ -46,7 +46,14 @@ async function readCommand(request: IncomingMessage, screenshot: boolean) {
     return { error: screenshot ? 'invalid_json' : 'invalid_url', status: 400 } as const;
   }
   let url: URL | undefined;
-  if (!screenshot) {
+  let selector: string | undefined;
+  if (click) {
+    if (!('selector' in input) || typeof input.selector !== 'string' ||
+        !input.selector.trim() || input.selector.length > 1024 || /\p{Cc}/u.test(input.selector)) {
+      return { error: 'invalid_selector', status: 400 } as const;
+    }
+    selector = input.selector;
+  } else if (!screenshot) {
     const target = 'url' in input && typeof input.url === 'string' ? URL.parse(input.url) : null;
     if (!target || !isWebURL(target.href) || target.username || target.password) {
       return { error: 'invalid_url', status: 400 } as const;
@@ -57,7 +64,7 @@ async function readCommand(request: IncomingMessage, screenshot: boolean) {
   if (typeof timeout !== 'number' || !Number.isInteger(timeout) || timeout < 1 || timeout > maxTimeout) {
     return { error: 'invalid_timeout', status: 400 } as const;
   }
-  return { url, timeout };
+  return { url, selector, timeout };
 }
 
 function isWebURL(url: string) {
@@ -78,7 +85,7 @@ const browser = await chromium.launch({
 });
 let stopping = false;
 let expiryTimer: ReturnType<typeof setTimeout> | undefined;
-let activeCommand: 'navigation' | 'screenshot' | 'text' | undefined;
+let activeCommand: 'navigation' | 'screenshot' | 'text' | 'click' | undefined;
 let hasPage = false;
 const server = createServer({ requestTimeout: 15000, headersTimeout: 5000 }, (request, response) => {
   void handle(request, response).catch(() => {
@@ -156,10 +163,11 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
     return;
   }
   const screenshot = request.url === '/screenshot';
+  const click = request.url === '/click';
   const viewport = request.method === 'GET' && request.url === '/viewport';
   const consoleHistory = request.method === 'GET' && request.url === '/console';
   const text = request.method === 'GET' && (request.url === '/text' || request.url?.startsWith('/text?'));
-  if (!viewport && !consoleHistory && !text && (request.method !== 'POST' || (!screenshot && request.url !== '/navigate'))) {
+  if (!viewport && !consoleHistory && !text && (request.method !== 'POST' || (!screenshot && !click && request.url !== '/navigate'))) {
     send(response, 404, { error: 'not_found' });
     return;
   }
@@ -174,7 +182,7 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
     send(response, 200, readConsole());
     return;
   }
-  const command = viewport || text ? undefined : await readCommand(request, screenshot);
+  const command = viewport || text ? undefined : await readCommand(request, screenshot, click);
   if (command?.error) {
     if (command.status === 413) {
       response.setHeader('Connection', 'close');
@@ -233,8 +241,26 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
     send(response, 200, { ...size, device_scale_factor: viewportOptions.deviceScaleFactor });
     return;
   }
-  if (screenshot && (!hasPage || page.isClosed() || !isWebURL(page.url()))) {
+  if ((screenshot || click) && (!hasPage || page.isClosed() || !isWebURL(page.url()))) {
     send(response, 409, { error: 'no_page' });
+    return;
+  }
+
+  if (command.selector !== undefined) {
+    activeCommand = 'click';
+    try {
+      // Playwright enforces strict, actionable CSS selection and its own deadline.
+      await page.locator('css=' + command.selector).click({ timeout: command.timeout });
+      response.writeHead(204, { 'Cache-Control': 'no-store' }).end();
+    } catch (error: unknown) {
+      if (error instanceof errors.TimeoutError) {
+        send(response, 504, { error: 'click_timeout' });
+      } else {
+        send(response, 422, { error: 'click_failed' });
+      }
+    } finally {
+      activeCommand = undefined;
+    }
     return;
   }
 
