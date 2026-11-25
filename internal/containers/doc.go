@@ -4,7 +4,9 @@
 // them, reads the published loopback port, and probes HTTP readiness through
 // that endpoint within a bounded deadline. It stops or removes only containers
 // that belong to the requested environment, project, resource and execution
-// generation.
+// generation. Platform-prepared regular files are copied as read-only files
+// before startup. Their archive digest is recorded with the container so the
+// execution service rejects adoption with different code or configuration.
 //
 // AccessPublished publishes the container port on the host loopback interface
 // for local development. AccessNetwork joins an existing user-defined bridge

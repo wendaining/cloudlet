@@ -10,7 +10,7 @@ master 更新和 PR 变化时，CI 根据改动路径选择检查任务。路径
 | Go 源码、模块依赖与运行配置 | Go 格式、模块依赖、go vet、race 测试、构建与 govulncheck |
 | 数据库、账号、管理接口与迁移 | 真实 PostgreSQL 上的迁移、账号、会话、项目成员角色、容量预留、项目容量查询与重启验证 |
 | 路由快照与 Gateway 动态路由 | 真实 PostgreSQL、HTTP 上游与 Gateway 的发布、冲突、恢复与并发验证 |
-| Worker 运行配置与镜像 | 真实 workerd 的 HTTP 调用与配置错误验证 |
+| Worker 运行配置、发布接口与镜像 | 真实 PostgreSQL、workerd 与 Gateway 的首发、权限、幂等、错误清理和 HTTP 验证 |
 | Browser Run 执行服务与镜像 | 真实 Chromium 容器的认证、导航和退出验证 |
 | 容器适配器与 Docker 执行 | 真实 Docker 中的创建、启动、观测、归属校验、HTTP 就绪探测、配额触发、停止与端口释放 |
 | 前端与接口类型 | 前端静态检查、构建与生成一致性 |

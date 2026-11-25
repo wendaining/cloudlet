@@ -374,6 +374,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{projectID}/workers/{name}/deployments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 发布首个无状态 Worker 版本，等待真实运行时就绪并激活域名。所有者和开发者可以调用。同一幂等键复用操作。 */
+        post: operations["deployWorker"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/worker-deployments/{deploymentID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+                deploymentID: string;
+            };
+            cookie?: never;
+        };
+        /** @description 项目成员查询不可变 Worker 版本、执行与操作结果。 */
+        get: operations["getWorkerDeployment"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -547,6 +587,50 @@ export interface components {
         };
         Error: {
             message: string;
+        };
+        DeployWorkerRequest: {
+            /** @description 已打包的单文件 JavaScript ES Module，UTF-8 编码后最多 1048576 字节。入口固定为 index.mjs。 */
+            module: string;
+            /**
+             * Format: date
+             * @description 固定 workerd 支持的兼容日期。
+             */
+            compatibility_date: string;
+            /** @description 无端口的公开域名。 */
+            hostname: string;
+        };
+        WorkerDeployment: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            project_id: string;
+            /** Format: uuid */
+            worker_id: string;
+            /** Format: uuid */
+            execution_id: string;
+            /** Format: uuid */
+            operation_id: string;
+            artifact_digest: string;
+            config_digest: string;
+            entry: string;
+            compatibility_date: string;
+            runtime_version: string;
+            runtime_image: string;
+            hostname: string;
+            state: string;
+            failure: string;
+            container_id: string;
+            execution_state: string;
+            operation_phase: string;
+            operation_outcome: string;
+            /** Format: int64 */
+            cpu_millis: number;
+            /** Format: int64 */
+            memory_bytes: number;
+            /** Format: int64 */
+            generation: number;
+            /** Format: date-time */
+            created_at: string;
         };
     };
     responses: {
@@ -1207,6 +1291,135 @@ export interface operations {
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    deployWorker: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                projectID: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeployWorkerRequest"];
+            };
+        };
+        responses: {
+            /** @description 已存在的发布结果 */
+            200: {
+                headers: {
+                    /** @description 已登记版本的项目内查询地址。版本尚未登记时省略。 */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerDeployment"];
+                };
+            };
+            /** @description 新 Worker 发布结果 */
+            201: {
+                headers: {
+                    /** @description 已登记版本的项目内查询地址。版本尚未登记时省略。 */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerDeployment"];
+                };
+            };
+            /** @description Worker 发布请求参数无效 */
+            400: {
+                headers: {
+                    /** @description 已登记版本的项目内查询地址。版本尚未登记时省略。 */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            /** @description Worker 发布请求冲突 */
+            409: {
+                headers: {
+                    /** @description 已登记版本的项目内查询地址。版本尚未登记时省略。 */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 运行时预检或就绪检查失败 */
+            422: {
+                headers: {
+                    /** @description 已登记版本的项目内查询地址。版本尚未登记时省略。 */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerDeployment"];
+                };
+            };
+            /** @description 容量不足 */
+            429: {
+                headers: {
+                    /** @description 已登记版本的项目内查询地址。版本尚未登记时省略。 */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerDeployment"];
+                };
+            };
+            /** @description Worker 发布步骤失败 */
+            500: {
+                headers: {
+                    /** @description 已登记版本的项目内查询地址。版本尚未登记时省略。 */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getWorkerDeployment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+                deploymentID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Worker 发布结果 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerDeployment"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            503: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };

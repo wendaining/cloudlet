@@ -72,7 +72,15 @@ func (a *Adapter) Create(ctx context.Context, spec Spec) (Container, error) {
 	if err := validateContainerID(result.ID); err != nil {
 		return Container{}, fmt.Errorf("create container %s: %w", options.Name, err)
 	}
-	return Container{ID: result.ID, Name: options.Name}, nil
+	created := Container{ID: result.ID, Name: options.Name}
+	if len(spec.Files) > 0 {
+		if err := a.installFiles(ctx, created, spec); err != nil {
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+			defer cancel()
+			return created, errors.Join(err, a.Remove(cleanupCtx, spec.Ownership, created.ID))
+		}
+	}
+	return created, nil
 }
 
 // Find returns the managed container for the ownership's deterministic name.
@@ -309,8 +317,15 @@ func (s Spec) createOptions() (client.ContainerCreateOptions, error) {
 		return client.ContainerCreateOptions{}, fmt.Errorf("build container spec: parse port %d: %w", s.Port, err)
 	}
 	pids := s.Limits.PIDs
-	seconds := int(stopTimeout / time.Second)
 	labels := s.Ownership.labels()
+	digest, err := filesDigest(s.Files)
+	if err != nil {
+		return client.ContainerCreateOptions{}, err
+	}
+	if digest != "" {
+		labels["io.cloudlet.files-digest"] = digest
+	}
+	seconds := int(stopTimeout / time.Second)
 	labels[LabelPort] = strconv.FormatUint(uint64(s.Port), 10)
 	options := client.ContainerCreateOptions{
 		Name: s.Ownership.containerName(),

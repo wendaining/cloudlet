@@ -45,6 +45,8 @@ make setup 安装 npm 与 Go 锁定依赖、提交检查和 Chromium，生成权
 
 make dev 检查配置与端口，使用 compose.yaml 和 compose.dev.yaml 启动本实例数据库，等待健康，执行 goose 迁移，准备开发账号，再启动 Air、Vite 与 TypeScript 检查。所有服务就绪后显示访问地址。初始化失败时停止本次启动的环境资源。
 
+开发入口在实例配置中启用 Worker 首发，产物保存到 `.local/实例名称/workers`。主机预算与项目初始配额均配置为 4000 CPU 毫核、四 GiB 内存与四个实例。已有项目配额保持原值。每个 Worker 执行申请 1000 CPU 毫核、256 MiB 内存与一个实例。发布方法见 [Worker 发布](workers.md)。
+
 开发账号使用 CLOUDLET_DEV_EMAIL 与 CLOUDLET_DEV_PASSWORD，走正常登录流程。后续启动保留数据库中已有的账号与密码。生产环境禁止执行开发账号初始化。
 
 | 命令 | 行为 |
