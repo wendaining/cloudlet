@@ -132,12 +132,9 @@ func TestProjectCapacityQuery(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	handler, cleanup, err := controlplane.NewHandler(store, config.Config{
+	handler, cleanup := controlplane.NewHandler(store, config.Config{
 		Instance: "integration", PublicOrigin: "http://localhost",
 	}, slog.Default())
-	if err != nil {
-		t.Fatal(err)
-	}
 	defer cleanup()
 	server := httptest.NewServer(handler)
 	defer server.Close()

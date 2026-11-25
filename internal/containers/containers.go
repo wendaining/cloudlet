@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -123,6 +124,9 @@ type Spec struct {
 	Access    AccessMode
 	Network   string
 	Limits    Limits
+	// ChromiumSeccompProfile enables the hardened Chromium container settings.
+	// It must come from platform configuration, not a management API request.
+	ChromiumSeccompProfile string
 }
 
 // Container identifies a container created by the adapter.
@@ -319,6 +323,9 @@ func (s Spec) validate() error {
 	}
 	if s.Port == 0 {
 		return fmt.Errorf("validate container spec: port must be between 1 and 65535: %w", fs.ErrInvalid)
+	}
+	if s.ChromiumSeccompProfile != "" && !json.Valid([]byte(s.ChromiumSeccompProfile)) {
+		return fmt.Errorf("validate Chromium seccomp profile: %w", fs.ErrInvalid)
 	}
 	if err := s.Limits.validate(); err != nil {
 		return err

@@ -196,6 +196,62 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{projectID}/browser-sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["createBrowserSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/browser-sessions/{sessionID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        get: operations["getBrowserSession"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/browser-sessions/{sessionID}/navigate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["navigateBrowserSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{projectID}/sites/{siteName}/versions": {
         parameters: {
             query?: never;
@@ -411,6 +467,24 @@ export interface components {
             user: components["schemas"]["User"];
             projects: components["schemas"]["Project"][];
         };
+        /** @enum {string} */
+        BrowserSessionStatus: "starting" | "ready" | "failed" | "closed";
+        BrowserSession: {
+            /** Format: uuid */
+            id: string;
+            /** @description 需要项目会话凭据的相对管理 API 地址 */
+            endpoint: string;
+            /** Format: date-time */
+            expires_at: string;
+            status: components["schemas"]["BrowserSessionStatus"];
+        };
+        NavigateBrowserSessionRequest: {
+            url: string;
+        };
+        BrowserNavigation: {
+            url: string;
+            title: string;
+        };
         StaticSiteVersion: {
             /** Format: uuid */
             id: string;
@@ -506,6 +580,8 @@ export interface components {
         };
     };
     parameters: {
+        BrowserProjectID: string;
+        BrowserSessionID: string;
         SiteProjectID: string;
         SiteName: string;
     };
@@ -813,6 +889,82 @@ export interface operations {
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createBrowserSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 浏览器会话已就绪 */
+            201: {
+                headers: {
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrowserSession"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getBrowserSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 项目浏览器会话 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrowserSession"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    navigateBrowserSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NavigateBrowserSessionRequest"];
+            };
+        };
+        responses: {
+            /** @description 导航后的页面地址和标题 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrowserNavigation"];
+                };
+            };
             default: components["responses"]["Error"];
         };
     };

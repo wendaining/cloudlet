@@ -42,7 +42,7 @@ func TestStaticSiteVersionHTTP(t *testing.T) {
 			t.Fatal(err)
 		}
 		server := httptest.NewUnstartedServer(nil)
-		handler, cleanup, err := controlplane.NewHandlerWithMCP(db, sites,
+		handler, cleanup, err := controlplane.NewHandlerWithMCP(db, sites, nil,
 			config.Config{Instance: "integration", PublicOrigin: "http://localhost"}, slog.Default(), "http://"+server.Listener.Addr().String())
 		if err != nil {
 			server.Close()

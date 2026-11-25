@@ -60,14 +60,11 @@ func TestProjectSecretsEncryptAtRestAndExposeMetadataOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	var logs bytes.Buffer
-	handler, cleanup, err := controlplane.NewHandler(store, config.Config{
+	handler, cleanup := controlplane.NewHandler(store, config.Config{
 		Instance:     "integration",
 		PublicOrigin: "http://localhost",
 		SecretKey:    key,
 	}, slog.New(slog.NewTextHandler(&logs, nil)))
-	if err != nil {
-		t.Fatal(err)
-	}
 	t.Cleanup(cleanup)
 	api := httptest.NewServer(handler)
 	t.Cleanup(api.Close)
@@ -237,14 +234,11 @@ func TestProjectSecretsEncryptAtRestAndExposeMetadataOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = reopened.SQL.Close() })
-	restartedHandler, restartedCleanup, err := controlplane.NewHandler(reopened, config.Config{
+	restartedHandler, restartedCleanup := controlplane.NewHandler(reopened, config.Config{
 		Instance:     "integration",
 		PublicOrigin: "http://localhost",
 		SecretKey:    key,
 	}, slog.New(slog.NewTextHandler(&logs, nil)))
-	if err != nil {
-		t.Fatal(err)
-	}
 	t.Cleanup(restartedCleanup)
 	restarted := httptest.NewServer(restartedHandler)
 	t.Cleanup(restarted.Close)

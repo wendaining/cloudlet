@@ -11,6 +11,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/moby/moby/client"
+	"github.com/wendaining/cloudlet/internal/browser"
 	"github.com/wendaining/cloudlet/internal/config"
 	"github.com/wendaining/cloudlet/internal/controlplane"
 	"github.com/wendaining/cloudlet/internal/database"
@@ -48,6 +50,20 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 			}
 		}()
 	}
+	var browserService *browser.Service
+	if cfg.BrowserImage != "" {
+		docker, err := client.New(client.FromEnv)
+		if err != nil {
+			return fmt.Errorf("configure Browser Run Docker client: %w", err)
+		}
+		defer docker.Close()
+		browserCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		browserService, err = browser.NewService(browserCtx, store, docker, cfg.Instance, cfg.BrowserImage, cfg.BrowserSeccomp, cfg.SecretKey)
+		cancel()
+		if err != nil {
+			return fmt.Errorf("configure Browser Run: %w", err)
+		}
+	}
 	proxy, err := gateway.NewHandler(cfg, logger)
 	if err != nil {
 		return err
@@ -75,7 +91,7 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) error {
 	if err != nil {
 		return fmt.Errorf("resolve management API endpoint: %w", err)
 	}
-	management, closeSessions, err := controlplane.NewHandlerWithMCP(store, sites, cfg, logger, endpoint)
+	management, closeSessions, err := controlplane.NewHandlerWithMCP(store, sites, browserService, cfg, logger, endpoint)
 	if err != nil {
 		return fmt.Errorf("configure management API: %w", err)
 	}

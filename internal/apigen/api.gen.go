@@ -19,6 +19,30 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
+// Defines values for BrowserSessionStatus.
+const (
+	BrowserSessionStatusClosed   BrowserSessionStatus = "closed"
+	BrowserSessionStatusFailed   BrowserSessionStatus = "failed"
+	BrowserSessionStatusReady    BrowserSessionStatus = "ready"
+	BrowserSessionStatusStarting BrowserSessionStatus = "starting"
+)
+
+// Valid indicates whether the value is a known member of the BrowserSessionStatus enum.
+func (e BrowserSessionStatus) Valid() bool {
+	switch e {
+	case BrowserSessionStatusClosed:
+		return true
+	case BrowserSessionStatusFailed:
+		return true
+	case BrowserSessionStatusReady:
+		return true
+	case BrowserSessionStatusStarting:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ProjectMemberRole.
 const (
 	ProjectMemberRoleDeveloper ProjectMemberRole = "developer"
@@ -73,6 +97,24 @@ func (e StaticSiteVersionStatus) Valid() bool {
 	}
 }
 
+// BrowserNavigation defines model for BrowserNavigation.
+type BrowserNavigation struct {
+	Title string `json:"title"`
+	Url   string `json:"url"`
+}
+
+// BrowserSession defines model for BrowserSession.
+type BrowserSession struct {
+	// Endpoint 需要项目会话凭据的相对管理 API 地址
+	Endpoint  string               `json:"endpoint"`
+	ExpiresAt time.Time            `json:"expires_at"`
+	Id        openapi_types.UUID   `json:"id"`
+	Status    BrowserSessionStatus `json:"status"`
+}
+
+// BrowserSessionStatus defines model for BrowserSessionStatus.
+type BrowserSessionStatus string
+
 // CreateProjectRequest defines model for CreateProjectRequest.
 type CreateProjectRequest struct {
 	// Name 服务端去除首尾空白后必须包含 1 至 100 个 Unicode 字符；原始字符串可以包含首尾空白。
@@ -102,6 +144,11 @@ type Error struct {
 type LoginRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
+}
+
+// NavigateBrowserSessionRequest defines model for NavigateBrowserSessionRequest.
+type NavigateBrowserSessionRequest struct {
+	Url string `json:"url"`
 }
 
 // Operation defines model for Operation.
@@ -226,6 +273,12 @@ type VersionInfo struct {
 	Version string `json:"version"`
 }
 
+// BrowserProjectID defines model for BrowserProjectID.
+type BrowserProjectID = string
+
+// BrowserSessionID defines model for BrowserSessionID.
+type BrowserSessionID = openapi_types.UUID
+
 // SiteName defines model for SiteName.
 type SiteName = string
 
@@ -240,6 +293,9 @@ type CreateProjectJSONRequestBody = CreateProjectRequest
 
 // RenameProjectJSONRequestBody defines body for RenameProject for application/json ContentType.
 type RenameProjectJSONRequestBody = RenameProjectRequest
+
+// NavigateBrowserSessionJSONRequestBody defines body for NavigateBrowserSession for application/json ContentType.
+type NavigateBrowserSessionJSONRequestBody = NavigateBrowserSessionRequest
 
 // UpsertProjectMemberJSONRequestBody defines body for UpsertProjectMember for application/json ContentType.
 type UpsertProjectMemberJSONRequestBody = UpsertProjectMemberRequest
@@ -363,6 +419,20 @@ type ClientInterface interface {
 	//
 	// 更新项目显示名称；仅项目所有者可以调用，项目 ID 与成员关系保持不变。.
 	RenameProject(ctx context.Context, projectID string, body RenameProjectJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateBrowserSession performs a POST /api/v1/projects/{projectID}/browser-sessions (the `CreateBrowserSession` operationId) request.
+	CreateBrowserSession(ctx context.Context, projectID BrowserProjectID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetBrowserSession performs a GET /api/v1/projects/{projectID}/browser-sessions/{sessionID} (the `GetBrowserSession` operationId) request.
+	GetBrowserSession(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// NavigateBrowserSessionWithBody performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/navigate (the `NavigateBrowserSession` operationId) request,
+	// with any type of body and a specified content type.
+	NavigateBrowserSessionWithBody(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// NavigateBrowserSession performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/navigate (the `NavigateBrowserSession` operationId) request.
+	// Takes a body of the `application/json` content type.
+	NavigateBrowserSession(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, body NavigateBrowserSessionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetProjectCapacity performs a GET /api/v1/projects/{projectID}/capacity (the `GetProjectCapacity` operationId) request.
 	//
@@ -579,6 +649,60 @@ func (c *Client) RenameProjectWithBody(ctx context.Context, projectID string, co
 // 更新项目显示名称；仅项目所有者可以调用，项目 ID 与成员关系保持不变。.
 func (c *Client) RenameProject(ctx context.Context, projectID string, body RenameProjectJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRenameProjectRequest(c.Server, projectID, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateBrowserSession performs a POST /api/v1/projects/{projectID}/browser-sessions (the `CreateBrowserSession` operationId) request.
+func (c *Client) CreateBrowserSession(ctx context.Context, projectID BrowserProjectID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateBrowserSessionRequest(c.Server, projectID)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetBrowserSession performs a GET /api/v1/projects/{projectID}/browser-sessions/{sessionID} (the `GetBrowserSession` operationId) request.
+func (c *Client) GetBrowserSession(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetBrowserSessionRequest(c.Server, projectID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// NavigateBrowserSessionWithBody performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/navigate (the `NavigateBrowserSession` operationId) request,
+// with any type of body and a specified content type.
+func (c *Client) NavigateBrowserSessionWithBody(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewNavigateBrowserSessionRequestWithBody(c.Server, projectID, sessionID, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// NavigateBrowserSession performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/navigate (the `NavigateBrowserSession` operationId) request.
+// Takes a body of the `application/json` content type.
+func (c *Client) NavigateBrowserSession(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, body NavigateBrowserSessionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewNavigateBrowserSessionRequest(c.Server, projectID, sessionID, body)
 	if err != nil {
 		return nil, err
 	}
@@ -1060,6 +1184,135 @@ func NewRenameProjectRequestWithBody(server string, projectID string, contentTyp
 	}
 
 	req, err := http.NewRequest(http.MethodPatch, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewCreateBrowserSessionRequest constructs an http.Request for the CreateBrowserSession method
+func NewCreateBrowserSessionRequest(server string, projectID BrowserProjectID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/browser-sessions", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetBrowserSessionRequest constructs an http.Request for the GetBrowserSession method
+func NewGetBrowserSessionRequest(server string, projectID BrowserProjectID, sessionID BrowserSessionID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "sessionID", sessionID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/browser-sessions/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewNavigateBrowserSessionRequest calls the generic NavigateBrowserSession builder with application/json body
+func NewNavigateBrowserSessionRequest(server string, projectID BrowserProjectID, sessionID BrowserSessionID, body NavigateBrowserSessionJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewNavigateBrowserSessionRequestWithBody(server, projectID, sessionID, "application/json", bodyReader)
+}
+
+// NewNavigateBrowserSessionRequestWithBody constructs an http.Request for the NavigateBrowserSession method, with any body, and a specified content type
+func NewNavigateBrowserSessionRequestWithBody(server string, projectID BrowserProjectID, sessionID BrowserSessionID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "sessionID", sessionID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/browser-sessions/%s/navigate", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
 	if err != nil {
 		return nil, err
 	}
@@ -1650,6 +1903,26 @@ type ClientWithResponsesInterface interface {
 	// 更新项目显示名称；仅项目所有者可以调用，项目 ID 与成员关系保持不变。.
 	RenameProjectWithResponse(ctx context.Context, projectID string, body RenameProjectJSONRequestBody, reqEditors ...RequestEditorFn) (*RenameProjectResponse, error)
 
+	// CreateBrowserSessionWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions (the `CreateBrowserSession` operationId) request.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	CreateBrowserSessionWithResponse(ctx context.Context, projectID BrowserProjectID, reqEditors ...RequestEditorFn) (*CreateBrowserSessionResponse, error)
+
+	// GetBrowserSessionWithResponse performs a GET /api/v1/projects/{projectID}/browser-sessions/{sessionID} (the `GetBrowserSession` operationId) request.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	GetBrowserSessionWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, reqEditors ...RequestEditorFn) (*GetBrowserSessionResponse, error)
+
+	// NavigateBrowserSessionWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/navigate (the `NavigateBrowserSession` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	NavigateBrowserSessionWithBodyWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*NavigateBrowserSessionResponse, error)
+
+	// NavigateBrowserSessionWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/navigate (the `NavigateBrowserSession` operationId) request.
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	NavigateBrowserSessionWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, body NavigateBrowserSessionJSONRequestBody, reqEditors ...RequestEditorFn) (*NavigateBrowserSessionResponse, error)
+
 	// GetProjectCapacityWithResponse performs a GET /api/v1/projects/{projectID}/capacity (the `GetProjectCapacity` operationId) request.
 	//
 	// 返回项目成员可见的项目额度、活动预留占用和剩余量；三个值来自同一数据库快照。.
@@ -2208,6 +2481,157 @@ func (r RenameProjectResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r RenameProjectResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// CreateBrowserSessionResponse201Headers the declared response headers of an HTTP 201 response for CreateBrowserSession
+type CreateBrowserSessionResponse201Headers struct {
+	Location *string
+}
+
+type CreateBrowserSessionResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *BrowserSession
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+	// Headers201 the parsed response headers for an HTTP 201 response
+	Headers201 *CreateBrowserSessionResponse201Headers
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r CreateBrowserSessionResponse) GetJSON201() *BrowserSession {
+	return r.JSON201
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r CreateBrowserSessionResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r CreateBrowserSessionResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateBrowserSessionResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateBrowserSessionResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CreateBrowserSessionResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetBrowserSessionResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *BrowserSession
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetBrowserSessionResponse) GetJSON200() *BrowserSession {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r GetBrowserSessionResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r GetBrowserSessionResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetBrowserSessionResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetBrowserSessionResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetBrowserSessionResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type NavigateBrowserSessionResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *BrowserNavigation
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r NavigateBrowserSessionResponse) GetJSON200() *BrowserNavigation {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r NavigateBrowserSessionResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r NavigateBrowserSessionResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r NavigateBrowserSessionResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r NavigateBrowserSessionResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r NavigateBrowserSessionResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -3153,6 +3577,50 @@ func (c *ClientWithResponses) RenameProjectWithResponse(ctx context.Context, pro
 	return ParseRenameProjectResponse(rsp)
 }
 
+// CreateBrowserSessionWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions (the `CreateBrowserSession` operationId) request.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) CreateBrowserSessionWithResponse(ctx context.Context, projectID BrowserProjectID, reqEditors ...RequestEditorFn) (*CreateBrowserSessionResponse, error) {
+	rsp, err := c.CreateBrowserSession(ctx, projectID, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateBrowserSessionResponse(rsp)
+}
+
+// GetBrowserSessionWithResponse performs a GET /api/v1/projects/{projectID}/browser-sessions/{sessionID} (the `GetBrowserSession` operationId) request.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) GetBrowserSessionWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, reqEditors ...RequestEditorFn) (*GetBrowserSessionResponse, error) {
+	rsp, err := c.GetBrowserSession(ctx, projectID, sessionID, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetBrowserSessionResponse(rsp)
+}
+
+// NavigateBrowserSessionWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/navigate (the `NavigateBrowserSession` operationId) request,
+// with any type of body and a specified content type.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) NavigateBrowserSessionWithBodyWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*NavigateBrowserSessionResponse, error) {
+	rsp, err := c.NavigateBrowserSessionWithBody(ctx, projectID, sessionID, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseNavigateBrowserSessionResponse(rsp)
+}
+
+// NavigateBrowserSessionWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/navigate (the `NavigateBrowserSession` operationId) request.
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) NavigateBrowserSessionWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, body NavigateBrowserSessionJSONRequestBody, reqEditors ...RequestEditorFn) (*NavigateBrowserSessionResponse, error) {
+	rsp, err := c.NavigateBrowserSession(ctx, projectID, sessionID, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseNavigateBrowserSessionResponse(rsp)
+}
+
 // GetProjectCapacityWithResponse performs a GET /api/v1/projects/{projectID}/capacity (the `GetProjectCapacity` operationId) request.
 //
 // 返回项目成员可见的项目额度、活动预留占用和剩余量；三个值来自同一数据库快照。.
@@ -3670,6 +4138,118 @@ func ParseRenameProjectResponse(rsp *http.Response) (*RenameProjectResponse, err
 			return nil, err
 		}
 		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateBrowserSessionResponse parses an HTTP response from a CreateBrowserSessionWithResponse call
+func ParseCreateBrowserSessionResponse(rsp *http.Response) (*CreateBrowserSessionResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateBrowserSessionResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest BrowserSession
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 201:
+		var headers CreateBrowserSessionResponse201Headers
+		if values := rsp.Header.Values("Location"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Location", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.Location = &value
+		}
+		response.Headers201 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseGetBrowserSessionResponse parses an HTTP response from a GetBrowserSessionWithResponse call
+func ParseGetBrowserSessionResponse(rsp *http.Response) (*GetBrowserSessionResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetBrowserSessionResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest BrowserSession
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseNavigateBrowserSessionResponse parses an HTTP response from a NavigateBrowserSessionWithResponse call
+func ParseNavigateBrowserSessionResponse(rsp *http.Response) (*NavigateBrowserSessionResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &NavigateBrowserSessionResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest BrowserNavigation
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error
@@ -4353,6 +4933,15 @@ type ServerInterface interface {
 	// (PATCH /api/v1/projects/{projectID})
 	RenameProject(c *gin.Context, projectID string)
 
+	// (POST /api/v1/projects/{projectID}/browser-sessions)
+	CreateBrowserSession(c *gin.Context, projectID BrowserProjectID)
+
+	// (GET /api/v1/projects/{projectID}/browser-sessions/{sessionID})
+	GetBrowserSession(c *gin.Context, projectID BrowserProjectID, sessionID BrowserSessionID)
+
+	// (POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/navigate)
+	NavigateBrowserSession(c *gin.Context, projectID BrowserProjectID, sessionID BrowserSessionID)
+
 	// (GET /api/v1/projects/{projectID}/capacity)
 	GetProjectCapacity(c *gin.Context, projectID string)
 
@@ -4525,6 +5114,99 @@ func (siw *ServerInterfaceWrapper) RenameProject(c *gin.Context) {
 	}
 
 	siw.Handler.RenameProject(c, projectID)
+}
+
+// CreateBrowserSession operation middleware
+func (siw *ServerInterfaceWrapper) CreateBrowserSession(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID BrowserProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.CreateBrowserSession(c, projectID)
+}
+
+// GetBrowserSession operation middleware
+func (siw *ServerInterfaceWrapper) GetBrowserSession(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID BrowserProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "sessionID" -------------
+	var sessionID BrowserSessionID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "sessionID", c.Param("sessionID"), &sessionID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter sessionID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetBrowserSession(c, projectID, sessionID)
+}
+
+// NavigateBrowserSession operation middleware
+func (siw *ServerInterfaceWrapper) NavigateBrowserSession(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID BrowserProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "sessionID" -------------
+	var sessionID BrowserSessionID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "sessionID", c.Param("sessionID"), &sessionID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter sessionID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.NavigateBrowserSession(c, projectID, sessionID)
 }
 
 // GetProjectCapacity operation middleware
@@ -4919,6 +5601,9 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/members", wrapper.ListProjectMembers)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/members", wrapper.UpsertProjectMember)
 	router.DELETE(options.BaseURL+"/api/v1/projects/:projectID/members/:userID", wrapper.RemoveProjectMember)
+	router.POST(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions", wrapper.CreateBrowserSession)
+	router.GET(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID", wrapper.GetBrowserSession)
+	router.POST(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID/navigate", wrapper.NavigateBrowserSession)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/sites/:siteName/versions", wrapper.UploadStaticSiteVersion)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/sites/:siteName/versions/:versionID", wrapper.GetStaticSiteVersion)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/secrets", wrapper.ListProjectSecrets)

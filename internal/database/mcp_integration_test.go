@@ -121,7 +121,7 @@ func TestMCPReadOnlyQueriesUseAuthenticatedProjectAccess(t *testing.T) {
 	server.Listener.Close()
 	server.Listener = listener
 	endpoint := "http://" + listener.Addr().String()
-	handler, closeSessions, err := controlplane.NewHandlerWithMCP(store, nil,
+	handler, closeSessions, err := controlplane.NewHandlerWithMCP(store, nil, nil,
 		config.Config{Instance: "mcp-integration", PublicOrigin: "http://localhost"}, slog.Default(), endpoint)
 	if err != nil {
 		t.Fatal(err)
