@@ -28,18 +28,7 @@ import (
 func TestBrowserSessionHTTP(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 	defer cancel()
-	runtimeDir, err := filepath.Abs("../../runtimes/browser")
-	if err != nil {
-		t.Fatal(err)
-	}
-	imageID := os.Getenv("CLOUDLET_BROWSER_TEST_IMAGE")
-	if imageID == "" {
-		output, err := exec.CommandContext(ctx, "docker", "build", "--quiet", runtimeDir).CombinedOutput()
-		if err != nil {
-			t.Fatalf("build Chromium runtime: %v\n%s", err, output)
-		}
-		imageID = strings.TrimSpace(string(output))
-	}
+	runtimeDir, imageID := browserRuntimeImage(t, ctx)
 	store, _, _ := openIntegrationDatabase(t, ctx)
 	if err := store.Migrate(ctx); err != nil {
 		t.Fatal(err)
@@ -157,6 +146,23 @@ func TestBrowserSessionHTTP(t *testing.T) {
 	if err != nil || usage.HostUsed.Instances != 0 || usage.ProjectUsed.Instances != 0 {
 		t.Fatalf("expired session still holds capacity: %+v (%v)", usage, err)
 	}
+}
+
+func browserRuntimeImage(t *testing.T, ctx context.Context) (string, string) {
+	t.Helper()
+	runtimeDir, err := filepath.Abs("../../runtimes/browser")
+	if err != nil {
+		t.Fatal(err)
+	}
+	imageID := os.Getenv("CLOUDLET_BROWSER_TEST_IMAGE")
+	if imageID == "" {
+		output, err := exec.CommandContext(ctx, "docker", "build", "--quiet", runtimeDir).CombinedOutput()
+		if err != nil {
+			t.Fatalf("build Chromium runtime: %v\n%s", err, output)
+		}
+		imageID = strings.TrimSpace(string(output))
+	}
+	return runtimeDir, imageID
 }
 
 func chromiumPage(t *testing.T, ctx context.Context, docker *client.Client) string {

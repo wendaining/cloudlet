@@ -403,6 +403,11 @@ type ClientInterface interface {
 	// CreateBrowserSession performs a POST /api/v1/projects/{projectID}/browser-sessions (the `CreateBrowserSession` operationId) request.
 	CreateBrowserSession(ctx context.Context, projectID BrowserProjectID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// CloseBrowserSession performs a DELETE /api/v1/projects/{projectID}/browser-sessions/{sessionID} (the `CloseBrowserSession` operationId) request.
+	//
+	// 停止容器并确认清理，释放容量后返回会话终态。重复关闭返回已有终态。.
+	CloseBrowserSession(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetBrowserSession performs a GET /api/v1/projects/{projectID}/browser-sessions/{sessionID} (the `GetBrowserSession` operationId) request.
 	GetBrowserSession(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -637,6 +642,21 @@ func (c *Client) RenameProject(ctx context.Context, projectID string, body Renam
 // CreateBrowserSession performs a POST /api/v1/projects/{projectID}/browser-sessions (the `CreateBrowserSession` operationId) request.
 func (c *Client) CreateBrowserSession(ctx context.Context, projectID BrowserProjectID, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewCreateBrowserSessionRequest(c.Server, projectID)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CloseBrowserSession performs a DELETE /api/v1/projects/{projectID}/browser-sessions/{sessionID} (the `CloseBrowserSession` operationId) request.
+//
+// 停止容器并确认清理，释放容量后返回会话终态。重复关闭返回已有终态。.
+func (c *Client) CloseBrowserSession(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCloseBrowserSessionRequest(c.Server, projectID, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -1180,6 +1200,47 @@ func NewCreateBrowserSessionRequest(server string, projectID BrowserProjectID) (
 	}
 
 	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCloseBrowserSessionRequest constructs an http.Request for the CloseBrowserSession method
+func NewCloseBrowserSessionRequest(server string, projectID BrowserProjectID, sessionID BrowserSessionID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "sessionID", sessionID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/browser-sessions/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, queryURL.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1834,6 +1895,13 @@ type ClientWithResponsesInterface interface {
 	// Returns a wrapper object for the known response body format(s).
 	CreateBrowserSessionWithResponse(ctx context.Context, projectID BrowserProjectID, reqEditors ...RequestEditorFn) (*CreateBrowserSessionResponse, error)
 
+	// CloseBrowserSessionWithResponse performs a DELETE /api/v1/projects/{projectID}/browser-sessions/{sessionID} (the `CloseBrowserSession` operationId) request.
+	//
+	// 停止容器并确认清理，释放容量后返回会话终态。重复关闭返回已有终态。.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	CloseBrowserSessionWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, reqEditors ...RequestEditorFn) (*CloseBrowserSessionResponse, error)
+
 	// GetBrowserSessionWithResponse performs a GET /api/v1/projects/{projectID}/browser-sessions/{sessionID} (the `GetBrowserSession` operationId) request.
 	//
 	// Returns a wrapper object for the known response body format(s).
@@ -2455,6 +2523,68 @@ func (r CreateBrowserSessionResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r CreateBrowserSessionResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type CloseBrowserSessionResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *BrowserSession
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Error
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *Error
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r CloseBrowserSessionResponse) GetJSON200() *BrowserSession {
+	return r.JSON200
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r CloseBrowserSessionResponse) GetJSON403() *Error {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r CloseBrowserSessionResponse) GetJSON404() *Error {
+	return r.JSON404
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r CloseBrowserSessionResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r CloseBrowserSessionResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CloseBrowserSessionResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CloseBrowserSessionResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CloseBrowserSessionResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -3445,6 +3575,19 @@ func (c *ClientWithResponses) CreateBrowserSessionWithResponse(ctx context.Conte
 	return ParseCreateBrowserSessionResponse(rsp)
 }
 
+// CloseBrowserSessionWithResponse performs a DELETE /api/v1/projects/{projectID}/browser-sessions/{sessionID} (the `CloseBrowserSession` operationId) request.
+//
+// 停止容器并确认清理，释放容量后返回会话终态。重复关闭返回已有终态。.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) CloseBrowserSessionWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, reqEditors ...RequestEditorFn) (*CloseBrowserSessionResponse, error) {
+	rsp, err := c.CloseBrowserSession(ctx, projectID, sessionID, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCloseBrowserSessionResponse(rsp)
+}
+
 // GetBrowserSessionWithResponse performs a GET /api/v1/projects/{projectID}/browser-sessions/{sessionID} (the `GetBrowserSession` operationId) request.
 //
 // Returns a wrapper object for the known response body format(s).
@@ -4036,6 +4179,53 @@ func ParseCreateBrowserSessionResponse(rsp *http.Response) (*CreateBrowserSessio
 			headers.Location = &value
 		}
 		response.Headers201 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseCloseBrowserSessionResponse parses an HTTP response from a CloseBrowserSessionWithResponse call
+func ParseCloseBrowserSessionResponse(rsp *http.Response) (*CloseBrowserSessionResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CloseBrowserSessionResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest BrowserSession
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
 	}
 
 	return response, nil
@@ -4733,6 +4923,9 @@ type ServerInterface interface {
 	// (POST /api/v1/projects/{projectID}/browser-sessions)
 	CreateBrowserSession(c *gin.Context, projectID BrowserProjectID)
 
+	// (DELETE /api/v1/projects/{projectID}/browser-sessions/{sessionID})
+	CloseBrowserSession(c *gin.Context, projectID BrowserProjectID, sessionID BrowserSessionID)
+
 	// (GET /api/v1/projects/{projectID}/browser-sessions/{sessionID})
 	GetBrowserSession(c *gin.Context, projectID BrowserProjectID, sessionID BrowserSessionID)
 
@@ -4933,6 +5126,40 @@ func (siw *ServerInterfaceWrapper) CreateBrowserSession(c *gin.Context) {
 	}
 
 	siw.Handler.CreateBrowserSession(c, projectID)
+}
+
+// CloseBrowserSession operation middleware
+func (siw *ServerInterfaceWrapper) CloseBrowserSession(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID BrowserProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "sessionID" -------------
+	var sessionID BrowserSessionID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "sessionID", c.Param("sessionID"), &sessionID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter sessionID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.CloseBrowserSession(c, projectID, sessionID)
 }
 
 // GetBrowserSession operation middleware
@@ -5370,6 +5597,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/members", wrapper.UpsertProjectMember)
 	router.DELETE(options.BaseURL+"/api/v1/projects/:projectID/members/:userID", wrapper.RemoveProjectMember)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions", wrapper.CreateBrowserSession)
+	router.DELETE(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID", wrapper.CloseBrowserSession)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID", wrapper.GetBrowserSession)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID/navigate", wrapper.NavigateBrowserSession)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/sites/:siteName/versions", wrapper.UploadStaticSiteVersion)
