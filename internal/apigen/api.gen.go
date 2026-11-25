@@ -19,6 +19,24 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
+// Defines values for BrowserFormActionRequestAction.
+const (
+	Fill   BrowserFormActionRequestAction = "fill"
+	Select BrowserFormActionRequestAction = "select"
+)
+
+// Valid indicates whether the value is a known member of the BrowserFormActionRequestAction enum.
+func (e BrowserFormActionRequestAction) Valid() bool {
+	switch e {
+	case Fill:
+		return true
+	case Select:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for BrowserSessionStatus.
 const (
 	BrowserSessionStatusClosed   BrowserSessionStatus = "closed"
@@ -112,6 +130,21 @@ type BrowserConsoleEntry struct {
 	Message   string `json:"message"`
 	Truncated bool   `json:"truncated"`
 }
+
+// BrowserFormActionRequest defines model for BrowserFormActionRequest.
+type BrowserFormActionRequest struct {
+	Action BrowserFormActionRequestAction `json:"action"`
+
+	// Selector 唯一定位表单控件的 CSS 选择器
+	Selector  string `json:"selector"`
+	TimeoutMs *int   `json:"timeout_ms,omitempty"`
+
+	// Value 填写文本或原生选项的 value。允许空字符串。
+	Value string `json:"value"`
+}
+
+// BrowserFormActionRequestAction defines model for BrowserFormActionRequest.Action.
+type BrowserFormActionRequestAction string
 
 // BrowserNavigation defines model for BrowserNavigation.
 type BrowserNavigation struct {
@@ -432,6 +465,9 @@ type RenameProjectJSONRequestBody = RenameProjectRequest
 // ClickBrowserPageJSONRequestBody defines body for ClickBrowserPage for application/json ContentType.
 type ClickBrowserPageJSONRequestBody = ClickBrowserPageRequest
 
+// ApplyBrowserFormActionJSONRequestBody defines body for ApplyBrowserFormAction for application/json ContentType.
+type ApplyBrowserFormActionJSONRequestBody = BrowserFormActionRequest
+
 // NavigateBrowserSessionJSONRequestBody defines body for NavigateBrowserSession for application/json ContentType.
 type NavigateBrowserSessionJSONRequestBody = NavigateBrowserSessionRequest
 
@@ -585,6 +621,18 @@ type ClientInterface interface {
 
 	// GetBrowserConsole performs a GET /api/v1/projects/{projectID}/browser-sessions/{sessionID}/console (the `GetBrowserConsole` operationId) request.
 	GetBrowserConsole(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ApplyBrowserFormActionWithBody performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/form (the `ApplyBrowserFormAction` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// 填写输入或选择原生选项，使用点击接口提交表单。.
+	ApplyBrowserFormActionWithBody(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ApplyBrowserFormAction performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/form (the `ApplyBrowserFormAction` operationId) request.
+	// Takes a body of the `application/json` content type.
+	//
+	// 填写输入或选择原生选项，使用点击接口提交表单。.
+	ApplyBrowserFormAction(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, body ApplyBrowserFormActionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// NavigateBrowserSessionWithBody performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/navigate (the `NavigateBrowserSession` operationId) request,
 	// with any type of body and a specified content type.
@@ -941,6 +989,38 @@ func (c *Client) ClickBrowserPage(ctx context.Context, projectID BrowserProjectI
 // GetBrowserConsole performs a GET /api/v1/projects/{projectID}/browser-sessions/{sessionID}/console (the `GetBrowserConsole` operationId) request.
 func (c *Client) GetBrowserConsole(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetBrowserConsoleRequest(c.Server, projectID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ApplyBrowserFormActionWithBody performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/form (the `ApplyBrowserFormAction` operationId) request,
+// with any type of body and a specified content type.
+//
+// 填写输入或选择原生选项，使用点击接口提交表单。.
+func (c *Client) ApplyBrowserFormActionWithBody(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewApplyBrowserFormActionRequestWithBody(c.Server, projectID, sessionID, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ApplyBrowserFormAction performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/form (the `ApplyBrowserFormAction` operationId) request.
+// Takes a body of the `application/json` content type.
+//
+// 填写输入或选择原生选项，使用点击接口提交表单。.
+func (c *Client) ApplyBrowserFormAction(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, body ApplyBrowserFormActionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewApplyBrowserFormActionRequest(c.Server, projectID, sessionID, body)
 	if err != nil {
 		return nil, err
 	}
@@ -1816,6 +1896,60 @@ func NewGetBrowserConsoleRequest(server string, projectID BrowserProjectID, sess
 	if err != nil {
 		return nil, err
 	}
+
+	return req, nil
+}
+
+// NewApplyBrowserFormActionRequest calls the generic ApplyBrowserFormAction builder with application/json body
+func NewApplyBrowserFormActionRequest(server string, projectID BrowserProjectID, sessionID BrowserSessionID, body ApplyBrowserFormActionJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewApplyBrowserFormActionRequestWithBody(server, projectID, sessionID, "application/json", bodyReader)
+}
+
+// NewApplyBrowserFormActionRequestWithBody constructs an http.Request for the ApplyBrowserFormAction method, with any body, and a specified content type
+func NewApplyBrowserFormActionRequestWithBody(server string, projectID BrowserProjectID, sessionID BrowserSessionID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "sessionID", sessionID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/browser-sessions/%s/form", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -2946,6 +3080,20 @@ type ClientWithResponsesInterface interface {
 	// Returns a wrapper object for the known response body format(s).
 	GetBrowserConsoleWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, reqEditors ...RequestEditorFn) (*GetBrowserConsoleResponse, error)
 
+	// ApplyBrowserFormActionWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/form (the `ApplyBrowserFormAction` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// 填写输入或选择原生选项，使用点击接口提交表单。.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	ApplyBrowserFormActionWithBodyWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ApplyBrowserFormActionResponse, error)
+
+	// ApplyBrowserFormActionWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/form (the `ApplyBrowserFormAction` operationId) request.
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// 填写输入或选择原生选项，使用点击接口提交表单。.
+	ApplyBrowserFormActionWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, body ApplyBrowserFormActionJSONRequestBody, reqEditors ...RequestEditorFn) (*ApplyBrowserFormActionResponse, error)
+
 	// NavigateBrowserSessionWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/navigate (the `NavigateBrowserSession` operationId) request,
 	// with any type of body and a specified content type.
 	//
@@ -3834,6 +3982,47 @@ func (r GetBrowserConsoleResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetBrowserConsoleResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ApplyBrowserFormActionResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r ApplyBrowserFormActionResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r ApplyBrowserFormActionResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ApplyBrowserFormActionResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ApplyBrowserFormActionResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ApplyBrowserFormActionResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -5540,6 +5729,32 @@ func (c *ClientWithResponses) GetBrowserConsoleWithResponse(ctx context.Context,
 	return ParseGetBrowserConsoleResponse(rsp)
 }
 
+// ApplyBrowserFormActionWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/form (the `ApplyBrowserFormAction` operationId) request,
+// with any type of body and a specified content type.
+//
+// 填写输入或选择原生选项，使用点击接口提交表单。.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) ApplyBrowserFormActionWithBodyWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ApplyBrowserFormActionResponse, error) {
+	rsp, err := c.ApplyBrowserFormActionWithBody(ctx, projectID, sessionID, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseApplyBrowserFormActionResponse(rsp)
+}
+
+// ApplyBrowserFormActionWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/form (the `ApplyBrowserFormAction` operationId) request.
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// 填写输入或选择原生选项，使用点击接口提交表单。.
+func (c *ClientWithResponses) ApplyBrowserFormActionWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, body ApplyBrowserFormActionJSONRequestBody, reqEditors ...RequestEditorFn) (*ApplyBrowserFormActionResponse, error) {
+	rsp, err := c.ApplyBrowserFormAction(ctx, projectID, sessionID, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseApplyBrowserFormActionResponse(rsp)
+}
+
 // NavigateBrowserSessionWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/navigate (the `NavigateBrowserSession` operationId) request,
 // with any type of body and a specified content type.
 //
@@ -6393,6 +6608,35 @@ func ParseGetBrowserConsoleResponse(rsp *http.Response) (*GetBrowserConsoleRespo
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseApplyBrowserFormActionResponse parses an HTTP response from a ApplyBrowserFormActionWithResponse call
+func ParseApplyBrowserFormActionResponse(rsp *http.Response) (*ApplyBrowserFormActionResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ApplyBrowserFormActionResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case rsp.StatusCode == 204:
+		break // No content-type
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error
@@ -7697,6 +7941,9 @@ type ServerInterface interface {
 	// (GET /api/v1/projects/{projectID}/browser-sessions/{sessionID}/console)
 	GetBrowserConsole(c *gin.Context, projectID BrowserProjectID, sessionID BrowserSessionID)
 
+	// (POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/form)
+	ApplyBrowserFormAction(c *gin.Context, projectID BrowserProjectID, sessionID BrowserSessionID)
+
 	// (POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/navigate)
 	NavigateBrowserSession(c *gin.Context, projectID BrowserProjectID, sessionID BrowserSessionID)
 
@@ -8057,6 +8304,40 @@ func (siw *ServerInterfaceWrapper) GetBrowserConsole(c *gin.Context) {
 	}
 
 	siw.Handler.GetBrowserConsole(c, projectID, sessionID)
+}
+
+// ApplyBrowserFormAction operation middleware
+func (siw *ServerInterfaceWrapper) ApplyBrowserFormAction(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID BrowserProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "sessionID" -------------
+	var sessionID BrowserSessionID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "sessionID", c.Param("sessionID"), &sessionID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter sessionID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ApplyBrowserFormAction(c, projectID, sessionID)
 }
 
 // NavigateBrowserSession operation middleware
@@ -8844,6 +9125,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.DELETE(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID", wrapper.CloseBrowserSession)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID", wrapper.GetBrowserSession)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID/click", wrapper.ClickBrowserPage)
+	router.POST(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID/form", wrapper.ApplyBrowserFormAction)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID/navigate", wrapper.NavigateBrowserSession)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID/console", wrapper.GetBrowserConsole)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID/screenshots", wrapper.CaptureBrowserScreenshot)

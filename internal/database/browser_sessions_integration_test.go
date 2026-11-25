@@ -174,6 +174,7 @@ func TestBrowserSessionHTTP(t *testing.T) {
 	click(ownerAPI, owner.ID, "#absent", &short, http.StatusGatewayTimeout)
 	get(ownerAPI, owner.ID, http.StatusOK)
 	t.Log("real Chromium clicked the counter twice; ambiguous locator HTTP 422, absent locator HTTP 504, other project HTTP 404")
+	verifyBrowserForm(t, ctx, ownerAPI, otherAPI, owner.ID, session.Id, fixture)
 	page := navigate(ownerAPI, owner.ID, fixture, http.StatusOK).JSON200
 	if page == nil || page.Url != fixture || page.Title != "Cloudlet Browser Run" {
 		t.Fatalf("unexpected Chromium page: %+v", page)
