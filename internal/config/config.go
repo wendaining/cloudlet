@@ -25,19 +25,20 @@ type Route struct {
 }
 
 type Config struct {
-	Environment            string         `json:"environment,omitempty"`
-	Instance               string         `json:"instance,omitempty"`
-	PublicOrigin           string         `json:"public_origin,omitempty"`
-	SecretKey              []byte         `json:"-"`
-	BrowserImage           string         `json:"-"`
-	BrowserSeccomp         string         `json:"-"`
-	BrowserSessionLifetime time.Duration  `json:"-"`
-	DatabaseURL            string         `json:"-"`
-	SiteStorageDirectory   string         `json:"site_storage_directory,omitempty"`
-	APIAddress             string         `json:"api_address"`
-	GatewayAddress         string         `json:"gateway_address"`
-	Routes                 []Route        `json:"routes"`
-	Workers                *WorkerRuntime `json:"workers,omitempty"`
+	Environment            string            `json:"environment,omitempty"`
+	Instance               string            `json:"instance,omitempty"`
+	PublicOrigin           string            `json:"public_origin,omitempty"`
+	SecretKey              []byte            `json:"-"`
+	BrowserImage           string            `json:"-"`
+	BrowserSeccomp         string            `json:"-"`
+	BrowserSessionLifetime time.Duration     `json:"-"`
+	DatabaseURL            string            `json:"-"`
+	SiteStorageDirectory   string            `json:"site_storage_directory,omitempty"`
+	APIAddress             string            `json:"api_address"`
+	GatewayAddress         string            `json:"gateway_address"`
+	Routes                 []Route           `json:"routes"`
+	Workers                *WorkerRuntime    `json:"workers,omitempty"`
+	Containers             *ContainerRuntime `json:"containers,omitempty"`
 }
 
 type ResourceBudget struct {
@@ -61,6 +62,27 @@ func (w WorkerRuntime) Validate() error {
 	for _, budget := range []ResourceBudget{w.HostBudget, w.ProjectQuota} {
 		if budget.CPUMillis < 1000 || budget.MemoryBytes < 256<<20 || budget.Instances < 1 {
 			return errors.New("Worker budgets must provide at least 1000 CPU millicores, 256 MiB memory and one instance")
+		}
+	}
+	return nil
+}
+
+// ContainerRuntime configures the host budget and initial project quota used by
+// the container controller. It shares the capacity tables with the Worker
+// runtime, so both configurations must declare the same host and budgets.
+type ContainerRuntime struct {
+	HostID       string         `json:"host_id"`
+	HostBudget   ResourceBudget `json:"host_budget"`
+	ProjectQuota ResourceBudget `json:"project_quota"`
+}
+
+func (c ContainerRuntime) Validate() error {
+	if c.HostID == "" || len(c.HostID) > 64 || strings.TrimSpace(c.HostID) != c.HostID {
+		return errors.New("Container runtime requires a host identifier of 1 to 64 bytes")
+	}
+	for _, budget := range []ResourceBudget{c.HostBudget, c.ProjectQuota} {
+		if budget.CPUMillis < 1000 || budget.MemoryBytes < 256<<20 || budget.Instances < 1 {
+			return errors.New("Container budgets must provide at least 1000 CPU millicores, 256 MiB memory and one instance")
 		}
 	}
 	return nil
@@ -112,6 +134,22 @@ func (cfg Config) Validate() error {
 		}
 		if err := cfg.Workers.Validate(); err != nil {
 			return err
+		}
+	}
+	if cfg.Containers != nil {
+		if cfg.DatabaseURL == "" || cfg.Instance == "" {
+			return errors.New("Container runtime requires a management database and instance")
+		}
+		if err := cfg.Containers.Validate(); err != nil {
+			return err
+		}
+	}
+	if cfg.Workers != nil && cfg.Containers != nil {
+		if cfg.Workers.HostID != cfg.Containers.HostID {
+			return errors.New("Worker and Container runtimes must use the same host identifier")
+		}
+		if cfg.Workers.HostBudget != cfg.Containers.HostBudget || cfg.Workers.ProjectQuota != cfg.Containers.ProjectQuota {
+			return errors.New("Worker and Container runtimes must use the same host budget and project quota")
 		}
 	}
 	if cfg.BrowserImage != "" || cfg.BrowserSeccomp != "" {

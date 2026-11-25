@@ -8,7 +8,7 @@
 | npm run lint:config | JSON、YAML、Issue 表单与 Actions 约定 |
 | npm run lint:tooling | 脚本语法、ShellCheck、配置文件与真实端口检查 |
 | make test | Go race 测试、真实 HTTP、Gateway 转发与服务停止 |
-| make test-integration | Docker 中的 PostgreSQL 迁移、账号、会话、项目与成员角色、操作记录、项目凭据、路由快照、容量预留、容器容量准入、项目容量查询、就绪检查、workerd 执行和容器创建、启动、观测、HTTP 就绪探测、配额触发、停止与删除 |
+| make test-integration | Docker 中的 PostgreSQL 迁移、账号、会话、项目与成员角色、操作记录、项目凭据、路由快照、容量预留、容器容量准入、项目容量查询、就绪检查、workerd 执行、管理 API 容器创建与 Gateway 访问，以及容器启动、观测、HTTP 就绪探测、配额触发、停止与删除 |
 | make web-check | TypeScript、ESLint、Prettier、Vite 构建与接口生成一致性 |
 | make dev-check | 真实本机进程、数据库、热重载、完整停止、多实例与失败清理 |
 | make test-e2e | 真实 Chromium 在桌面和手机尺寸下完成登录、刷新和退出 |
@@ -55,6 +55,20 @@ go test -race -count=1 -tags=integration ./internal/executions
 ```
 
 用例在四核四 GiB 主机预算下预占三核三 GiB 与三个实例，再并发提交八个一核一 GiB、单实例的容器启动请求。只有一个请求成功，其余返回容量不足且没有创建容器；成功启动的固定镜像通过实际发布的回环端口返回预期页面。仅停止容器时预留保持活动；停止并删除容器后容量恢复，后续申请可以再次成功。无效镜像导致创建失败时释放预留且不留下容器；无效用户使 Docker 启动失败时清理容器并释放预留。同一执行标识的并发启动只创建一个容器，并只扣减一次容量。同一执行更换归属或镜像、不同执行复用同一归属都会被拒绝；错误容器标识不会释放容量，绑定容器被外部删除后按归属确认清理。尚未记录容器标识的预留可以在确认没有容器后释放；替换容器清理后释放失败时，原 Stop 请求仍可使用原容器标识重试。256 至 512 字节的摘要固定镜像可以通过准入；Docker 创建失败时正常释放预留。生命周期用例使用真实 PostgreSQL 与 Docker，纯逻辑单元测试只覆盖构造与请求校验、绑定映射和复用配置比较。
+
+## 容器创建验收
+
+使用真实 PostgreSQL、Docker、管理 HTTP API 与 Gateway 验证首个容器创建、就绪和公开访问。
+
+```sh
+export DOCKER_HOST="$(docker context inspect --format '{{.Endpoints.docker.Host}}')"
+export TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock
+go test -race -count=1 -tags=integration -run TestContainerPublicationHTTP -v ./internal/containerpublish
+```
+
+用例创建真实项目与成员，验证查看者 403、非成员 404、未登录 401、缺少幂等键与无效请求 400。使用 configs/images.json 中固定镜像和摘要创建容器，核对 201 响应、Operation 成功、Docker 容器运行、归属标签、非 root 用户、CPU、内存、进程与文件句柄限制和回环端口。通过 Gateway 使用大小写与末尾句点变化的域名访问容器，核对实际 HTTP 响应。重复幂等请求返回 200 且不创建第二个容器；更换请求内容、容器名称或域名冲突返回 409。使用会立即退出的命令验证 422、失败原因、容器删除与容量释放；超额 CPU 返回 429 且不创建容器。查询接口验证项目成员可读、非成员返回 404。
+
+测试结束后清理所属容器。镜像缓存继续复用。
 
 ## 项目容量查询验收
 

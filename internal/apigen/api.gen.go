@@ -131,6 +131,78 @@ type BrowserSession struct {
 // BrowserSessionStatus defines model for BrowserSessionStatus.
 type BrowserSessionStatus string
 
+// Container defines model for Container.
+type Container struct {
+	Command           *[]string          `json:"command,omitempty"`
+	CpuMillis         int64              `json:"cpu_millis"`
+	CreatedAt         time.Time          `json:"created_at"`
+	DockerContainerId string             `json:"docker_container_id"`
+	Env               *[]string          `json:"env,omitempty"`
+	ExecutionId       openapi_types.UUID `json:"execution_id"`
+
+	// ExecutionState 实际执行状态，取值为 pending、running、stopped 或 failed。
+	ExecutionState       string             `json:"execution_state"`
+	Failure              string             `json:"failure"`
+	Generation           int64              `json:"generation"`
+	HealthCheckPath      string             `json:"health_check_path"`
+	HealthCheckTimeoutMs int64              `json:"health_check_timeout_ms"`
+	Hostname             string             `json:"hostname"`
+	Id                   openapi_types.UUID `json:"id"`
+	Image                string             `json:"image"`
+	ImageDigest          string             `json:"image_digest"`
+	MemoryBytes          int64              `json:"memory_bytes"`
+	Name                 string             `json:"name"`
+	OpenFiles            int64              `json:"open_files"`
+	OperationId          openapi_types.UUID `json:"operation_id"`
+	OperationOutcome     string             `json:"operation_outcome"`
+	OperationPhase       string             `json:"operation_phase"`
+	PathPrefix           string             `json:"path_prefix"`
+	Pids                 int64              `json:"pids"`
+	Port                 int                `json:"port"`
+	ProjectId            openapi_types.UUID `json:"project_id"`
+
+	// State 容器目标状态，取值为 pending、active 或 failed。
+	State  string `json:"state"`
+	Target string `json:"target"`
+	User   string `json:"user"`
+}
+
+// CreateContainerRequest defines model for CreateContainerRequest.
+type CreateContainerRequest struct {
+	// Command 覆盖镜像命令的参数数组。省略时使用镜像默认命令。
+	Command *[]string `json:"command,omitempty"`
+
+	// CpuMillis 申请并限制的 CPU 毫核。
+	CpuMillis int64 `json:"cpu_millis"`
+
+	// Env KEY=value 形式的环境变量。请求体总大小最多 64 KiB。
+	Env *[]string `json:"env,omitempty"`
+
+	// HealthCheckPath 就绪探测的绝对请求路径。
+	HealthCheckPath *string `json:"health_check_path,omitempty"`
+
+	// HealthCheckTimeoutMs 就绪探测的总截止时间。接受 200 至 399 的最终 HTTP 状态。
+	HealthCheckTimeoutMs *int64 `json:"health_check_timeout_ms,omitempty"`
+
+	// Hostname 无端口的公开域名，由 Gateway 提供根路径路由。
+	Hostname string `json:"hostname"`
+
+	// Image 包含不可变摘要的镜像引用，格式为 repository@sha256:digest。仅使用标签的引用会被拒绝。
+	Image string `json:"image"`
+
+	// MemoryBytes 申请并限制的内存字节。
+	MemoryBytes int64 `json:"memory_bytes"`
+
+	// Name 项目内稳定的容器名称。
+	Name string `json:"name"`
+
+	// Port 容器内 HTTP 服务监听的 TCP 端口。
+	Port int `json:"port"`
+
+	// User 非 root 运行身份，格式为 user 或 user:group。省略时使用 1000:1000。
+	User *string `json:"user,omitempty"`
+}
+
 // CreateProjectRequest defines model for CreateProjectRequest.
 type CreateProjectRequest struct {
 	// Name 服务端去除首尾空白后必须包含 1 至 100 个 Unicode 字符；原始字符串可以包含首尾空白。
@@ -339,6 +411,11 @@ type SiteName = string
 // SiteProjectID defines model for SiteProjectID.
 type SiteProjectID = string
 
+// CreateContainerParams defines parameters for CreateContainer.
+type CreateContainerParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
 // DeployWorkerParams defines parameters for DeployWorker.
 type DeployWorkerParams struct {
 	IdempotencyKey string `json:"Idempotency-Key"`
@@ -355,6 +432,9 @@ type RenameProjectJSONRequestBody = RenameProjectRequest
 
 // NavigateBrowserSessionJSONRequestBody defines body for NavigateBrowserSession for application/json ContentType.
 type NavigateBrowserSessionJSONRequestBody = NavigateBrowserSessionRequest
+
+// CreateContainerJSONRequestBody defines body for CreateContainer for application/json ContentType.
+type CreateContainerJSONRequestBody = CreateContainerRequest
 
 // UpsertProjectMemberJSONRequestBody defines body for UpsertProjectMember for application/json ContentType.
 type UpsertProjectMemberJSONRequestBody = UpsertProjectMemberRequest
@@ -508,6 +588,23 @@ type ClientInterface interface {
 	//
 	// 返回项目成员可见的项目额度、活动预留占用和剩余量；三个值来自同一数据库快照。.
 	GetProjectCapacity(ctx context.Context, projectID string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateContainerWithBody performs a POST /api/v1/projects/{projectID}/containers (the `CreateContainer` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用。同一幂等键复用操作。.
+	CreateContainerWithBody(ctx context.Context, projectID string, params *CreateContainerParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateContainer performs a POST /api/v1/projects/{projectID}/containers (the `CreateContainer` operationId) request.
+	// Takes a body of the `application/json` content type.
+	//
+	// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用。同一幂等键复用操作。.
+	CreateContainer(ctx context.Context, projectID string, params *CreateContainerParams, body CreateContainerJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetContainer performs a GET /api/v1/projects/{projectID}/containers/{containerID} (the `GetContainer` operationId) request.
+	//
+	// 项目成员查询容器配置、执行与操作结果。.
+	GetContainer(ctx context.Context, projectID string, containerID string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListProjectMembers performs a GET /api/v1/projects/{projectID}/members (the `ListProjectMembers` operationId) request.
 	//
@@ -833,6 +930,53 @@ func (c *Client) NavigateBrowserSession(ctx context.Context, projectID BrowserPr
 // 返回项目成员可见的项目额度、活动预留占用和剩余量；三个值来自同一数据库快照。.
 func (c *Client) GetProjectCapacity(ctx context.Context, projectID string, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetProjectCapacityRequest(c.Server, projectID)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateContainerWithBody performs a POST /api/v1/projects/{projectID}/containers (the `CreateContainer` operationId) request,
+// with any type of body and a specified content type.
+//
+// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用。同一幂等键复用操作。.
+func (c *Client) CreateContainerWithBody(ctx context.Context, projectID string, params *CreateContainerParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateContainerRequestWithBody(c.Server, projectID, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateContainer performs a POST /api/v1/projects/{projectID}/containers (the `CreateContainer` operationId) request.
+// Takes a body of the `application/json` content type.
+//
+// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用。同一幂等键复用操作。.
+func (c *Client) CreateContainer(ctx context.Context, projectID string, params *CreateContainerParams, body CreateContainerJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateContainerRequest(c.Server, projectID, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetContainer performs a GET /api/v1/projects/{projectID}/containers/{containerID} (the `GetContainer` operationId) request.
+//
+// 项目成员查询容器配置、执行与操作结果。.
+func (c *Client) GetContainer(ctx context.Context, projectID string, containerID string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetContainerRequest(c.Server, projectID, containerID)
 	if err != nil {
 		return nil, err
 	}
@@ -1600,6 +1744,107 @@ func NewGetProjectCapacityRequest(server string, projectID string) (*http.Reques
 	return req, nil
 }
 
+// NewCreateContainerRequest calls the generic CreateContainer builder with application/json body
+func NewCreateContainerRequest(server string, projectID string, params *CreateContainerParams, body CreateContainerJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateContainerRequestWithBody(server, projectID, params, "application/json", bodyReader)
+}
+
+// NewCreateContainerRequestWithBody constructs an http.Request for the CreateContainer method, with any body, and a specified content type
+func NewCreateContainerRequestWithBody(server string, projectID string, params *CreateContainerParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/containers", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		var headerParam0 string
+
+		headerParam0, err = runtime.StyleParamWithOptions("simple", false, "Idempotency-Key", params.IdempotencyKey, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+		if err != nil {
+			return nil, err
+		}
+
+		req.Header.Set("Idempotency-Key", headerParam0)
+
+	}
+
+	return req, nil
+}
+
+// NewGetContainerRequest constructs an http.Request for the GetContainer method
+func NewGetContainerRequest(server string, projectID string, containerID string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "containerID", containerID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/containers/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewListProjectMembersRequest constructs an http.Request for the ListProjectMembers method
 func NewListProjectMembersRequest(server string, projectID string) (*http.Request, error) {
 	var err error
@@ -2293,6 +2538,27 @@ type ClientWithResponsesInterface interface {
 	//
 	// Returns a wrapper object for the known response body format(s).
 	GetProjectCapacityWithResponse(ctx context.Context, projectID string, reqEditors ...RequestEditorFn) (*GetProjectCapacityResponse, error)
+
+	// CreateContainerWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/containers (the `CreateContainer` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用。同一幂等键复用操作。.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	CreateContainerWithBodyWithResponse(ctx context.Context, projectID string, params *CreateContainerParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateContainerResponse, error)
+
+	// CreateContainerWithResponse performs a POST /api/v1/projects/{projectID}/containers (the `CreateContainer` operationId) request.
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用。同一幂等键复用操作。.
+	CreateContainerWithResponse(ctx context.Context, projectID string, params *CreateContainerParams, body CreateContainerJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateContainerResponse, error)
+
+	// GetContainerWithResponse performs a GET /api/v1/projects/{projectID}/containers/{containerID} (the `GetContainer` operationId) request.
+	//
+	// 项目成员查询容器配置、执行与操作结果。.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	GetContainerWithResponse(ctx context.Context, projectID string, containerID string, reqEditors ...RequestEditorFn) (*GetContainerResponse, error)
 
 	// ListProjectMembersWithResponse performs a GET /api/v1/projects/{projectID}/members (the `ListProjectMembers` operationId) request.
 	//
@@ -3189,6 +3455,228 @@ func (r GetProjectCapacityResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetProjectCapacityResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// CreateContainerResponse200Headers the declared response headers of an HTTP 200 response for CreateContainer
+type CreateContainerResponse200Headers struct {
+	Location *string
+}
+
+// CreateContainerResponse201Headers the declared response headers of an HTTP 201 response for CreateContainer
+type CreateContainerResponse201Headers struct {
+	Location *string
+}
+
+// CreateContainerResponse409Headers the declared response headers of an HTTP 409 response for CreateContainer
+type CreateContainerResponse409Headers struct {
+	Location *string
+}
+
+// CreateContainerResponse422Headers the declared response headers of an HTTP 422 response for CreateContainer
+type CreateContainerResponse422Headers struct {
+	Location *string
+}
+
+// CreateContainerResponse429Headers the declared response headers of an HTTP 429 response for CreateContainer
+type CreateContainerResponse429Headers struct {
+	Location *string
+}
+
+type CreateContainerResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *Container
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *Container
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *Error
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Error
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Error
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *Error
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
+	// JSON422 the response for an HTTP 422 `application/json` response
+	JSON422 *Container
+	// JSON429 the response for an HTTP 429 `application/json` response
+	JSON429 *Container
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *Error
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *Error
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+	// Headers200 the parsed response headers for an HTTP 200 response
+	Headers200 *CreateContainerResponse200Headers
+	// Headers201 the parsed response headers for an HTTP 201 response
+	Headers201 *CreateContainerResponse201Headers
+	// Headers409 the parsed response headers for an HTTP 409 response
+	Headers409 *CreateContainerResponse409Headers
+	// Headers422 the parsed response headers for an HTTP 422 response
+	Headers422 *CreateContainerResponse422Headers
+	// Headers429 the parsed response headers for an HTTP 429 response
+	Headers429 *CreateContainerResponse429Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r CreateContainerResponse) GetJSON200() *Container {
+	return r.JSON200
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r CreateContainerResponse) GetJSON201() *Container {
+	return r.JSON201
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r CreateContainerResponse) GetJSON400() *Error {
+	return r.JSON400
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r CreateContainerResponse) GetJSON401() *Error {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r CreateContainerResponse) GetJSON403() *Error {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r CreateContainerResponse) GetJSON404() *Error {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r CreateContainerResponse) GetJSON409() *Error {
+	return r.JSON409
+}
+
+// GetJSON422 returns the response for an HTTP 422 `application/json` response
+func (r CreateContainerResponse) GetJSON422() *Container {
+	return r.JSON422
+}
+
+// GetJSON429 returns the response for an HTTP 429 `application/json` response
+func (r CreateContainerResponse) GetJSON429() *Container {
+	return r.JSON429
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r CreateContainerResponse) GetJSON500() *Error {
+	return r.JSON500
+}
+
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r CreateContainerResponse) GetJSON503() *Error {
+	return r.JSON503
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r CreateContainerResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r CreateContainerResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateContainerResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateContainerResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CreateContainerResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetContainerResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *Container
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Error
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *Error
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *Error
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetContainerResponse) GetJSON200() *Container {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r GetContainerResponse) GetJSON401() *Error {
+	return r.JSON401
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetContainerResponse) GetJSON404() *Error {
+	return r.JSON404
+}
+
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r GetContainerResponse) GetJSON503() *Error {
+	return r.JSON503
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r GetContainerResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r GetContainerResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetContainerResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetContainerResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetContainerResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -4389,6 +4877,45 @@ func (c *ClientWithResponses) GetProjectCapacityWithResponse(ctx context.Context
 	return ParseGetProjectCapacityResponse(rsp)
 }
 
+// CreateContainerWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/containers (the `CreateContainer` operationId) request,
+// with any type of body and a specified content type.
+//
+// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用。同一幂等键复用操作。.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) CreateContainerWithBodyWithResponse(ctx context.Context, projectID string, params *CreateContainerParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateContainerResponse, error) {
+	rsp, err := c.CreateContainerWithBody(ctx, projectID, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateContainerResponse(rsp)
+}
+
+// CreateContainerWithResponse performs a POST /api/v1/projects/{projectID}/containers (the `CreateContainer` operationId) request.
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用。同一幂等键复用操作。.
+func (c *ClientWithResponses) CreateContainerWithResponse(ctx context.Context, projectID string, params *CreateContainerParams, body CreateContainerJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateContainerResponse, error) {
+	rsp, err := c.CreateContainer(ctx, projectID, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateContainerResponse(rsp)
+}
+
+// GetContainerWithResponse performs a GET /api/v1/projects/{projectID}/containers/{containerID} (the `GetContainer` operationId) request.
+//
+// 项目成员查询容器配置、执行与操作结果。.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) GetContainerWithResponse(ctx context.Context, projectID string, containerID string, reqEditors ...RequestEditorFn) (*GetContainerResponse, error) {
+	rsp, err := c.GetContainer(ctx, projectID, containerID, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetContainerResponse(rsp)
+}
+
 // ListProjectMembersWithResponse performs a GET /api/v1/projects/{projectID}/members (the `ListProjectMembers` operationId) request.
 //
 // 返回项目成员及其角色，项目成员可以读取。.
@@ -5171,6 +5698,216 @@ func ParseGetProjectCapacityResponse(rsp *http.Response) (*GetProjectCapacityRes
 			return nil, err
 		}
 		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateContainerResponse parses an HTTP response from a CreateContainerWithResponse call
+func ParseCreateContainerResponse(rsp *http.Response) (*CreateContainerResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateContainerResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest Container
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest Container
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest Container
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest Container
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON429 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 200:
+		var headers CreateContainerResponse200Headers
+		if values := rsp.Header.Values("Location"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Location", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.Location = &value
+		}
+		response.Headers200 = &headers
+	case rsp.StatusCode == 201:
+		var headers CreateContainerResponse201Headers
+		if values := rsp.Header.Values("Location"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Location", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.Location = &value
+		}
+		response.Headers201 = &headers
+	case rsp.StatusCode == 409:
+		var headers CreateContainerResponse409Headers
+		if values := rsp.Header.Values("Location"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Location", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.Location = &value
+		}
+		response.Headers409 = &headers
+	case rsp.StatusCode == 422:
+		var headers CreateContainerResponse422Headers
+		if values := rsp.Header.Values("Location"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Location", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.Location = &value
+		}
+		response.Headers422 = &headers
+	case rsp.StatusCode == 429:
+		var headers CreateContainerResponse429Headers
+		if values := rsp.Header.Values("Location"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Location", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.Location = &value
+		}
+		response.Headers429 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseGetContainerResponse parses an HTTP response from a GetContainerWithResponse call
+func ParseGetContainerResponse(rsp *http.Response) (*GetContainerResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetContainerResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest Container
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error
@@ -6055,6 +6792,12 @@ type ServerInterface interface {
 	// (GET /api/v1/projects/{projectID}/capacity)
 	GetProjectCapacity(c *gin.Context, projectID string)
 
+	// (POST /api/v1/projects/{projectID}/containers)
+	CreateContainer(c *gin.Context, projectID string, params CreateContainerParams)
+
+	// (GET /api/v1/projects/{projectID}/containers/{containerID})
+	GetContainer(c *gin.Context, projectID string, containerID string)
+
 	// (GET /api/v1/projects/{projectID}/members)
 	ListProjectMembers(c *gin.Context, projectID string)
 
@@ -6416,6 +7159,92 @@ func (siw *ServerInterfaceWrapper) GetProjectCapacity(c *gin.Context) {
 	}
 
 	siw.Handler.GetProjectCapacity(c, projectID)
+}
+
+// CreateContainer operation middleware
+func (siw *ServerInterfaceWrapper) CreateContainer(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CreateContainerParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey string
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.CreateContainer(c, projectID, params)
+}
+
+// GetContainer operation middleware
+func (siw *ServerInterfaceWrapper) GetContainer(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "containerID" -------------
+	var containerID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "containerID", c.Param("containerID"), &containerID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter containerID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetContainer(c, projectID, containerID)
 }
 
 // ListProjectMembers operation middleware
@@ -6893,4 +7722,6 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/secrets/:name/versions/:version/value", wrapper.GetProjectSecretValue)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/workers/:name/deployments", wrapper.DeployWorker)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/worker-deployments/:deploymentID", wrapper.GetWorkerDeployment)
+	router.POST(options.BaseURL+"/api/v1/projects/:projectID/containers", wrapper.CreateContainer)
+	router.GET(options.BaseURL+"/api/v1/projects/:projectID/containers/:containerID", wrapper.GetContainer)
 }

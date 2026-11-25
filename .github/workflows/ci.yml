@@ -234,7 +234,7 @@ jobs:
       - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
-      - run: go test -race -count=1 -tags=integration ./internal/containers
+      - run: go test -race -count=1 -tags=integration ./internal/containers ./internal/containerpublish
   executions:
     name: Executions
     needs: changes

@@ -122,5 +122,10 @@ export async function writeServerConfig(config) {
       host_budget: { cpu_millis: 4000, memory_bytes: 4294967296, instances: 4 },
       project_quota: { cpu_millis: 4000, memory_bytes: 4294967296, instances: 4 },
     },
+    containers: {
+      host_id: config.instance,
+      host_budget: { cpu_millis: 4000, memory_bytes: 4294967296, instances: 4 },
+      project_quota: { cpu_millis: 4000, memory_bytes: 4294967296, instances: 4 },
+    },
   }, null, 2) + '\n', { mode: 0o600 });
 }
