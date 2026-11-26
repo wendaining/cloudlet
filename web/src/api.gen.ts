@@ -349,6 +349,45 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{projectID}/browser-sessions/{sessionID}/downloads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["captureBrowserDownload"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/browser-sessions/{sessionID}/downloads/{downloadID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+                downloadID: string;
+            };
+            cookie?: never;
+        };
+        get: operations["getBrowserDownload"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{projectID}/sites/{siteName}/versions": {
         parameters: {
             query?: never;
@@ -676,6 +715,23 @@ export interface components {
             /** Format: int64 */
             size_bytes: number;
             /** @description 需要项目会话凭据的相对下载地址 */
+            download_url: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        CaptureBrowserDownloadRequest: {
+            /** @description 触发下载的主框架控件的 CSS 选择器 */
+            selector: string;
+            /** @default 10000 */
+            timeout_ms: number;
+        };
+        BrowserDownload: {
+            /** Format: uuid */
+            id: string;
+            filename: string;
+            artifact_digest: string;
+            /** Format: int64 */
+            size_bytes: number;
             download_url: string;
             /** Format: date-time */
             created_at: string;
@@ -1412,6 +1468,68 @@ export interface operations {
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
             503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    captureBrowserDownload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CaptureBrowserDownloadRequest"];
+            };
+        };
+        responses: {
+            /** @description 完整下载已保存为项目产物 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrowserDownload"];
+                };
+            };
+            /** @description 下载失败或超过 8 MiB */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getBrowserDownload: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+                downloadID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已保存下载产物的原始字节 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": string;
+                };
+            };
             default: components["responses"]["Error"];
         };
     };

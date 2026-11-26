@@ -471,6 +471,59 @@ paths:
           $ref: '#/components/responses/Error'
         '503':
           $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/browser-sessions/{sessionID}/downloads:
+    parameters:
+      - $ref: '#/components/parameters/BrowserProjectID'
+      - $ref: '#/components/parameters/BrowserSessionID'
+    post:
+      operationId: captureBrowserDownload
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CaptureBrowserDownloadRequest'
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '201':
+          description: 完整下载已保存为项目产物
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserDownload'
+        '422':
+          description: 下载失败或超过 8 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/projects/{projectID}/browser-sessions/{sessionID}/downloads/{downloadID}:
+    parameters:
+      - $ref: '#/components/parameters/BrowserProjectID'
+      - $ref: '#/components/parameters/BrowserSessionID'
+      - name: downloadID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getBrowserDownload
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 已保存下载产物的原始字节
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
   /api/v1/projects/{projectID}/sites/{siteName}/versions:
     parameters:
       - $ref: '#/components/parameters/SiteProjectID'
@@ -1230,6 +1283,43 @@ components:
         download_url:
           type: string
           description: 需要项目会话凭据的相对下载地址
+        created_at:
+          type: string
+          format: date-time
+    CaptureBrowserDownloadRequest:
+      type: object
+      required: [selector]
+      additionalProperties: false
+      properties:
+        selector:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          description: 触发下载的主框架控件的 CSS 选择器
+        timeout_ms:
+          type: integer
+          minimum: 1
+          maximum: 30000
+          default: 10000
+    BrowserDownload:
+      type: object
+      required: [id, filename, artifact_digest, size_bytes, download_url, created_at]
+      properties:
+        id:
+          type: string
+          format: uuid
+        filename:
+          type: string
+        artifact_digest:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+        size_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 8388608
+        download_url:
+          type: string
         created_at:
           type: string
           format: date-time

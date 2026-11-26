@@ -113,6 +113,16 @@ type BrowserConsoleEntry struct {
 	Truncated bool   `json:"truncated"`
 }
 
+// BrowserDownload defines model for BrowserDownload.
+type BrowserDownload struct {
+	ArtifactDigest string             `json:"artifact_digest"`
+	CreatedAt      time.Time          `json:"created_at"`
+	DownloadUrl    string             `json:"download_url"`
+	Filename       string             `json:"filename"`
+	Id             openapi_types.UUID `json:"id"`
+	SizeBytes      int64              `json:"size_bytes"`
+}
+
 // BrowserNavigation defines model for BrowserNavigation.
 type BrowserNavigation struct {
 	Title string `json:"title"`
@@ -142,6 +152,13 @@ type BrowserSession struct {
 
 // BrowserSessionStatus defines model for BrowserSessionStatus.
 type BrowserSessionStatus string
+
+// CaptureBrowserDownloadRequest defines model for CaptureBrowserDownloadRequest.
+type CaptureBrowserDownloadRequest struct {
+	// Selector 触发下载的主框架控件的 CSS 选择器
+	Selector  string `json:"selector"`
+	TimeoutMs *int   `json:"timeout_ms,omitempty"`
+}
 
 // ClickBrowserPageRequest defines model for ClickBrowserPageRequest.
 type ClickBrowserPageRequest struct {
@@ -432,6 +449,9 @@ type RenameProjectJSONRequestBody = RenameProjectRequest
 // ClickBrowserPageJSONRequestBody defines body for ClickBrowserPage for application/json ContentType.
 type ClickBrowserPageJSONRequestBody = ClickBrowserPageRequest
 
+// CaptureBrowserDownloadJSONRequestBody defines body for CaptureBrowserDownload for application/json ContentType.
+type CaptureBrowserDownloadJSONRequestBody = CaptureBrowserDownloadRequest
+
 // NavigateBrowserSessionJSONRequestBody defines body for NavigateBrowserSession for application/json ContentType.
 type NavigateBrowserSessionJSONRequestBody = NavigateBrowserSessionRequest
 
@@ -585,6 +605,17 @@ type ClientInterface interface {
 
 	// GetBrowserConsole performs a GET /api/v1/projects/{projectID}/browser-sessions/{sessionID}/console (the `GetBrowserConsole` operationId) request.
 	GetBrowserConsole(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CaptureBrowserDownloadWithBody performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/downloads (the `CaptureBrowserDownload` operationId) request,
+	// with any type of body and a specified content type.
+	CaptureBrowserDownloadWithBody(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CaptureBrowserDownload performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/downloads (the `CaptureBrowserDownload` operationId) request.
+	// Takes a body of the `application/json` content type.
+	CaptureBrowserDownload(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, body CaptureBrowserDownloadJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetBrowserDownload performs a GET /api/v1/projects/{projectID}/browser-sessions/{sessionID}/downloads/{downloadID} (the `GetBrowserDownload` operationId) request.
+	GetBrowserDownload(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, downloadID openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// NavigateBrowserSessionWithBody performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/navigate (the `NavigateBrowserSession` operationId) request,
 	// with any type of body and a specified content type.
@@ -941,6 +972,47 @@ func (c *Client) ClickBrowserPage(ctx context.Context, projectID BrowserProjectI
 // GetBrowserConsole performs a GET /api/v1/projects/{projectID}/browser-sessions/{sessionID}/console (the `GetBrowserConsole` operationId) request.
 func (c *Client) GetBrowserConsole(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetBrowserConsoleRequest(c.Server, projectID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CaptureBrowserDownloadWithBody performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/downloads (the `CaptureBrowserDownload` operationId) request,
+// with any type of body and a specified content type.
+func (c *Client) CaptureBrowserDownloadWithBody(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCaptureBrowserDownloadRequestWithBody(c.Server, projectID, sessionID, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CaptureBrowserDownload performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/downloads (the `CaptureBrowserDownload` operationId) request.
+// Takes a body of the `application/json` content type.
+func (c *Client) CaptureBrowserDownload(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, body CaptureBrowserDownloadJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCaptureBrowserDownloadRequest(c.Server, projectID, sessionID, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetBrowserDownload performs a GET /api/v1/projects/{projectID}/browser-sessions/{sessionID}/downloads/{downloadID} (the `GetBrowserDownload` operationId) request.
+func (c *Client) GetBrowserDownload(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, downloadID openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetBrowserDownloadRequest(c.Server, projectID, sessionID, downloadID)
 	if err != nil {
 		return nil, err
 	}
@@ -1803,6 +1875,108 @@ func NewGetBrowserConsoleRequest(server string, projectID BrowserProjectID, sess
 	}
 
 	operationPath := fmt.Sprintf("/api/v1/projects/%s/browser-sessions/%s/console", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCaptureBrowserDownloadRequest calls the generic CaptureBrowserDownload builder with application/json body
+func NewCaptureBrowserDownloadRequest(server string, projectID BrowserProjectID, sessionID BrowserSessionID, body CaptureBrowserDownloadJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCaptureBrowserDownloadRequestWithBody(server, projectID, sessionID, "application/json", bodyReader)
+}
+
+// NewCaptureBrowserDownloadRequestWithBody constructs an http.Request for the CaptureBrowserDownload method, with any body, and a specified content type
+func NewCaptureBrowserDownloadRequestWithBody(server string, projectID BrowserProjectID, sessionID BrowserSessionID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "sessionID", sessionID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/browser-sessions/%s/downloads", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewGetBrowserDownloadRequest constructs an http.Request for the GetBrowserDownload method
+func NewGetBrowserDownloadRequest(server string, projectID BrowserProjectID, sessionID BrowserSessionID, downloadID openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "sessionID", sessionID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "downloadID", downloadID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/browser-sessions/%s/downloads/%s", pathParam0, pathParam1, pathParam2)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -2946,6 +3120,21 @@ type ClientWithResponsesInterface interface {
 	// Returns a wrapper object for the known response body format(s).
 	GetBrowserConsoleWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, reqEditors ...RequestEditorFn) (*GetBrowserConsoleResponse, error)
 
+	// CaptureBrowserDownloadWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/downloads (the `CaptureBrowserDownload` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	CaptureBrowserDownloadWithBodyWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CaptureBrowserDownloadResponse, error)
+
+	// CaptureBrowserDownloadWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/downloads (the `CaptureBrowserDownload` operationId) request.
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	CaptureBrowserDownloadWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, body CaptureBrowserDownloadJSONRequestBody, reqEditors ...RequestEditorFn) (*CaptureBrowserDownloadResponse, error)
+
+	// GetBrowserDownloadWithResponse performs a GET /api/v1/projects/{projectID}/browser-sessions/{sessionID}/downloads/{downloadID} (the `GetBrowserDownload` operationId) request.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	GetBrowserDownloadWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, downloadID openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetBrowserDownloadResponse, error)
+
 	// NavigateBrowserSessionWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/navigate (the `NavigateBrowserSession` operationId) request,
 	// with any type of body and a specified content type.
 	//
@@ -3834,6 +4023,102 @@ func (r GetBrowserConsoleResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetBrowserConsoleResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type CaptureBrowserDownloadResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *BrowserDownload
+	// JSON422 the response for an HTTP 422 `application/json` response
+	JSON422 *Error
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r CaptureBrowserDownloadResponse) GetJSON201() *BrowserDownload {
+	return r.JSON201
+}
+
+// GetJSON422 returns the response for an HTTP 422 `application/json` response
+func (r CaptureBrowserDownloadResponse) GetJSON422() *Error {
+	return r.JSON422
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r CaptureBrowserDownloadResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r CaptureBrowserDownloadResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CaptureBrowserDownloadResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CaptureBrowserDownloadResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CaptureBrowserDownloadResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetBrowserDownloadResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r GetBrowserDownloadResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r GetBrowserDownloadResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetBrowserDownloadResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetBrowserDownloadResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetBrowserDownloadResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -5540,6 +5825,39 @@ func (c *ClientWithResponses) GetBrowserConsoleWithResponse(ctx context.Context,
 	return ParseGetBrowserConsoleResponse(rsp)
 }
 
+// CaptureBrowserDownloadWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/downloads (the `CaptureBrowserDownload` operationId) request,
+// with any type of body and a specified content type.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) CaptureBrowserDownloadWithBodyWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CaptureBrowserDownloadResponse, error) {
+	rsp, err := c.CaptureBrowserDownloadWithBody(ctx, projectID, sessionID, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCaptureBrowserDownloadResponse(rsp)
+}
+
+// CaptureBrowserDownloadWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/downloads (the `CaptureBrowserDownload` operationId) request.
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) CaptureBrowserDownloadWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, body CaptureBrowserDownloadJSONRequestBody, reqEditors ...RequestEditorFn) (*CaptureBrowserDownloadResponse, error) {
+	rsp, err := c.CaptureBrowserDownload(ctx, projectID, sessionID, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCaptureBrowserDownloadResponse(rsp)
+}
+
+// GetBrowserDownloadWithResponse performs a GET /api/v1/projects/{projectID}/browser-sessions/{sessionID}/downloads/{downloadID} (the `GetBrowserDownload` operationId) request.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) GetBrowserDownloadWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, downloadID openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetBrowserDownloadResponse, error) {
+	rsp, err := c.GetBrowserDownload(ctx, projectID, sessionID, downloadID, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetBrowserDownloadResponse(rsp)
+}
+
 // NavigateBrowserSessionWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/navigate (the `NavigateBrowserSession` operationId) request,
 // with any type of body and a specified content type.
 //
@@ -6394,6 +6712,72 @@ func ParseGetBrowserConsoleResponse(rsp *http.Response) (*GetBrowserConsoleRespo
 		}
 		response.JSON200 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCaptureBrowserDownloadResponse parses an HTTP response from a CaptureBrowserDownloadWithResponse call
+func ParseCaptureBrowserDownloadResponse(rsp *http.Response) (*CaptureBrowserDownloadResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CaptureBrowserDownloadResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest BrowserDownload
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetBrowserDownloadResponse parses an HTTP response from a GetBrowserDownloadWithResponse call
+func ParseGetBrowserDownloadResponse(rsp *http.Response) (*GetBrowserDownloadResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetBrowserDownloadResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -7697,6 +8081,12 @@ type ServerInterface interface {
 	// (GET /api/v1/projects/{projectID}/browser-sessions/{sessionID}/console)
 	GetBrowserConsole(c *gin.Context, projectID BrowserProjectID, sessionID BrowserSessionID)
 
+	// (POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/downloads)
+	CaptureBrowserDownload(c *gin.Context, projectID BrowserProjectID, sessionID BrowserSessionID)
+
+	// (GET /api/v1/projects/{projectID}/browser-sessions/{sessionID}/downloads/{downloadID})
+	GetBrowserDownload(c *gin.Context, projectID BrowserProjectID, sessionID BrowserSessionID, downloadID openapi_types.UUID)
+
 	// (POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/navigate)
 	NavigateBrowserSession(c *gin.Context, projectID BrowserProjectID, sessionID BrowserSessionID)
 
@@ -8057,6 +8447,83 @@ func (siw *ServerInterfaceWrapper) GetBrowserConsole(c *gin.Context) {
 	}
 
 	siw.Handler.GetBrowserConsole(c, projectID, sessionID)
+}
+
+// CaptureBrowserDownload operation middleware
+func (siw *ServerInterfaceWrapper) CaptureBrowserDownload(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID BrowserProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "sessionID" -------------
+	var sessionID BrowserSessionID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "sessionID", c.Param("sessionID"), &sessionID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter sessionID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.CaptureBrowserDownload(c, projectID, sessionID)
+}
+
+// GetBrowserDownload operation middleware
+func (siw *ServerInterfaceWrapper) GetBrowserDownload(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID BrowserProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "sessionID" -------------
+	var sessionID BrowserSessionID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "sessionID", c.Param("sessionID"), &sessionID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter sessionID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "downloadID" -------------
+	var downloadID openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "downloadID", c.Param("downloadID"), &downloadID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter downloadID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetBrowserDownload(c, projectID, sessionID, downloadID)
 }
 
 // NavigateBrowserSession operation middleware
@@ -8849,6 +9316,8 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID/screenshots", wrapper.CaptureBrowserScreenshot)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID/screenshots/:screenshotID", wrapper.DownloadBrowserScreenshot)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/sites", wrapper.ListStaticSites)
+	router.POST(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID/downloads", wrapper.CaptureBrowserDownload)
+	router.GET(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID/downloads/:downloadID", wrapper.GetBrowserDownload)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/sites/:siteName/versions", wrapper.ListStaticSiteVersions)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/sites/:siteName/versions", wrapper.UploadStaticSiteVersion)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/sites/:siteName/versions/:versionID", wrapper.GetStaticSiteVersion)
