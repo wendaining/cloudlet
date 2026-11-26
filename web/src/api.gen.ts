@@ -206,7 +206,7 @@ export interface paths {
             };
             cookie?: never;
         };
-        get?: never;
+        get: operations["listBrowserSessions"];
         put?: never;
         post: operations["createBrowserSession"];
         delete?: never;
@@ -230,6 +230,26 @@ export interface paths {
         post?: never;
         /** @description 停止容器并确认清理，释放容量后返回会话终态。重复关闭返回已有终态。 */
         delete: operations["closeBrowserSession"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/browser-sessions/{sessionID}/form": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 填写输入或选择原生选项，使用点击接口提交表单。 */
+        post: operations["applyBrowserFormAction"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -546,7 +566,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description 发布首个无状态 Worker 版本，等待真实运行时就绪并激活域名。所有者和开发者可以调用。同一幂等键复用操作。 */
+        /** @description 发布首个无状态 Worker 版本并激活域名，或通过 stage 准备后续版本。所有者和开发者可以调用。同一幂等键复用操作。 */
         post: operations["deployWorker"];
         delete?: never;
         options?: never;
@@ -726,6 +746,26 @@ export interface paths {
         get: operations["getS3Binding"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/worker-deployments/{deploymentID}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+                deploymentID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 由项目所有者或开发者显式激活已就绪的候选版本。同一版本的重复激活返回原操作，域名保持不变。 */
+        post: operations["activateWorkerDeployment"];
         delete?: never;
         options?: never;
         head?: never;
@@ -915,6 +955,16 @@ export interface components {
         };
         /** @enum {string} */
         BrowserSessionStatus: "starting" | "ready" | "failed" | "closed";
+        BrowserFormActionRequest: {
+            /** @enum {string} */
+            action: "fill" | "select";
+            /** @description 唯一定位表单控件的 CSS 选择器 */
+            selector: string;
+            /** @description 填写文本或原生选项的 value。允许空字符串。 */
+            value: string;
+            /** @default 10000 */
+            timeout_ms: number;
+        };
         BrowserSession: {
             /** Format: uuid */
             id: string;
@@ -923,6 +973,15 @@ export interface components {
             /** Format: date-time */
             expires_at: string;
             status: components["schemas"]["BrowserSessionStatus"];
+            desired_status: components["schemas"]["BrowserSessionStatus"];
+            actual_status: components["schemas"]["BrowserSessionStatus"];
+            /** @description 最近一次平台错误摘要 */
+            last_error?: string;
+        };
+        BrowserSessionPage: {
+            items: components["schemas"]["BrowserSession"][];
+            /** Format: uuid */
+            next_cursor?: string;
         };
         NavigateBrowserSessionRequest: {
             url: string;
@@ -1081,6 +1140,18 @@ export interface components {
             hostname: string;
             /** @description 显式声明的 workerd 兼容标志，由部署采用的固定版本验证。 */
             compatibility_flags?: string[];
+            /** @description SQLite Durable Object 类及其环境绑定，命名空间由项目和 Worker 自动分配。 */
+            durable_objects?: components["schemas"]["WorkerDurableObjectBinding"][];
+        };
+        WorkerDurableObjectBinding: {
+            /** @description 模块中导出的 Durable Object 类名。 */
+            class_name: string;
+            bindings: string[];
+            /**
+             * @description 现有 Worker 的候选版本使用 true，域名须与活动版本相同。候选版本就绪后需显式激活。
+             * @default false
+             */
+            stage: boolean;
         };
         WorkerDeployment: {
             /** Format: uuid */
@@ -1567,6 +1638,32 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    listBrowserSessions: {
+        parameters: {
+            query?: {
+                limit?: number;
+                before?: string;
+            };
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 按创建时间倒序排列的项目浏览器会话 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrowserSessionPage"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
     createBrowserSession: {
         parameters: {
             query?: never;
@@ -1638,6 +1735,32 @@ export interface operations {
             };
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    applyBrowserFormAction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BrowserFormActionRequest"];
+            };
+        };
+        responses: {
+            /** @description 表单操作已完成 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             default: components["responses"]["Error"];
         };
     };
@@ -1721,7 +1844,10 @@ export interface operations {
     };
     captureBrowserScreenshot: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description 截取整个可滚动页面，省略时截取当前视口。 */
+                full_page?: boolean;
+            };
             header?: never;
             path: {
                 projectID: components["parameters"]["BrowserProjectID"];
@@ -1739,6 +1865,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BrowserScreenshot"];
+                };
+            };
+            /** @description 截图超过 4194304 设备像素或 2 MiB */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
                 };
             };
             default: components["responses"]["Error"];
@@ -2684,6 +2819,36 @@ export interface operations {
             };
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    activateWorkerDeployment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+                deploymentID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 激活已完成 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Operation"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            503: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };

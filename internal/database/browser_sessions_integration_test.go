@@ -28,6 +28,7 @@ import (
 	"github.com/wendaining/cloudlet/internal/capacity"
 	"github.com/wendaining/cloudlet/internal/config"
 	"github.com/wendaining/cloudlet/internal/controlplane"
+	"github.com/wendaining/cloudlet/internal/database"
 )
 
 func TestBrowserSessionHTTP(t *testing.T) {
@@ -114,13 +115,16 @@ func TestBrowserSessionHTTP(t *testing.T) {
 		}
 		return response
 	}
-	get(ownerAPI, owner.ID, http.StatusOK)
+	if detail := get(ownerAPI, owner.ID, http.StatusOK).JSON200; detail == nil ||
+		detail.DesiredStatus != apigen.BrowserSessionStatusReady || detail.ActualStatus != apigen.BrowserSessionStatusReady || detail.LastError != nil {
+		t.Fatalf("unexpected running session view: %+v", detail)
+	}
 	get(otherAPI, owner.ID, http.StatusNotFound)
 	get(otherAPI, other.ID, http.StatusNotFound)
 
 	capture := func(api *apigen.ClientWithResponses, project string, want int) *apigen.CaptureBrowserScreenshotResponse {
 		t.Helper()
-		response, err := api.CaptureBrowserScreenshotWithResponse(ctx, project, session.Id)
+		response, err := api.CaptureBrowserScreenshotWithResponse(ctx, project, session.Id, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -174,6 +178,7 @@ func TestBrowserSessionHTTP(t *testing.T) {
 	click(ownerAPI, owner.ID, "#absent", &short, http.StatusGatewayTimeout)
 	get(ownerAPI, owner.ID, http.StatusOK)
 	t.Log("real Chromium clicked the counter twice; ambiguous locator HTTP 422, absent locator HTTP 504, other project HTTP 404")
+	verifyBrowserForm(t, ctx, ownerAPI, otherAPI, owner.ID, session.Id, fixture)
 	page := navigate(ownerAPI, owner.ID, fixture, http.StatusOK).JSON200
 	if page == nil || page.Url != fixture || page.Title != "Cloudlet Browser Run" {
 		t.Fatalf("unexpected Chromium page: %+v", page)
@@ -246,6 +251,7 @@ func TestBrowserSessionHTTP(t *testing.T) {
 		t.Fatalf("invalid Chromium PNG: %v", err)
 	}
 	t.Logf("screenshot HTTP 201; download HTTP 200, %d bytes, PNG 1280x720, SHA-256 %s; cross-project download HTTP 404", screenshot.SizeBytes, hash)
+	verifyScreenshotModes(t, store, ownerAPI, owner.ID, session.Id, fixture)
 	verifyBrowserDownloads(t, ctx, store, ownerAPI, otherAPI, owner.ID, session.Id, fixture)
 	second, err := ownerAPI.CreateBrowserSessionWithResponse(ctx, owner.ID)
 	if err != nil {
@@ -254,10 +260,42 @@ func TestBrowserSessionHTTP(t *testing.T) {
 	if second.StatusCode() != http.StatusConflict {
 		t.Fatalf("capacity response = %d %s, want 409", second.StatusCode(), second.Body)
 	}
+	list := func(api *apigen.ClientWithResponses, project string, params *apigen.ListBrowserSessionsParams, want int) *apigen.BrowserSessionPage {
+		t.Helper()
+		response, err := api.ListBrowserSessionsWithResponse(ctx, project, params)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if response.StatusCode() != want {
+			t.Fatalf("list sessions = %d %s, want %d", response.StatusCode(), response.Body, want)
+		}
+		return response.JSON200
+	}
+	invalid := 0
+	list(ownerAPI, owner.ID, &apigen.ListBrowserSessionsParams{Limit: &invalid}, http.StatusBadRequest)
+	list(otherAPI, owner.ID, nil, http.StatusNotFound)
+	if isolated := list(otherAPI, other.ID, nil, http.StatusOK); isolated == nil || len(isolated.Items) != 0 {
+		t.Fatalf("other project unexpectedly sees sessions: %+v", isolated)
+	}
+	one := 1
+	firstPage := list(ownerAPI, owner.ID, &apigen.ListBrowserSessionsParams{Limit: &one}, http.StatusOK)
+	if firstPage == nil || firstPage.NextCursor == nil || len(firstPage.Items) != 1 {
+		t.Fatalf("unexpected session page: %+v", firstPage)
+	}
+	failed := firstPage.Items[0]
+	if failed.ActualStatus != apigen.BrowserSessionStatusFailed || failed.LastError == nil || *failed.LastError != "浏览器会话容量不足" {
+		t.Fatalf("quota failure not recorded: %+v", failed)
+	}
+	secondPage := list(ownerAPI, owner.ID, &apigen.ListBrowserSessionsParams{Limit: &one, Before: firstPage.NextCursor}, http.StatusOK)
+	if secondPage == nil || secondPage.NextCursor != nil || len(secondPage.Items) != 1 || secondPage.Items[0].Id != session.Id {
+		t.Fatalf("unexpected second session page: %+v", secondPage)
+	}
+	list(otherAPI, other.ID, &apigen.ListBrowserSessionsParams{Before: firstPage.NextCursor}, http.StatusNotFound)
 	if err := expire(session.Id); err != nil {
 		t.Fatal(err)
 	}
-	if resolved := get(ownerAPI, owner.ID, http.StatusOK).JSON200; resolved == nil || string(resolved.Status) != "closed" {
+	if resolved := get(ownerAPI, owner.ID, http.StatusOK).JSON200; resolved == nil ||
+		resolved.ActualStatus != apigen.BrowserSessionStatusClosed || resolved.DesiredStatus != apigen.BrowserSessionStatusClosed {
 		t.Fatalf("expired session is not closed: %+v", resolved)
 	}
 	if afterClose := download(ownerAPI, owner.ID, session.Id, http.StatusOK); !bytes.Equal(afterClose.Body, asset.Body) {
@@ -273,13 +311,44 @@ func TestBrowserSessionHTTP(t *testing.T) {
 	}
 	replacement, err := ownerAPI.CreateBrowserSessionWithResponse(ctx, owner.ID)
 	if err != nil || replacement.StatusCode() != http.StatusCreated || replacement.JSON201 == nil {
-		t.Fatalf("create isolated session: %v (%v)", replacement, err)
+		t.Fatalf("create second real session: %v (%v)", replacement, err)
 	}
 	defer func() {
 		if err := expire(replacement.JSON201.Id); err != nil {
 			t.Error(err)
 		}
 	}()
+	pageWithHistory := list(ownerAPI, owner.ID, nil, http.StatusOK)
+	if len(pageWithHistory.Items) != 3 || pageWithHistory.Items[0].Id != replacement.JSON201.Id ||
+		pageWithHistory.Items[0].ActualStatus != apigen.BrowserSessionStatusReady ||
+		pageWithHistory.Items[2].ActualStatus != apigen.BrowserSessionStatusClosed {
+		t.Fatalf("wrong history after creating a second session: %+v", pageWithHistory)
+	}
+	interrupted := database.BrowserSession{
+		ID: uuid.New(), ProjectID: projectID, HostID: instance, Status: "starting",
+		CreatedAt: time.Now().Add(-2 * time.Minute), ExpiresAt: time.Now().Add(-time.Minute),
+	}
+	if err := store.CreateBrowserSession(ctx, interrupted); err != nil {
+		t.Fatal(err)
+	}
+	interruptedPage := list(ownerAPI, owner.ID, nil, http.StatusOK)
+	var found bool
+	for _, item := range interruptedPage.Items {
+		if item.Id != interrupted.ID {
+			continue
+		}
+		found = true
+		detail, err := ownerAPI.GetBrowserSessionWithResponse(ctx, owner.ID, interrupted.ID)
+		if err != nil || detail.JSON200 == nil || item.ActualStatus != apigen.BrowserSessionStatusClosed ||
+			detail.JSON200.ActualStatus != item.ActualStatus || detail.JSON200.DesiredStatus != item.DesiredStatus {
+			t.Fatalf("inconsistent interrupted session: list=%+v detail=%+v error=%v", item, detail, err)
+		}
+	}
+	if !found {
+		t.Fatal("interrupted session is missing from the list")
+	}
+	t.Log("expired interrupted startup is closed in both list and detail")
+	t.Log("project list and detail expose ready, closed and failed state; bounded pagination and cross-project scope verified")
 	isolated := readConsole(ownerAPI, owner.ID, replacement.JSON201.Id, http.StatusOK)
 	if isolated == nil || len(isolated.Entries) != 0 || isolated.Dropped != 0 {
 		t.Fatalf("previous session console leaked into new session: %+v", isolated)
@@ -302,6 +371,59 @@ func browserRuntimeImage(t *testing.T, ctx context.Context) (string, string) {
 		imageID = strings.TrimSpace(string(output))
 	}
 	return runtimeDir, imageID
+}
+
+func verifyScreenshotModes(t *testing.T, store *database.Store, api *apigen.ClientWithResponses, projectID string, sessionID uuid.UUID, fixture string) {
+	t.Helper()
+	ctx := t.Context()
+	navigate := func(query string) {
+		t.Helper()
+		result, err := api.NavigateBrowserSessionWithResponse(ctx, projectID, sessionID,
+			apigen.NavigateBrowserSessionJSONRequestBody{Url: fixture + query})
+		if err != nil || result.StatusCode() != http.StatusOK {
+			t.Fatalf("navigate screenshot fixture: %v (%v)", result, err)
+		}
+	}
+	navigate("?screenshot-long")
+	for _, full := range []bool{false, true} {
+		capture, err := api.CaptureBrowserScreenshotWithResponse(ctx, projectID, sessionID, &apigen.CaptureBrowserScreenshotParams{FullPage: &full})
+		if err != nil || capture.StatusCode() != http.StatusCreated || capture.JSON201 == nil {
+			t.Fatalf("capture full_page=%v: %v (%v)", full, capture, err)
+		}
+		download, err := api.DownloadBrowserScreenshotWithResponse(ctx, projectID, sessionID, capture.JSON201.Id)
+		if err != nil || download.StatusCode() != http.StatusOK {
+			t.Fatalf("download full_page=%v: %v (%v)", full, download, err)
+		}
+		decoded, err := png.Decode(bytes.NewReader(download.Body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		height := 720
+		if full {
+			height = 1800
+		}
+		if decoded.Bounds().Dx() != 1280 || decoded.Bounds().Dy() != height {
+			t.Fatalf("PNG bounds for full_page=%v: %v, want 1280×%d", full, decoded.Bounds(), height)
+		}
+		r, g, b, _ := decoded.At(20, height-20).RGBA()
+		if full != (r == 0xe0e0 && g == 0 && b == 0) {
+			t.Fatalf("unexpected footer pixel for full_page=%v: %04x %04x %04x", full, r, g, b)
+		}
+	}
+	var before, after int64
+	if err := store.DB.Model(&database.BrowserScreenshot{}).Where("session_id = ?", sessionID).Count(&before).Error; err != nil {
+		t.Fatal(err)
+	}
+	navigate("?screenshot-too-large")
+	full := true
+	rejected, err := api.CaptureBrowserScreenshotWithResponse(ctx, projectID, sessionID, &apigen.CaptureBrowserScreenshotParams{FullPage: &full})
+	if err != nil || rejected.StatusCode() != http.StatusUnprocessableEntity {
+		t.Fatalf("oversized full-page screenshot: %v (%v), want HTTP 422", rejected, err)
+	}
+	if err := store.DB.Model(&database.BrowserScreenshot{}).Where("session_id = ?", sessionID).Count(&after).Error; err != nil || after != before {
+		t.Fatalf("oversized screenshot was registered: before=%d after=%d (%v)", before, after, err)
+	}
+	t.Log("viewport PNG 1280×720 and full-page PNG 1280×1800 decoded; only full-page PNG contains the red footer; oversized page returned HTTP 422 with no new artifact")
 }
 
 func chromiumPage(t *testing.T, ctx context.Context, docker *client.Client) string {
@@ -328,6 +450,14 @@ func chromiumPage(t *testing.T, ctx context.Context, docker *client.Client) stri
 		ReadHeaderTimeout: time.Second,
 		Handler: http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 			writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+			if request.URL.Query().Has("screenshot-too-large") {
+				fmt.Fprint(writer, `<!doctype html><title>Over pixel limit</title><div style="height:6000px"></div>`)
+				return
+			}
+			if request.URL.Query().Has("screenshot-long") {
+				fmt.Fprint(writer, `<!doctype html><title>Full screenshot fixture</title><body style="margin:0"><main style="height:1700px"></main><footer style="height:100px;background:#e00000">Page end</footer></body>`)
+				return
+			}
 			fmt.Fprint(writer, `<!doctype html><title>Cloudlet Browser Run</title><h1>Cloudlet Browser Run</h1>
 <script>
 for (let i = 0; i < 110; i++) console.log('entry ' + i);

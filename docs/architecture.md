@@ -42,7 +42,7 @@ Cloudlet 在一台 Linux 服务器上管理计算资源。本地开发在成员�
 | internal/server | 监听端口与服务生命周期 |
 | internal/version | 构建版本和提交标识 |
 | internal/workers | ES Module 与 Durable Objects 的 workerd 配置、启动参数和镜像引用 |
-| internal/workerpublish | 首个无状态 Worker 的产物、预检、容量准入、执行与路由激活 |
+| internal/workerpublish | 无状态 Worker 的产物、预检、容量准入、候选执行与路由切换 |
 | internal/durableobjects | SQLite 命名空间、类绑定和存储挂载路径 |
 | runtimes/workers | TypeScript Worker 构建命令与示例入口 |
 | internal/containers | Docker Engine 镜像摘要准备、容器生命周期、项目隔离 bridge 网络管理、回环端口或内部网络端点观测、HTTP 就绪探测与宿主配额支持报告 |
@@ -51,7 +51,7 @@ Cloudlet 在一台 Linux 服务器上管理计算资源。本地开发在成员�
 | pkg/client | CLI 与其他客户端共享的 API 客户端 |
 | internal/mcpserver | MCP 项目查询、Worker 发布与操作查询，复用管理 API 会话权限 |
 
-PostgreSQL 当前保存账号、登录会话、项目、操作记录、项目凭据、项目路由、容量预留、静态站点版本、浏览器会话、容器与执行记录以及 Worker 部署与执行记录。首个无状态 Worker 可以通过管理 API 发布并访问。Durable Objects 的运行配置与存储能力通过独立 workerd 集成验证。
+PostgreSQL 当前保存账号、登录会话、项目、操作记录、项目凭据、项目路由、容量预留、静态站点版本、浏览器会话、容器与执行记录以及 Worker 部署与执行记录。首个无状态 Worker 可以通过管理 API 发布并访问。具有 Durable Object 绑定的 Worker 可以通过同一管理 API 首次发布，PostgreSQL 记录命名空间、持久化数据卷和唯一执行所有者。
 
 项目拥有稳定的 project_id。创建项目在事务内写入项目和创建者的 owner 成员记录。项目列表和单项目读取同时校验当前会话账号的项目成员关系。项目成员列表对所有成员开放；所有者可以按邮箱把已有账号添加为 developer 或 viewer，或更新已有成员的角色，创建者的 owner 身份保持不变。非成员访问返回 404，成员越权修改返回 403。
 
@@ -90,8 +90,9 @@ PostgreSQL 当前保存账号、登录会话、项目、操作记录、项目凭
 | /api/v1/projects/{projectID}/secrets | GET、POST | 列出项目凭据元数据；所有者追加加密版本 |
 | /api/v1/projects/{projectID}/secrets/{name} | GET | 列出项目凭据的版本元数据 |
 | /api/v1/projects/{projectID}/secrets/{name}/versions/{version}/value | GET | 所有者读取指定版本的值 |
-| /api/v1/projects/{projectID}/workers/{name}/deployments | POST | 所有者或开发者发布首个无状态 Worker，按 Idempotency-Key 复用操作 |
+| /api/v1/projects/{projectID}/workers/{name}/deployments | POST | 所有者或开发者发布首个无状态 Worker，或准备候选版本，按 Idempotency-Key 复用操作 |
 | /api/v1/projects/{projectID}/worker-deployments/{deploymentID} | GET | 项目成员查询版本、产物摘要、执行与 Operation 结果 |
+| /api/v1/projects/{projectID}/worker-deployments/{deploymentID}/activate | POST | 所有者或开发者切换到就绪版本，同一版本重复提交返回原激活 Operation |
 | /mcp | MCP Streamable HTTP | 使用当前会话查询项目、发布 Worker 并查询项目操作 |
 
 PostgreSQL 绑定按项目和名称存储。登记时引用本项目不可变的 Secret 版本。只有实际验证成功才保存元数据和验证时间。凭据值使用含有 `username` 与 `password` 的 JSON 对象。登记时连接指定数据库并执行 Ping，默认校验服务器证书与主机名。开发环境可使用回环地址连接本地无 TLS PostgreSQL。

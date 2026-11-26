@@ -34,6 +34,7 @@ type RuntimeConfig struct {
 	Entry              string
 	CompatibilityDate  string
 	CompatibilityFlags []string
+	DurableClasses     []string
 }
 
 // ServeArgs returns the arguments for the pinned image's entrypoint.
@@ -82,20 +83,33 @@ func prepare(bundleDir, entry, compatibilityDate string, namespaces []durableobj
 	if err != nil {
 		return RuntimeConfig{}, fmt.Errorf("read entry %q in bundle %q: %w", entry, bundleDir, err)
 	}
-	return prepareModule(entry, module, compatibilityDate, namespaces, nil)
+	return prepareModule(entry, module, compatibilityDate, namespaces, nil, durableobjects.StoragePath)
 }
 
 // PrepareModule prepares a bundled ES module already read from an upload.
 func PrepareModule(module []byte, compatibilityDate string) (RuntimeConfig, error) {
-	return prepareModule("index.mjs", module, compatibilityDate, nil, nil)
+	return prepareModule("index.mjs", module, compatibilityDate, nil, nil, "")
 }
 
 // PrepareModuleWithFlags prepares an uploaded module with explicit compatibility flags.
 func PrepareModuleWithFlags(module []byte, compatibilityDate string, flags []string) (RuntimeConfig, error) {
-	return prepareModule("index.mjs", module, compatibilityDate, nil, flags)
+	return prepareModule("index.mjs", module, compatibilityDate, nil, flags, "")
 }
 
-func prepareModule(entry string, module []byte, compatibilityDate string, namespaces []durableobjects.Namespace, flags []string) (RuntimeConfig, error) {
+// PrepareDurableModule prepares an uploaded module for a managed SQLite volume.
+func PrepareDurableModule(module []byte, compatibilityDate string, namespaces []durableobjects.Namespace) (RuntimeConfig, error) {
+	return PrepareDurableModuleWithFlags(module, compatibilityDate, namespaces, nil)
+}
+
+// PrepareDurableModuleWithFlags prepares a Durable Object module with explicit compatibility flags.
+func PrepareDurableModuleWithFlags(module []byte, compatibilityDate string, namespaces []durableobjects.Namespace, flags []string) (RuntimeConfig, error) {
+	if err := durableobjects.Validate(namespaces); err != nil {
+		return RuntimeConfig{}, err
+	}
+	return prepareModule("index.mjs", module, compatibilityDate, namespaces, flags, path.Join(durableobjects.StoragePath, durableobjects.StorageDirectory))
+}
+
+func prepareModule(entry string, module []byte, compatibilityDate string, namespaces []durableobjects.Namespace, flags []string, storagePath string) (RuntimeConfig, error) {
 	if err := validateCompatibilityDate(compatibilityDate, time.Now()); err != nil {
 		return RuntimeConfig{}, err
 	}
@@ -108,12 +122,17 @@ func prepareModule(entry string, module []byte, compatibilityDate string, namesp
 		return RuntimeConfig{}, err
 	}
 
+	var classes []string
+	for _, namespace := range namespaces {
+		classes = append(classes, namespace.ClassName)
+	}
 	return RuntimeConfig{
-		Config:             renderConfig(entry, compatibilityDate, namespaces, normalized),
+		Config:             renderConfig(entry, compatibilityDate, namespaces, normalized, storagePath),
 		Module:             bytes.Clone(module),
 		Entry:              entry,
 		CompatibilityDate:  compatibilityDate,
 		CompatibilityFlags: normalized,
+		DurableClasses:     classes,
 	}, nil
 }
 
@@ -131,10 +150,10 @@ func validateCompatibilityDate(compatibilityDate string, now time.Time) error {
 	return nil
 }
 
-func renderConfig(entry, compatibilityDate string, namespaces []durableobjects.Namespace, flags []string) []byte {
+func renderConfig(entry, compatibilityDate string, namespaces []durableobjects.Namespace, flags []string, storagePath string) []byte {
 	var storageService, workerFields []byte
 	if len(namespaces) > 0 {
-		storageService = fmt.Appendf(nil, `, (name = "durable-storage", disk = (path = "%s", writable = true))`, durableobjects.StoragePath)
+		storageService = fmt.Appendf(nil, `, (name = "durable-storage", disk = (path = "%s", writable = true))`, storagePath)
 		workerFields = append(workerFields, "  durableObjectStorage = (localDisk = \"durable-storage\"),\n  durableObjectNamespaces = [\n"...)
 		for _, namespace := range namespaces {
 			workerFields = fmt.Appendf(workerFields, "    (className = \"%s\", uniqueKey = \"%s\", enableSql = true),\n", namespace.ClassName, namespace.ID)
