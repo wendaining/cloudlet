@@ -29,6 +29,31 @@ func (h *handler) CreateBrowserSession(c *gin.Context, projectID string) {
 	c.JSON(http.StatusCreated, browserSessionResponse(session))
 }
 
+func (h *handler) ListBrowserSessions(c *gin.Context, projectID string, params apigen.ListBrowserSessionsParams) {
+	_, project, member, ok := h.projectAccess(c, projectID)
+	if !ok || !h.browserAccess(c, member, false) {
+		return
+	}
+	limit := browser.DefaultSessionLimit
+	if params.Limit != nil {
+		limit = *params.Limit
+	}
+	views, next, err := h.browser.List(c.Request.Context(), uuid.MustParse(project), params.Before, limit)
+	if errors.Is(err, browser.ErrSessionListLimit) {
+		c.JSON(http.StatusBadRequest, apigen.Error{Message: "每页会话数必须在 1 至 100 之间"})
+		return
+	}
+	if err != nil {
+		h.browserFailure(c, err)
+		return
+	}
+	items := make([]apigen.BrowserSession, 0, len(views))
+	for _, view := range views {
+		items = append(items, browserSessionViewResponse(view))
+	}
+	c.JSON(http.StatusOK, apigen.BrowserSessionPage{Items: items, NextCursor: next})
+}
+
 func (h *handler) GetBrowserSession(c *gin.Context, projectID string, sessionID uuid.UUID) {
 	_, project, member, ok := h.projectAccess(c, projectID)
 	if !ok || !h.browserAccess(c, member, false) {
@@ -39,7 +64,12 @@ func (h *handler) GetBrowserSession(c *gin.Context, projectID string, sessionID 
 		h.browserFailure(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, browserSessionResponse(session))
+	view, err := h.browser.Describe(c.Request.Context(), session)
+	if err != nil {
+		h.browserFailure(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, browserSessionViewResponse(view))
 }
 
 func (h *handler) CloseBrowserSession(c *gin.Context, projectID string, sessionID uuid.UUID) {
@@ -118,8 +148,24 @@ func browserEndpoint(session database.BrowserSession) string {
 }
 
 func browserSessionResponse(session database.BrowserSession) apigen.BrowserSession {
-	return apigen.BrowserSession{
-		Id: session.ID, Endpoint: browserEndpoint(session), ExpiresAt: session.ExpiresAt,
-		Status: apigen.BrowserSessionStatus(session.Status),
+	desired := apigen.BrowserSessionStatusReady
+	if session.Status == "closed" || session.Status == "failed" {
+		desired = apigen.BrowserSessionStatusClosed
 	}
+	response := apigen.BrowserSession{
+		Id: session.ID, Endpoint: browserEndpoint(session), ExpiresAt: session.ExpiresAt,
+		Status: apigen.BrowserSessionStatus(session.Status), DesiredStatus: desired,
+		ActualStatus: apigen.BrowserSessionStatus(session.Status),
+	}
+	if session.LastError != "" {
+		response.LastError = &session.LastError
+	}
+	return response
+}
+
+func browserSessionViewResponse(view browser.SessionView) apigen.BrowserSession {
+	response := browserSessionResponse(view.BrowserSession)
+	response.DesiredStatus = apigen.BrowserSessionStatus(view.DesiredStatus)
+	response.ActualStatus = apigen.BrowserSessionStatus(view.ActualStatus)
+	return response
 }

@@ -334,6 +334,32 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BrowserSession'
+    get:
+      operationId: listBrowserSessions
+      security:
+        - SessionCookie: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: before
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 按创建时间倒序排列的项目浏览器会话
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserSessionPage'
   /api/v1/projects/{projectID}/browser-sessions/{sessionID}:
     parameters:
       - $ref: '#/components/parameters/BrowserProjectID'
@@ -447,6 +473,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BrowserPageText'
+  /api/v1/projects/{projectID}/browser-sessions/{sessionID}/form:
+    parameters:
+      - $ref: '#/components/parameters/BrowserProjectID'
+      - $ref: '#/components/parameters/BrowserSessionID'
+    post:
+      operationId: applyBrowserFormAction
+      description: 填写输入或选择原生选项，使用点击接口提交表单。
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BrowserFormActionRequest'
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '204':
+          description: 表单操作已完成
   /api/v1/projects/{projectID}/browser-sessions/{sessionID}/click:
     parameters:
       - $ref: '#/components/parameters/BrowserProjectID'
@@ -806,6 +852,71 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/StaticSitePublication'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+        '503':
+          $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/sites/{siteName}/publication:
+    parameters:
+      - $ref: '#/components/parameters/SiteProjectID'
+      - $ref: '#/components/parameters/SiteName'
+    get:
+      operationId: getStaticSitePublication
+      description: 项目成员读取当前发布版本、固定域名和切换所需的修订值。
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 当前活动版本和修订值
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaticSiteActivePublication'
+        '401':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '503':
+          $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/activate:
+    parameters:
+      - $ref: '#/components/parameters/SiteProjectID'
+      - $ref: '#/components/parameters/SiteName'
+      - name: versionID
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      operationId: activateStaticSiteVersion
+      description: 项目所有者使用当前修订值在现有域名切换版本。目标已经生效时，重复调用不修改路由。
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StaticSiteActivationRequest'
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 当前活动版本和修订值
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaticSiteActivePublication'
         '400':
           $ref: '#/components/responses/Error'
         '401':
@@ -1965,9 +2076,31 @@ components:
           maxLength: 4096
         text_truncated:
           type: boolean
+    BrowserFormActionRequest:
+      type: object
+      additionalProperties: false
+      required: [ action, selector, value ]
+      properties:
+        action:
+          type: string
+          enum: [ fill, select ]
+        selector:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          description: 唯一定位表单控件的 CSS 选择器
+        value:
+          type: string
+          maxLength: 1024
+          description: 填写文本或原生选项的 value。允许空字符串。
+        timeout_ms:
+          type: integer
+          minimum: 1
+          maximum: 30000
+          default: 10000
     BrowserSession:
       type: object
-      required: [ id, endpoint, expires_at, status ]
+      required: [ id, endpoint, expires_at, status, desired_status, actual_status ]
       properties:
         id:
           type: string
@@ -1980,6 +2113,24 @@ components:
           format: date-time
         status:
           $ref: '#/components/schemas/BrowserSessionStatus'
+        desired_status:
+          $ref: '#/components/schemas/BrowserSessionStatus'
+        actual_status:
+          $ref: '#/components/schemas/BrowserSessionStatus'
+        last_error:
+          type: string
+          description: 最近一次平台错误摘要
+    BrowserSessionPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/BrowserSession'
+        next_cursor:
+          type: string
+          format: uuid
     NavigateBrowserSessionRequest:
       type: object
       additionalProperties: false
@@ -2025,6 +2176,33 @@ components:
         url:
           type: string
           format: uri
+    StaticSiteActivationRequest:
+      type: object
+      additionalProperties: false
+      required: [ expected_revision ]
+      properties:
+        expected_revision:
+          type: string
+          format: date-time
+          description: 最近一次从发布查询或切换响应取得的修订值。
+    StaticSiteActivePublication:
+      type: object
+      required: [ site_id, version_id, hostname, url, revision ]
+      properties:
+        site_id:
+          type: string
+          format: uuid
+        version_id:
+          type: string
+          format: uuid
+        hostname:
+          type: string
+        url:
+          type: string
+          format: uri
+        revision:
+          type: string
+          format: date-time
     StaticSiteSummary:
       type: object
       required: [ id, name, created_at ]
