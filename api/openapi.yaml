@@ -638,6 +638,26 @@ paths:
           $ref: '#/components/responses/Error'
         '503':
           $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/browser-sessions/{sessionID}/uploads:
+    parameters:
+      - $ref: '#/components/parameters/BrowserProjectID'
+      - $ref: '#/components/parameters/BrowserSessionID'
+    post:
+      operationId: attachBrowserArtifact
+      description: 将同项目内的截图或浏览器下载产物放入默认页面的文件输入。
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AttachBrowserArtifactRequest'
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '204':
+          description: 文件已放入输入控件，可通过点击命令提交表单
   /api/v1/projects/{projectID}/browser-sessions/{sessionID}/downloads:
     parameters:
       - $ref: '#/components/parameters/BrowserProjectID'
@@ -2040,6 +2060,30 @@ components:
         created_at:
           type: string
           format: date-time
+    AttachBrowserArtifactRequest:
+      type: object
+      additionalProperties: false
+      required: [ artifact_kind, source_session_id, artifact_id, selector ]
+      properties:
+        artifact_kind:
+          type: string
+          enum: [ screenshot, download ]
+        source_session_id:
+          type: string
+          format: uuid
+        artifact_id:
+          type: string
+          format: uuid
+        selector:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          description: 唯一定位文件输入的 CSS 选择器
+        timeout_ms:
+          type: integer
+          minimum: 1
+          maximum: 30000
+          default: 10000
     CaptureBrowserDownloadRequest:
       type: object
       required: [ selector ]

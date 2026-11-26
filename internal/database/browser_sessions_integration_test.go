@@ -357,7 +357,7 @@ func TestBrowserSessionHTTP(t *testing.T) {
 	}
 	t.Logf("screenshot HTTP 201; download HTTP 200, %d bytes, PNG 1280x720, SHA-256 %s; cross-project download HTTP 404", screenshot.SizeBytes, hash)
 	verifyScreenshotModes(t, store, ownerAPI, owner.ID, session.Id, fixture)
-	verifyBrowserDownloads(t, ctx, store, ownerAPI, otherAPI, owner.ID, session.Id, fixture)
+	downloaded := verifyBrowserDownloads(t, ctx, store, ownerAPI, otherAPI, owner.ID, session.Id, fixture)
 	second, err := ownerAPI.CreateBrowserSessionWithResponse(ctx, owner.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -414,6 +414,7 @@ func TestBrowserSessionHTTP(t *testing.T) {
 	if err != nil || usage.HostUsed.Instances != 0 || usage.ProjectUsed.Instances != 0 {
 		t.Fatalf("expired session still holds capacity: %+v (%v)", usage, err)
 	}
+	verifyBrowserUploadProjectBoundary(t, ctx, otherAPI, other.ID, session.Id, screenshot.Id)
 	replacement, err := ownerAPI.CreateBrowserSessionWithResponse(ctx, owner.ID)
 	if err != nil || replacement.StatusCode() != http.StatusCreated || replacement.JSON201 == nil {
 		t.Fatalf("create second real session: %v (%v)", replacement, err)
@@ -459,6 +460,7 @@ func TestBrowserSessionHTTP(t *testing.T) {
 		t.Fatalf("previous session console leaked into new session: %+v", isolated)
 	}
 	t.Log("a second real Chromium session has no logs from the first")
+	verifyBrowserUpload(t, ctx, ownerAPI, owner.ID, replacement.JSON201.Id, session.Id, screenshot, downloaded, fixture)
 	if err := expire(replacement.JSON201.Id); err != nil {
 		t.Fatal(err)
 	}
