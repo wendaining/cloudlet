@@ -47,7 +47,7 @@ func NewHandler(store *database.Store, cfg config.Config, logger *slog.Logger) (
 	return newHandler(store, nil, nil, cfg, logger, nil, nil, nil, nil)
 }
 
-// NewHandlerWithMCP mounts the read-only MCP endpoint on the management API.
+// NewHandlerWithMCP mounts the MCP endpoint on the management API.
 func NewHandlerWithMCP(store *database.Store, sites *staticdeploy.Service, browserService *browser.Service, cfg config.Config, logger *slog.Logger, apiEndpoint string) (http.Handler, func(), error) {
 	return NewHandlerWithMCPAndWorkers(store, sites, browserService, cfg, logger, apiEndpoint, nil, nil)
 }

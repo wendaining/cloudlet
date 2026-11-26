@@ -26,6 +26,7 @@ import (
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/google/uuid"
 	"github.com/moby/moby/client"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 	openapi_types "github.com/oapi-codegen/runtime/types"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
@@ -130,8 +131,20 @@ func TestWorkerPublicationHTTP(t *testing.T) {
 		t.Fatal("second controller accepted")
 	}
 	cfg := config.Config{Instance: "publication", PublicOrigin: "http://localhost"}
-	handler, closeSessions := controlplane.NewHandlerWithWorkers(store, cfg, slog.Default(), publication)
-	api := httptest.NewServer(handler)
+	startManagement := func(publication *workerpublish.Service) (*httptest.Server, func()) {
+		t.Helper()
+		server := httptest.NewUnstartedServer(nil)
+		endpoint := "http://" + server.Listener.Addr().String()
+		handler, cleanup, err := controlplane.NewHandlerWithMCPAndWorkers(store, nil, nil, cfg, slog.Default(), endpoint, publication, nil)
+		if err != nil {
+			server.Close()
+			t.Fatal(err)
+		}
+		server.Config.Handler = handler
+		server.Start()
+		return server, cleanup
+	}
+	api, closeSessions := startManagement(publication)
 	public := httptest.NewServer(front)
 	t.Cleanup(func() {
 		api.Close()
@@ -221,12 +234,7 @@ func TestWorkerPublicationHTTP(t *testing.T) {
 		return data
 	}
 	decode := func(data []byte) apigen.WorkerDeployment {
-		t.Helper()
-		var value apigen.WorkerDeployment
-		if err := json.Unmarshal(data, &value); err != nil {
-			t.Fatal(err)
-		}
-		return value
+		return decodeWorkerMetadata(t, data)
 	}
 	deployPath := func(projectID, name string) string {
 		return "/api/v1/projects/" + projectID + "/workers/" + name + "/deployments"
@@ -553,6 +561,118 @@ AND d.state = 'pending' AND o.phase = 'preparing' AND e.container_id <> ''`, pro
 	if usage.ProjectUsed.CPUMillis != 3000 || usage.ProjectUsed.Instances != 3 {
 		t.Fatalf("failed publication leaked capacity: %+v", usage)
 	}
+	t.Run("publish and track a Worker through MCP", func(t *testing.T) {
+		session := func(browser *http.Client) *mcp.ClientSession {
+			t.Helper()
+			mcpClient := mcp.NewClient(&mcp.Implementation{Name: "cloudlet-worker-mcp-test", Version: "1.0.0"}, nil)
+			session, err := mcpClient.Connect(ctx, &mcp.StreamableClientTransport{
+				Endpoint: api.URL + "/mcp", HTTPClient: browser, DisableStandaloneSSE: true,
+			}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := session.Close(); err != nil {
+					t.Error(err)
+				}
+			})
+			return session
+		}
+		call := func(connection *mcp.ClientSession, name string, args map[string]any, wantError bool) *mcp.CallToolResult {
+			t.Helper()
+			result, err := connection.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: args})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.IsError != wantError {
+				t.Fatalf("MCP %s returned unexpected result %+v", name, result)
+			}
+			return result
+		}
+		decode := func(result *mcp.CallToolResult, value any) {
+			t.Helper()
+			body, err := json.Marshal(result.StructuredContent)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal(body, value); err != nil {
+				t.Fatalf("decode MCP result %s: %v", body, err)
+			}
+		}
+		ownerMCP := session(outsider)
+		viewerMCP := session(viewer)
+		anonymousMCP := session(&http.Client{Timeout: 5 * time.Second})
+		var resource struct {
+			ID string `json:"id"`
+		}
+		decode(call(ownerMCP, "get_project", map[string]any{"project_id": otherProject.ID}, false), &resource)
+		if resource.ID != otherProject.ID {
+			t.Fatalf("MCP returned project %q", resource.ID)
+		}
+		const hostname = "mcp-worker.localhost"
+		args := map[string]any{
+			"project_id": project.ID, "name": "mcp-worker", "idempotency_key": "mcp-worker", "module": module,
+			"compatibility_date": valid.CompatibilityDate, "hostname": hostname,
+		}
+		call(ownerMCP, "publish_worker", args, true)
+		call(viewerMCP, "publish_worker", args, true)
+		call(anonymousMCP, "publish_worker", args, true)
+		args["project_id"] = otherProject.ID
+		args["compatibility_date"] = "2026-02-30"
+		call(ownerMCP, "publish_worker", args, true)
+		args["compatibility_date"] = valid.CompatibilityDate
+		type result struct {
+			WorkerID     uuid.UUID `json:"worker_id"`
+			DeploymentID uuid.UUID `json:"deployment_id"`
+			OperationID  uuid.UUID `json:"operation_id"`
+			Hostname     string    `json:"hostname"`
+			State        string    `json:"state"`
+			Outcome      string    `json:"operation_outcome"`
+		}
+		args["module"] = "export default {"
+		var failed result
+		decode(call(ownerMCP, "publish_worker", args, true), &failed)
+		if failed.DeploymentID == uuid.Nil || failed.OperationID == uuid.Nil || failed.Outcome != "failed" {
+			t.Fatalf("failed MCP publication did not include its operation: %+v", failed)
+		}
+		args["module"] = module
+		args["idempotency_key"] = "mcp-valid"
+		var published, replay result
+		decode(call(ownerMCP, "publish_worker", args, false), &published)
+		decode(call(ownerMCP, "publish_worker", args, false), &replay)
+		if replay != published || published.WorkerID == uuid.Nil || published.DeploymentID == uuid.Nil ||
+			published.OperationID == uuid.Nil || published.Hostname != hostname || published.State != "active" || published.Outcome != "succeeded" {
+			t.Fatalf("unexpected MCP publication or repeated result: %+v / %+v", published, replay)
+		}
+		deployment := decodeWorkerMetadata(t, request(outsider, http.MethodGet, metadataPath(otherProject.ID, published.DeploymentID), "", nil, http.StatusOK))
+		if deployment.WorkerId != published.WorkerID || deployment.OperationId != published.OperationID || deployment.OperationOutcome != published.Outcome {
+			t.Fatalf("MCP result differs from management API: %+v / %+v", published, deployment)
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, public.URL+"/mcp", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Host = hostname
+		response, err := outsider.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		body, err := io.ReadAll(response.Body)
+		if err != nil || response.StatusCode != http.StatusOK || string(body) != "GET /mcp " {
+			t.Fatalf("MCP-published Worker returned HTTP %d %q: %v", response.StatusCode, body, err)
+		}
+		for _, recorded := range []result{published, failed} {
+			input := map[string]any{"project_id": otherProject.ID, "operation_id": recorded.OperationID.String()}
+			var operation apigen.Operation
+			decode(call(ownerMCP, "get_operation", input, false), &operation)
+			if operation.Id != recorded.OperationID || operation.Outcome != recorded.Outcome {
+				t.Fatalf("MCP returned a different operation: %+v", operation)
+			}
+			call(viewerMCP, "get_operation", input, true)
+		}
+		t.Logf("MCP published Worker %s, deployed at %s, same terminal operation %s in the management API", published.WorkerID, hostname, published.OperationID)
+	})
 	if err := os.Chmod(configuration.Directory, 0o500); err != nil {
 		t.Fatal(err)
 	}
@@ -574,8 +694,7 @@ AND d.state = 'pending' AND o.phase = 'preparing' AND e.container_id <> ''`, pro
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, closeSessions = controlplane.NewHandlerWithWorkers(store, cfg, slog.Default(), publication)
-	api = httptest.NewServer(handler)
+	api, closeSessions = startManagement(publication)
 	public = httptest.NewServer(front)
 	getPublic()
 	metadata = decode(request(owner, http.MethodGet, metadataPath(project.ID, initial.Id), "", nil, http.StatusOK))
@@ -619,4 +738,13 @@ lost:
 		t.Fatal("lost controller connection cleanup did not report its failure")
 	}
 	publication = nil
+}
+
+func decodeWorkerMetadata(t *testing.T, data []byte) apigen.WorkerDeployment {
+	t.Helper()
+	var deployment apigen.WorkerDeployment
+	if err := json.Unmarshal(data, &deployment); err != nil {
+		t.Fatal(err)
+	}
+	return deployment
 }
