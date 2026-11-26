@@ -13,7 +13,9 @@ import (
 )
 
 var ErrWorkerAlreadyActive = errors.New("Worker already has an active deployment")
-var ErrWorkerPublicationPending = errors.New("Worker already has a pending publication")
+var ErrWorkerPublicationPending = errors.New("Worker already has a pending or ready publication")
+var ErrWorkerHostnameChanged = errors.New("Worker candidate must use the active hostname")
+var ErrWorkerDeploymentNotReady = errors.New("Worker deployment is not ready for activation")
 
 type Worker struct {
 	ID                 uuid.UUID
@@ -53,22 +55,44 @@ type WorkerExecution struct {
 	State        string
 }
 
-// CheckFirstWorkerPublication validates existing state before writing artifacts.
-// CreateWorkerDeployment repeats the checks while holding the Worker row lock.
-func (s *Store) CheckFirstWorkerPublication(ctx context.Context, projectID uuid.UUID, name string) error {
+// CheckWorkerPublication validates the deployment before writing artifacts.
+func (s *Store) CheckWorkerPublication(ctx context.Context, projectID uuid.UUID, name, hostname string, stage bool) error {
+	db := s.DB.WithContext(ctx)
 	var worker Worker
-	err := s.DB.WithContext(ctx).Where("project_id = ? AND name = ?", projectID, name).Take(&worker).Error
+	err := db.Where("project_id = ? AND name = ?", projectID, name).Take(&worker).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
+		if stage {
+			return ErrWorkerDeploymentNotReady
+		}
 		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("inspect Worker %s/%s: %w", projectID, name, err)
 	}
+	return checkWorkerPublication(db, worker, hostname, stage)
+}
+
+func checkWorkerPublication(db *gorm.DB, worker Worker, hostname string, stage bool) error {
 	if worker.ActiveDeploymentID != nil {
-		return ErrWorkerAlreadyActive
+		if !stage {
+			return ErrWorkerAlreadyActive
+		}
+		var active WorkerDeployment
+		if err := db.Where("id = ? AND project_id = ?", *worker.ActiveDeploymentID, worker.ProjectID).Take(&active).Error; err != nil {
+			return err
+		}
+		if active.Hostname != hostname {
+			return ErrWorkerHostnameChanged
+		}
+	} else if stage {
+		return ErrWorkerDeploymentNotReady
 	}
 	var pending bool
-	if err := s.DB.WithContext(ctx).Raw("SELECT EXISTS (SELECT 1 FROM worker_deployments WHERE worker_id = ? AND state = 'pending')", worker.ID).Row().Scan(&pending); err != nil {
+	err := db.Raw(`SELECT EXISTS (
+		SELECT 1 FROM worker_deployments d JOIN worker_executions e ON e.deployment_id = d.id
+		WHERE d.worker_id = ? AND (d.state IN ('pending', 'ready') OR (d.state = 'retired' AND e.state = 'running'))
+	)`, worker.ID).Row().Scan(&pending)
+	if err != nil {
 		return err
 	}
 	if pending {
@@ -78,7 +102,7 @@ func (s *Store) CheckFirstWorkerPublication(ctx context.Context, projectID uuid.
 }
 
 // CreateWorkerDeployment records a complete artifact before starting runtime work.
-func (s *Store) CreateWorkerDeployment(ctx context.Context, name string, deployment WorkerDeployment) (WorkerDeployment, WorkerExecution, error) {
+func (s *Store) CreateWorkerDeployment(ctx context.Context, name string, deployment WorkerDeployment, stage bool) (WorkerDeployment, WorkerExecution, error) {
 	worker := Worker{ID: uuid.New(), ProjectID: deployment.ProjectID, Name: name}
 	execution := WorkerExecution{ID: uuid.New(), ProjectID: deployment.ProjectID, DeploymentID: deployment.ID, State: "pending"}
 	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -89,15 +113,8 @@ func (s *Store) CreateWorkerDeployment(ctx context.Context, name string, deploym
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("project_id = ? AND name = ?", deployment.ProjectID, name).Take(&worker).Error; err != nil {
 			return err
 		}
-		if worker.ActiveDeploymentID != nil {
-			return ErrWorkerAlreadyActive
-		}
-		var pending bool
-		if err := tx.Raw("SELECT EXISTS (SELECT 1 FROM worker_deployments WHERE worker_id = ? AND state = 'pending')", worker.ID).Row().Scan(&pending); err != nil {
+		if err := checkWorkerPublication(tx, worker, deployment.Hostname, stage); err != nil {
 			return err
-		}
-		if pending {
-			return ErrWorkerPublicationPending
 		}
 		deployment.WorkerID = worker.ID
 		execution.WorkerID = worker.ID

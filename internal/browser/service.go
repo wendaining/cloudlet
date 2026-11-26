@@ -165,8 +165,13 @@ func (s *Service) Create(ctx context.Context, projectID uuid.UUID, lifetime time
 	if err != nil {
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
 		defer cancel()
+		message := "浏览器会话启动失败"
+		if errors.Is(err, capacity.ErrInsufficientCapacity) {
+			message = "浏览器会话容量不足"
+		}
+		recordErr := s.store.RecordBrowserSessionError(cleanupCtx, projectID, session.ID, s.hostID, message)
 		_, cleanupErr := s.finish(cleanupCtx, session, "failed")
-		return database.BrowserSession{}, errors.Join(err, cleanupErr)
+		return database.BrowserSession{}, errors.Join(err, recordErr, cleanupErr)
 	}
 	session.Status = "ready"
 	return session, nil
@@ -177,6 +182,10 @@ func (s *Service) Session(ctx context.Context, projectID, id uuid.UUID) (databas
 	if err != nil {
 		return database.BrowserSession{}, err
 	}
+	return s.reconcileExpiredSession(ctx, session)
+}
+
+func (s *Service) reconcileExpiredSession(ctx context.Context, session database.BrowserSession) (database.BrowserSession, error) {
 	if !terminalSession(session) && !time.Now().Before(session.ExpiresAt) {
 		return s.closeSession(ctx, session)
 	}

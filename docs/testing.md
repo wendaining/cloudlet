@@ -128,7 +128,7 @@ go test -race -count=1 -tags=integration ./internal/routes
 
 ## workerd 集成验证
 
-Worker 首发验收使用真实 PostgreSQL、Docker、workerd、管理 HTTP 接口与 Gateway。
+Worker 首发与版本激活验收使用真实 PostgreSQL、Docker、workerd、管理 HTTP 接口与 Gateway。
 
 ```sh
 export DOCKER_HOST="$(docker context inspect --format '{{.Endpoints.docker.Host}}')"
@@ -155,6 +155,20 @@ go test -race -count=1 -tags=integration -v ./internal/workers
 同一入口中的 `TestWorkerdPersistsDurableObjectSQLite` 通过 HTTP 调用名为 `alpha` 和 `beta` 的两个对象。两个对象使用相同的 SQL 表和键保存各自的值。测试停止第一个容器，用原数据卷启动新容器，然后确认两个对象的标识和各自的值都保持不变。
 
 `TestWorkerPreflightReportsRuntimePhase` 使用真实 workerd 分别载入可运行模块、语法错误模块和初始化报错模块，检查返回阶段为 `ready`、`load` 和 `initialize`。
+
+## Worker 流式响应与断开验证
+
+`TestWorkerPublicationHTTP` 通过管理 API 发布 `internal/workerpublish/testdata/streaming.mjs`，再使用真实 HTTP 连接访问 Gateway。完整请求收到 `first` 和 `last` 两段。取消请求在延迟的第二段之前收到第一段，随后终止客户端连接。测试在同一容器完成另一份等长流后读取容器日志，记录取消请求的实际处理。
+
+手工验收时，使用项目所有者或开发者会话调用 [Worker 发布接口](workers.md#管理-api)。用测试模块作为 `module`，兼容日期设为 `2026-10-12`，域名设为 `streaming.localhost`。获取发布响应中的 `container_id`，按开发实例的 Gateway 端口运行以下命令。
+
+```sh
+curl --no-buffer -H 'Host: streaming.localhost' "$CLOUDLET_GATEWAY_URL/stream/full"
+curl --no-buffer --max-time 3 -H 'Host: streaming.localhost' "$CLOUDLET_GATEWAY_URL/stream/abort"
+docker logs "$CLOUDLET_WORKER_CONTAINER_ID"
+```
+
+完整请求会输出两行。限时请求先输出 `first`，再由 curl 以超时状态结束。用 workerd 日志核对 `cloudlet-stream:abort:first` 及后续处理，并访问域名根路径确认 Worker 仍可响应。本机 Docker Engine 29.5.2 和 workerd 1.20261012.1 的用例记录了 `cloudlet-stream:abort:completed`，表明客户端断开后，此 Worker 的延迟任务仍执行到了结束。
 
 ## Worker 构建验证
 

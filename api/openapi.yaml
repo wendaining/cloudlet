@@ -334,6 +334,32 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BrowserSession'
+    get:
+      operationId: listBrowserSessions
+      security:
+        - SessionCookie: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: before
+          in: query
+          schema:
+            type: string
+            format: uuid
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 按创建时间倒序排列的项目浏览器会话
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserSessionPage'
   /api/v1/projects/{projectID}/browser-sessions/{sessionID}:
     parameters:
       - $ref: '#/components/parameters/BrowserProjectID'
@@ -369,6 +395,26 @@ paths:
           $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/browser-sessions/{sessionID}/form:
+    parameters:
+      - $ref: '#/components/parameters/BrowserProjectID'
+      - $ref: '#/components/parameters/BrowserSessionID'
+    post:
+      operationId: applyBrowserFormAction
+      description: 填写输入或选择原生选项，使用点击接口提交表单。
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BrowserFormActionRequest'
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '204':
+          description: 表单操作已完成
   /api/v1/projects/{projectID}/browser-sessions/{sessionID}/click:
     parameters:
       - $ref: '#/components/parameters/BrowserProjectID'
@@ -436,6 +482,13 @@ paths:
       operationId: captureBrowserScreenshot
       security:
         - SessionCookie: []
+      parameters:
+        - name: full_page
+          in: query
+          description: 截取整个可滚动页面，省略时截取当前视口。
+          schema:
+            type: boolean
+            default: false
       responses:
         default:
           $ref: '#/components/responses/Error'
@@ -449,6 +502,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BrowserScreenshot'
+        '422':
+          description: 截图超过 4194304 设备像素或 2 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/projects/{projectID}/browser-sessions/{sessionID}/screenshots/{screenshotID}:
     parameters:
       - $ref: '#/components/parameters/BrowserProjectID'
@@ -864,7 +923,7 @@ paths:
           type: string
     post:
       operationId: deployWorker
-      description: 发布首个无状态 Worker 版本，等待真实运行时就绪并激活域名。所有者和开发者可以调用。同一幂等键复用操作。
+      description: 发布首个无状态 Worker 版本并激活域名，或通过 stage 准备后续版本。所有者和开发者可以调用。同一幂等键复用操作。
       security:
         - SessionCookie: []
       parameters:
@@ -1465,6 +1524,44 @@ paths:
           $ref: '#/components/responses/Error'
         default:
           $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/worker-deployments/{deploymentID}/activate:
+    parameters:
+      - name: projectID
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: deploymentID
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      operationId: activateWorkerDeployment
+      description: 由项目所有者或开发者显式激活已就绪的候选版本。同一版本的重复激活返回原操作，域名保持不变。
+      security:
+        - SessionCookie: []
+      responses:
+        "200":
+          description: 激活已完成
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "422":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
 components:
   parameters:
     BrowserProjectID:
@@ -1841,9 +1938,31 @@ components:
       type: string
       enum: [ starting, ready, failed, closed ]
       x-enum-varnames: [ BrowserSessionStatusStarting, BrowserSessionStatusReady, BrowserSessionStatusFailed, BrowserSessionStatusClosed ]
+    BrowserFormActionRequest:
+      type: object
+      additionalProperties: false
+      required: [ action, selector, value ]
+      properties:
+        action:
+          type: string
+          enum: [ fill, select ]
+        selector:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          description: 唯一定位表单控件的 CSS 选择器
+        value:
+          type: string
+          maxLength: 1024
+          description: 填写文本或原生选项的 value。允许空字符串。
+        timeout_ms:
+          type: integer
+          minimum: 1
+          maximum: 30000
+          default: 10000
     BrowserSession:
       type: object
-      required: [ id, endpoint, expires_at, status ]
+      required: [ id, endpoint, expires_at, status, desired_status, actual_status ]
       properties:
         id:
           type: string
@@ -1856,6 +1975,24 @@ components:
           format: date-time
         status:
           $ref: '#/components/schemas/BrowserSessionStatus'
+        desired_status:
+          $ref: '#/components/schemas/BrowserSessionStatus'
+        actual_status:
+          $ref: '#/components/schemas/BrowserSessionStatus'
+        last_error:
+          type: string
+          description: 最近一次平台错误摘要
+    BrowserSessionPage:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/BrowserSession'
+        next_cursor:
+          type: string
+          format: uuid
     NavigateBrowserSessionRequest:
       type: object
       additionalProperties: false
@@ -2193,6 +2330,10 @@ components:
             minLength: 1
             maxLength: 128
             pattern: '^[a-zA-Z_$][a-zA-Z0-9_$]*$'
+        stage:
+          type: boolean
+          default: false
+          description: 现有 Worker 的候选版本使用 true，域名须与活动版本相同。候选版本就绪后需显式激活。
     WorkerDeployment:
       type: object
       required:
