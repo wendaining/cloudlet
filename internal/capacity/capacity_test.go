@@ -86,6 +86,31 @@ func TestRemainingResources(t *testing.T) {
 	}
 }
 
+func TestEnsureCapacityAtLeast(t *testing.T) {
+	used := Resources{CPUMillis: 3000, MemoryBytes: 3 << 30, Instances: 2}
+	if err := ensureCapacityAtLeast("项目", "project-1", used, used); err != nil {
+		t.Fatalf("额度等于当前占用返回错误: %v", err)
+	}
+	if err := ensureCapacityAtLeast("项目", "project-1", Resources{CPUMillis: 4000, MemoryBytes: 4 << 30, Instances: 4}, used); err != nil {
+		t.Fatalf("额度高于当前占用返回错误: %v", err)
+	}
+	for name, limit := range map[string]Resources{
+		"CPU":       {CPUMillis: 2999, MemoryBytes: 3 << 30, Instances: 2},
+		"memory":    {CPUMillis: 3000, MemoryBytes: (3 << 30) - 1, Instances: 2},
+		"instances": {CPUMillis: 3000, MemoryBytes: 3 << 30, Instances: 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := ensureCapacityAtLeast("项目", "project-1", limit, used)
+			if !errors.Is(err, ErrQuotaInUse) {
+				t.Fatalf("额度低于当前占用返回 %v，要求 ErrQuotaInUse", err)
+			}
+			if !strings.Contains(err.Error(), "当前占用 CPU 3000 毫核、内存 3221225472 字节、实例 2") {
+				t.Fatalf("额度冲突错误缺少当前占用: %v", err)
+			}
+		})
+	}
+}
+
 func TestCheckAvailable(t *testing.T) {
 	limit := Resources{CPUMillis: 4000, MemoryBytes: 4 << 30, Instances: 4}
 	used := Resources{CPUMillis: 3000, MemoryBytes: 3 << 30, Instances: 3}

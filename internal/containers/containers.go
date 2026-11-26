@@ -73,6 +73,12 @@ var (
 	// ErrNetworkNotFound reports that the requested Docker network does not
 	// exist.
 	ErrNetworkNotFound = errors.New("container network not found")
+	// ErrNetworkNotOwned reports that a Docker network is not the platform
+	// network of the requested environment and project.
+	ErrNetworkNotOwned = errors.New("container network ownership mismatch")
+	// ErrNetworkInUse reports that a Docker network still has attached
+	// containers and cannot be removed.
+	ErrNetworkInUse = errors.New("container network is in use")
 	// ErrImagePull reports that Docker Engine could not pull the requested
 	// image. The underlying registry or transport error remains available
 	// through errors.Is and errors.As.
@@ -108,12 +114,15 @@ type Limits struct {
 // command, and Limits are the required resource limits.
 //
 // Access is required. AccessPublished publishes Port on the host loopback
-// interface. AccessNetwork joins the existing user-defined bridge network in
-// Network and exposes Port only to peers on that network.
+// interface. AccessNetwork joins the platform network of the container's
+// environment and project in Network and exposes Port only to peers on that
+// network.
 //
-// The adapter does not verify network ownership. Callers must pass a
-// platform-controlled network name; project network isolation and ownership
-// labels are handled by #154.
+// The network name must be the value returned by EnsureNetwork for the same
+// environment and project. Create and Start verify the network shape, the
+// canonical project network name and the network ownership labels. An
+// unmanaged network or a network owned by another project is rejected with
+// ErrNetworkNotOwned.
 type Spec struct {
 	Ownership Ownership
 	Image     string
@@ -211,7 +220,7 @@ func (o Ownership) validate() error {
 		{"project", o.Project},
 		{"resource", o.Resource},
 	} {
-		if err := validateIdentifier(field.name, field.value); err != nil {
+		if err := validateIdentifier("ownership", field.name, field.value); err != nil {
 			return err
 		}
 	}
@@ -224,20 +233,20 @@ func (o Ownership) validate() error {
 	return nil
 }
 
-func validateIdentifier(field, value string) error {
+func validateIdentifier(scope, field, value string) error {
 	if value == "" {
-		return fmt.Errorf("validate ownership: %s is required: %w", field, fs.ErrInvalid)
+		return fmt.Errorf("validate %s: %s is required: %w", scope, field, fs.ErrInvalid)
 	}
 	if len(value) > maxIdentifierLength {
-		return fmt.Errorf("validate ownership: %s exceeds %d bytes: %w", field, maxIdentifierLength, fs.ErrInvalid)
+		return fmt.Errorf("validate %s: %s exceeds %d bytes: %w", scope, field, maxIdentifierLength, fs.ErrInvalid)
 	}
 	if !isLetterOrDigit(value[0]) {
-		return fmt.Errorf("validate ownership: %s must start with a letter or digit: %w", field, fs.ErrInvalid)
+		return fmt.Errorf("validate %s: %s must start with a letter or digit: %w", scope, field, fs.ErrInvalid)
 	}
 	for index := 1; index < len(value); index++ {
 		char := value[index]
 		if !isLetterOrDigit(char) && char != '.' && char != '_' && char != '-' {
-			return fmt.Errorf("validate ownership: %s contains invalid character %q: %w", field, char, fs.ErrInvalid)
+			return fmt.Errorf("validate %s: %s contains invalid character %q: %w", scope, field, char, fs.ErrInvalid)
 		}
 	}
 	return nil

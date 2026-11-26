@@ -10,6 +10,22 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+// EnsureProjectQuota supplies the initial quota for a project and preserves an
+// existing operator-configured limit.
+func (s *Store) EnsureProjectQuota(ctx context.Context, projectID uuid.UUID, defaults Resources) error {
+	if projectID == uuid.Nil {
+		return fmt.Errorf("default project quota requires a project: %w", fs.ErrInvalid)
+	}
+	if err := defaults.validate(); err != nil {
+		return err
+	}
+	project := projectQuotaRow{ProjectID: projectID, CPUMillis: defaults.CPUMillis, MemoryBytes: defaults.MemoryBytes, Instances: defaults.Instances, UpdatedAt: currentTime()}
+	if err := s.db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&project).Error; err != nil {
+		return fmt.Errorf("initialize project %s quota: %w", projectID, err)
+	}
+	return nil
+}
+
 // EnsureDefaults supplies capacity for a new host or project and preserves
 // existing limits configured by an operator.
 func (s *Store) EnsureDefaults(ctx context.Context, hostID string, projectID uuid.UUID, defaults Resources) error {
