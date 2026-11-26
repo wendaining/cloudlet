@@ -507,6 +507,13 @@ paths:
       operationId: captureBrowserScreenshot
       security:
         - SessionCookie: []
+      parameters:
+        - name: full_page
+          in: query
+          description: 截取整个可滚动页面，省略时截取当前视口。
+          schema:
+            type: boolean
+            default: false
       responses:
         default:
           $ref: '#/components/responses/Error'
@@ -520,6 +527,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BrowserScreenshot'
+        '422':
+          description: 截图超过 4194304 设备像素或 2 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/projects/{projectID}/browser-sessions/{sessionID}/screenshots/{screenshotID}:
     parameters:
       - $ref: '#/components/parameters/BrowserProjectID'

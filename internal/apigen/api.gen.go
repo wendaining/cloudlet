@@ -597,6 +597,12 @@ type ListBrowserSessionsParams struct {
 	Before *openapi_types.UUID `form:"before,omitempty" json:"before,omitempty"`
 }
 
+// CaptureBrowserScreenshotParams defines parameters for CaptureBrowserScreenshot.
+type CaptureBrowserScreenshotParams struct {
+	// FullPage 截取整个可滚动页面，省略时截取当前视口。
+	FullPage *bool `form:"full_page,omitempty" json:"full_page,omitempty"`
+}
+
 // GetBrowserPageTextParams defines parameters for GetBrowserPageText.
 type GetBrowserPageTextParams struct {
 	// Selector 可选 CSS 选择器，唯一限定文本范围
@@ -863,7 +869,7 @@ type ClientInterface interface {
 	NavigateBrowserSession(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, body NavigateBrowserSessionJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// CaptureBrowserScreenshot performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/screenshots (the `CaptureBrowserScreenshot` operationId) request.
-	CaptureBrowserScreenshot(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, reqEditors ...RequestEditorFn) (*http.Response, error)
+	CaptureBrowserScreenshot(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, params *CaptureBrowserScreenshotParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// DownloadBrowserScreenshot performs a GET /api/v1/projects/{projectID}/browser-sessions/{sessionID}/screenshots/{screenshotID} (the `DownloadBrowserScreenshot` operationId) request.
 	DownloadBrowserScreenshot(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, screenshotID openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -1415,8 +1421,8 @@ func (c *Client) NavigateBrowserSession(ctx context.Context, projectID BrowserPr
 }
 
 // CaptureBrowserScreenshot performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/screenshots (the `CaptureBrowserScreenshot` operationId) request.
-func (c *Client) CaptureBrowserScreenshot(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewCaptureBrowserScreenshotRequest(c.Server, projectID, sessionID)
+func (c *Client) CaptureBrowserScreenshot(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, params *CaptureBrowserScreenshotParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCaptureBrowserScreenshotRequest(c.Server, projectID, sessionID, params)
 	if err != nil {
 		return nil, err
 	}
@@ -2770,7 +2776,7 @@ func NewNavigateBrowserSessionRequestWithBody(server string, projectID BrowserPr
 }
 
 // NewCaptureBrowserScreenshotRequest constructs an http.Request for the CaptureBrowserScreenshot method
-func NewCaptureBrowserScreenshotRequest(server string, projectID BrowserProjectID, sessionID BrowserSessionID) (*http.Request, error) {
+func NewCaptureBrowserScreenshotRequest(server string, projectID BrowserProjectID, sessionID BrowserSessionID, params *CaptureBrowserScreenshotParams) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -2800,6 +2806,33 @@ func NewCaptureBrowserScreenshotRequest(server string, projectID BrowserProjectI
 	queryURL, err := serverURL.Parse(operationPath)
 	if err != nil {
 		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.FullPage != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "full_page", *params.FullPage, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "boolean", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
 	}
 
 	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
@@ -4442,7 +4475,7 @@ type ClientWithResponsesInterface interface {
 	// CaptureBrowserScreenshotWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/screenshots (the `CaptureBrowserScreenshot` operationId) request.
 	//
 	// Returns a wrapper object for the known response body format(s).
-	CaptureBrowserScreenshotWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, reqEditors ...RequestEditorFn) (*CaptureBrowserScreenshotResponse, error)
+	CaptureBrowserScreenshotWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, params *CaptureBrowserScreenshotParams, reqEditors ...RequestEditorFn) (*CaptureBrowserScreenshotResponse, error)
 
 	// DownloadBrowserScreenshotWithResponse performs a GET /api/v1/projects/{projectID}/browser-sessions/{sessionID}/screenshots/{screenshotID} (the `DownloadBrowserScreenshot` operationId) request.
 	//
@@ -5669,6 +5702,8 @@ type CaptureBrowserScreenshotResponse struct {
 	HTTPResponse *http.Response
 	// JSON201 the response for an HTTP 201 `application/json` response
 	JSON201 *BrowserScreenshot
+	// JSON422 the response for an HTTP 422 `application/json` response
+	JSON422 *Error
 	// JSONDefault the response for an HTTP default `application/json` response
 	JSONDefault *Error
 	// Headers201 the parsed response headers for an HTTP 201 response
@@ -5678,6 +5713,11 @@ type CaptureBrowserScreenshotResponse struct {
 // GetJSON201 returns the response for an HTTP 201 `application/json` response
 func (r CaptureBrowserScreenshotResponse) GetJSON201() *BrowserScreenshot {
 	return r.JSON201
+}
+
+// GetJSON422 returns the response for an HTTP 422 `application/json` response
+func (r CaptureBrowserScreenshotResponse) GetJSON422() *Error {
+	return r.JSON422
 }
 
 // GetJSONDefault returns the response for an HTTP default `application/json` response
@@ -8382,8 +8422,8 @@ func (c *ClientWithResponses) NavigateBrowserSessionWithResponse(ctx context.Con
 // CaptureBrowserScreenshotWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/screenshots (the `CaptureBrowserScreenshot` operationId) request.
 //
 // Returns a wrapper object for the known response body format(s).
-func (c *ClientWithResponses) CaptureBrowserScreenshotWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, reqEditors ...RequestEditorFn) (*CaptureBrowserScreenshotResponse, error) {
-	rsp, err := c.CaptureBrowserScreenshot(ctx, projectID, sessionID, reqEditors...)
+func (c *ClientWithResponses) CaptureBrowserScreenshotWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, params *CaptureBrowserScreenshotParams, reqEditors ...RequestEditorFn) (*CaptureBrowserScreenshotResponse, error) {
+	rsp, err := c.CaptureBrowserScreenshot(ctx, projectID, sessionID, params, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -9597,6 +9637,13 @@ func ParseCaptureBrowserScreenshotResponse(rsp *http.Response) (*CaptureBrowserS
 			return nil, err
 		}
 		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error
@@ -11683,7 +11730,7 @@ type ServerInterface interface {
 	NavigateBrowserSession(c *gin.Context, projectID BrowserProjectID, sessionID BrowserSessionID)
 
 	// (POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/screenshots)
-	CaptureBrowserScreenshot(c *gin.Context, projectID BrowserProjectID, sessionID BrowserSessionID)
+	CaptureBrowserScreenshot(c *gin.Context, projectID BrowserProjectID, sessionID BrowserSessionID, params CaptureBrowserScreenshotParams)
 
 	// (GET /api/v1/projects/{projectID}/browser-sessions/{sessionID}/screenshots/{screenshotID})
 	DownloadBrowserScreenshot(c *gin.Context, projectID BrowserProjectID, sessionID BrowserSessionID, screenshotID openapi_types.UUID)
@@ -12287,6 +12334,17 @@ func (siw *ServerInterfaceWrapper) CaptureBrowserScreenshot(c *gin.Context) {
 		return
 	}
 
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CaptureBrowserScreenshotParams
+
+	// ------------- Optional query parameter "full_page" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "full_page", c.Request.URL.Query(), &params.FullPage, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter full_page: %w", err), http.StatusBadRequest)
+		return
+	}
+
 	for _, middleware := range siw.HandlerMiddlewares {
 		middleware(c)
 		if c.IsAborted() {
@@ -12294,7 +12352,7 @@ func (siw *ServerInterfaceWrapper) CaptureBrowserScreenshot(c *gin.Context) {
 		}
 	}
 
-	siw.Handler.CaptureBrowserScreenshot(c, projectID, sessionID)
+	siw.Handler.CaptureBrowserScreenshot(c, projectID, sessionID, params)
 }
 
 // DownloadBrowserScreenshot operation middleware
