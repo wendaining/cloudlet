@@ -235,6 +235,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{projectID}/browser-sessions/{sessionID}/form": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 填写输入或选择原生选项，使用点击接口提交表单。 */
+        post: operations["applyBrowserFormAction"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{projectID}/browser-sessions/{sessionID}/click": {
         parameters: {
             query?: never;
@@ -915,6 +935,16 @@ export interface components {
         };
         /** @enum {string} */
         BrowserSessionStatus: "starting" | "ready" | "failed" | "closed";
+        BrowserFormActionRequest: {
+            /** @enum {string} */
+            action: "fill" | "select";
+            /** @description 唯一定位表单控件的 CSS 选择器 */
+            selector: string;
+            /** @description 填写文本或原生选项的 value。允许空字符串。 */
+            value: string;
+            /** @default 10000 */
+            timeout_ms: number;
+        };
         BrowserSession: {
             /** Format: uuid */
             id: string;
@@ -1669,6 +1699,32 @@ export interface operations {
             };
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    applyBrowserFormAction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BrowserFormActionRequest"];
+            };
+        };
+        responses: {
+            /** @description 表单操作已完成 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             default: components["responses"]["Error"];
         };
     };
