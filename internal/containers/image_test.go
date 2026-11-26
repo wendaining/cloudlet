@@ -137,3 +137,19 @@ func TestVerifyImageRejectsMismatchedIdentity(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateImageReferenceDoesNotContactDocker(t *testing.T) {
+	if err := ValidateImageReference("nginx@" + testImageDigest); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateImageReference("nginx:latest"); !errors.Is(err, fs.ErrInvalid) {
+		t.Fatalf("ValidateImageReference() = %v, want fs.ErrInvalid", err)
+	}
+	canonical, got, err := ParseImageReference("nginx:1.29.3-alpine@" + testImageDigest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if canonical != "docker.io/library/nginx@"+testImageDigest || got != testImageDigest {
+		t.Fatalf("ParseImageReference() = (%q, %q)", canonical, got)
+	}
+}
