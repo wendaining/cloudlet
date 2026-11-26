@@ -12,6 +12,7 @@ import { captureDownload } from './download.ts';
 import { collectConsole } from './console-history.ts';
 import { limitPageTitle, pageIDPattern, sessionPages, type PageState } from './pages.ts';
 import { readPageText } from './page-text.ts';
+import { parseWaitCondition, waitForPage } from './page-wait.ts';
 
 const token = process.env.CLOUDLET_BROWSER_TOKEN;
 if (!token || !/^[A-Za-z0-9_-]{32,}$/.test(token)) {
@@ -35,7 +36,7 @@ function send(response: ServerResponse, status: number, body: object) {
   }).end(JSON.stringify(body));
 }
 
-async function readCommand(request: IncomingMessage, screenshot: boolean, click: boolean, form: boolean, upload: boolean) {
+async function readCommand(request: IncomingMessage, screenshot: boolean, click: boolean, form: boolean, upload: boolean, wait: boolean) {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request.iterator({ destroyOnReturn: false })) {
@@ -58,6 +59,8 @@ async function readCommand(request: IncomingMessage, screenshot: boolean, click:
   let selector: string | undefined;
   let formAction: { action: 'fill' | 'select'; value: string } | undefined;
   let file: { name: string; mimeType: string; buffer: Buffer } | undefined;
+  const waitCondition = wait ? parseWaitCondition(input) : undefined;
+  if (wait && !waitCondition) return { error: 'invalid_wait', status: 400 } as const;
   if (click || form || upload) {
     if (!('selector' in input) || typeof input.selector !== 'string' ||
         !input.selector.trim() || input.selector.length > 1024 || /\p{Cc}/u.test(input.selector)) {
@@ -84,7 +87,7 @@ async function readCommand(request: IncomingMessage, screenshot: boolean, click:
       }
       file = { name: input.filename, mimeType: input.mime_type, buffer };
     }
-  } else if (!screenshot) {
+  } else if (!screenshot && !wait) {
     const target = 'url' in input && typeof input.url === 'string' ? URL.parse(input.url) : null;
     if (!target || !isWebURL(target.href) || target.username || target.password) {
       return { error: 'invalid_url', status: 400 } as const;
@@ -105,7 +108,7 @@ async function readCommand(request: IncomingMessage, screenshot: boolean, click:
   if (typeof timeout !== 'number' || !Number.isInteger(timeout) || timeout < 1 || timeout > maxTimeout) {
     return { error: 'invalid_timeout', status: 400 } as const;
   }
-  return { url, selector, formAction, file, timeout, fullPage, pageID };
+  return { url, selector, formAction, file, waitCondition, timeout, fullPage, pageID };
 }
 
 function isWebURL(url: string) {
@@ -128,7 +131,7 @@ const browser = await chromium.launch({
 });
 let stopping = false;
 let expiryTimer: ReturnType<typeof setTimeout> | undefined;
-let activeCommand: 'navigation' | 'screenshot' | 'pages' | 'text' | 'click' | 'form' | 'download' | 'upload' | undefined;
+let activeCommand: 'navigation' | 'screenshot' | 'pages' | 'text' | 'click' | 'form' | 'download' | 'upload' | 'wait' | undefined;
 const server = createServer({ requestTimeout: 15000, headersTimeout: 5000 }, (request, response) => {
   void handle(request, response).catch(() => {
     if (response.destroyed) return;
@@ -213,6 +216,7 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
   const form = request.url === '/form';
   const download = request.url === '/download';
   const upload = request.url === '/upload';
+  const wait = request.url === '/wait';
   const viewport = request.method === 'GET' && request.url === '/viewport';
   const consoleHistory = request.method === 'GET' && request.url === '/console';
   const openPage = request.method === 'POST' && request.url === '/pages';
@@ -221,7 +225,7 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
     (request.method === 'GET' || request.method === 'DELETE'));
   const text = request.method === 'GET' && (request.url === '/text' || request.url?.startsWith('/text?'));
   if (!viewport && !consoleHistory && !text && !pageRequest &&
-      (request.method !== 'POST' || (!screenshot && !click && !form && !download && !upload && request.url !== '/navigate'))) {
+      (request.method !== 'POST' || (!screenshot && !click && !form && !download && !upload && !wait && request.url !== '/navigate'))) {
     send(response, 404, { error: 'not_found' });
     return;
   }
@@ -236,7 +240,7 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
     send(response, 200, consoleLog.read());
     return;
   }
-  const command = viewport || text || pageRequest ? undefined : await readCommand(request, screenshot, click || download, form, upload);
+  const command = viewport || text || pageRequest ? undefined : await readCommand(request, screenshot, click || download, form, upload, wait);
   if (command?.error) {
     if (command.status === 413) {
       response.setHeader('Connection', 'close');
@@ -332,8 +336,42 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
     send(response, 200, { ...size, device_scale_factor: viewportOptions.deviceScaleFactor });
     return;
   }
-  if ((screenshot || click || form || download || upload) && (!state.hasPage || page.isClosed() || !isWebURL(page.url()))) {
+  if ((screenshot || click || form || download || upload || wait) && (!state.hasPage || page.isClosed() || !isWebURL(page.url()))) {
     send(response, 409, { error: 'no_page' });
+    return;
+  }
+
+  if (command.waitCondition) {
+    activeCommand = 'wait';
+    const timer = new AbortController();
+    let stalled = false;
+    try {
+      const completed = await Promise.race([
+        waitForPage(page, command.waitCondition, command.timeout).then(() => true),
+        delay(command.timeout + 500, false, { signal: timer.signal }),
+      ]);
+      if (completed) {
+        response.writeHead(204, { 'Cache-Control': 'no-store' }).end();
+      } else {
+        stalled = true;
+        if (response.destroyed) {
+          void shutdown(0);
+        } else {
+          response.once('close', () => void shutdown(0));
+          response.setHeader('Connection', 'close');
+          send(response, 504, { error: 'wait_timeout' });
+        }
+      }
+    } catch (error: unknown) {
+      if (error instanceof errors.TimeoutError) {
+        send(response, 504, { error: 'wait_timeout' });
+      } else {
+        send(response, 422, { error: 'wait_failed' });
+      }
+    } finally {
+      timer.abort();
+      if (!stalled) activeCommand = undefined;
+    }
     return;
   }
 

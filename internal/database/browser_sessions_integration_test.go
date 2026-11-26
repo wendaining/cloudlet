@@ -460,6 +460,7 @@ func TestBrowserSessionHTTP(t *testing.T) {
 		t.Fatalf("previous session console leaked into new session: %+v", isolated)
 	}
 	t.Log("a second real Chromium session has no logs from the first")
+	verifyBrowserPageWait(t, ctx, ownerAPI, otherAPI, owner.ID, replacement.JSON201.Id, fixture)
 	verifyBrowserUpload(t, ctx, ownerAPI, owner.ID, replacement.JSON201.Id, session.Id, screenshot, downloaded, fixture)
 	if err := expire(replacement.JSON201.Id); err != nil {
 		t.Fatal(err)

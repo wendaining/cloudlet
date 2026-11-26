@@ -133,6 +133,24 @@ func (e StaticSiteVersionStatus) Valid() bool {
 	}
 }
 
+// Defines values for WaitForBrowserPageRequestCondition.
+const (
+	BrowserWaitReady WaitForBrowserPageRequestCondition = "ready"
+	BrowserWaitText  WaitForBrowserPageRequestCondition = "text"
+)
+
+// Valid indicates whether the value is a known member of the WaitForBrowserPageRequestCondition enum.
+func (e WaitForBrowserPageRequestCondition) Valid() bool {
+	switch e {
+	case BrowserWaitReady:
+		return true
+	case BrowserWaitText:
+		return true
+	default:
+		return false
+	}
+}
+
 // AttachBrowserArtifactRequest defines model for AttachBrowserArtifactRequest.
 type AttachBrowserArtifactRequest struct {
 	ArtifactId   openapi_types.UUID                       `json:"artifact_id"`
@@ -612,6 +630,19 @@ type VersionInfo struct {
 	Version string `json:"version"`
 }
 
+// WaitForBrowserPageRequest defines model for WaitForBrowserPageRequest.
+type WaitForBrowserPageRequest struct {
+	// Condition ready 等待页面加载完成，text 等待默认页面正文包含指定可见文本
+	Condition WaitForBrowserPageRequestCondition `json:"condition"`
+
+	// Text 仅在 condition 为 text 时必填，区分大小写
+	Text      *string `json:"text,omitempty"`
+	TimeoutMs *int    `json:"timeout_ms,omitempty"`
+}
+
+// WaitForBrowserPageRequestCondition ready 等待页面加载完成，text 等待默认页面正文包含指定可见文本
+type WaitForBrowserPageRequestCondition string
+
 // WorkerDeployment defines model for WorkerDeployment.
 type WorkerDeployment struct {
 	ArtifactDigest    string             `json:"artifact_digest"`
@@ -738,6 +769,9 @@ type NavigateBrowserSessionJSONRequestBody = NavigateBrowserSessionRequest
 
 // AttachBrowserArtifactJSONRequestBody defines body for AttachBrowserArtifact for application/json ContentType.
 type AttachBrowserArtifactJSONRequestBody = AttachBrowserArtifactRequest
+
+// WaitForBrowserPageJSONRequestBody defines body for WaitForBrowserPage for application/json ContentType.
+type WaitForBrowserPageJSONRequestBody = WaitForBrowserPageRequest
 
 // UpdateProjectCapacityJSONRequestBody defines body for UpdateProjectCapacity for application/json ContentType.
 type UpdateProjectCapacityJSONRequestBody = UpdateProjectCapacityRequest
@@ -968,6 +1002,14 @@ type ClientInterface interface {
 	//
 	// 将同项目内的截图或浏览器下载产物放入默认页面的文件输入。.
 	AttachBrowserArtifact(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, body AttachBrowserArtifactJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// WaitForBrowserPageWithBody performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/wait (the `WaitForBrowserPage` operationId) request,
+	// with any type of body and a specified content type.
+	WaitForBrowserPageWithBody(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// WaitForBrowserPage performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/wait (the `WaitForBrowserPage` operationId) request.
+	// Takes a body of the `application/json` content type.
+	WaitForBrowserPage(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, body WaitForBrowserPageJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetProjectCapacity performs a GET /api/v1/projects/{projectID}/capacity (the `GetProjectCapacity` operationId) request.
 	//
@@ -1634,6 +1676,34 @@ func (c *Client) AttachBrowserArtifactWithBody(ctx context.Context, projectID Br
 // 将同项目内的截图或浏览器下载产物放入默认页面的文件输入。.
 func (c *Client) AttachBrowserArtifact(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, body AttachBrowserArtifactJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewAttachBrowserArtifactRequest(c.Server, projectID, sessionID, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// WaitForBrowserPageWithBody performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/wait (the `WaitForBrowserPage` operationId) request,
+// with any type of body and a specified content type.
+func (c *Client) WaitForBrowserPageWithBody(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewWaitForBrowserPageRequestWithBody(c.Server, projectID, sessionID, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// WaitForBrowserPage performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/wait (the `WaitForBrowserPage` operationId) request.
+// Takes a body of the `application/json` content type.
+func (c *Client) WaitForBrowserPage(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, body WaitForBrowserPageJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewWaitForBrowserPageRequest(c.Server, projectID, sessionID, body)
 	if err != nil {
 		return nil, err
 	}
@@ -3397,6 +3467,60 @@ func NewAttachBrowserArtifactRequestWithBody(server string, projectID BrowserPro
 	return req, nil
 }
 
+// NewWaitForBrowserPageRequest calls the generic WaitForBrowserPage builder with application/json body
+func NewWaitForBrowserPageRequest(server string, projectID BrowserProjectID, sessionID BrowserSessionID, body WaitForBrowserPageJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewWaitForBrowserPageRequestWithBody(server, projectID, sessionID, "application/json", bodyReader)
+}
+
+// NewWaitForBrowserPageRequestWithBody constructs an http.Request for the WaitForBrowserPage method, with any body, and a specified content type
+func NewWaitForBrowserPageRequestWithBody(server string, projectID BrowserProjectID, sessionID BrowserSessionID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "sessionID", sessionID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/browser-sessions/%s/wait", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewGetProjectCapacityRequest constructs an http.Request for the GetProjectCapacity method
 func NewGetProjectCapacityRequest(server string, projectID string) (*http.Request, error) {
 	var err error
@@ -5097,6 +5221,16 @@ type ClientWithResponsesInterface interface {
 	// 将同项目内的截图或浏览器下载产物放入默认页面的文件输入。.
 	AttachBrowserArtifactWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, body AttachBrowserArtifactJSONRequestBody, reqEditors ...RequestEditorFn) (*AttachBrowserArtifactResponse, error)
 
+	// WaitForBrowserPageWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/wait (the `WaitForBrowserPage` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	WaitForBrowserPageWithBodyWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*WaitForBrowserPageResponse, error)
+
+	// WaitForBrowserPageWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/wait (the `WaitForBrowserPage` operationId) request.
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	WaitForBrowserPageWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, body WaitForBrowserPageJSONRequestBody, reqEditors ...RequestEditorFn) (*WaitForBrowserPageResponse, error)
+
 	// GetProjectCapacityWithResponse performs a GET /api/v1/projects/{projectID}/capacity (the `GetProjectCapacity` operationId) request.
 	//
 	// 返回项目成员可见的项目额度、活动预留占用和剩余量；三个值来自同一数据库快照。.
@@ -6660,6 +6794,54 @@ func (r AttachBrowserArtifactResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r AttachBrowserArtifactResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type WaitForBrowserPageResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON504 the response for an HTTP 504 `application/json` response
+	JSON504 *Error
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON504 returns the response for an HTTP 504 `application/json` response
+func (r WaitForBrowserPageResponse) GetJSON504() *Error {
+	return r.JSON504
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r WaitForBrowserPageResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r WaitForBrowserPageResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r WaitForBrowserPageResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r WaitForBrowserPageResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r WaitForBrowserPageResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -9583,6 +9765,28 @@ func (c *ClientWithResponses) AttachBrowserArtifactWithResponse(ctx context.Cont
 	return ParseAttachBrowserArtifactResponse(rsp)
 }
 
+// WaitForBrowserPageWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/wait (the `WaitForBrowserPage` operationId) request,
+// with any type of body and a specified content type.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) WaitForBrowserPageWithBodyWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*WaitForBrowserPageResponse, error) {
+	rsp, err := c.WaitForBrowserPageWithBody(ctx, projectID, sessionID, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseWaitForBrowserPageResponse(rsp)
+}
+
+// WaitForBrowserPageWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/wait (the `WaitForBrowserPage` operationId) request.
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) WaitForBrowserPageWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, body WaitForBrowserPageJSONRequestBody, reqEditors ...RequestEditorFn) (*WaitForBrowserPageResponse, error) {
+	rsp, err := c.WaitForBrowserPage(ctx, projectID, sessionID, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseWaitForBrowserPageResponse(rsp)
+}
+
 // GetProjectCapacityWithResponse performs a GET /api/v1/projects/{projectID}/capacity (the `GetProjectCapacity` operationId) request.
 //
 // 返回项目成员可见的项目额度、活动预留占用和剩余量；三个值来自同一数据库快照。.
@@ -11036,6 +11240,42 @@ func ParseAttachBrowserArtifactResponse(rsp *http.Response) (*AttachBrowserArtif
 	switch {
 	case rsp.StatusCode == 204:
 		break // No content-type
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseWaitForBrowserPageResponse parses an HTTP response from a WaitForBrowserPageWithResponse call
+func ParseWaitForBrowserPageResponse(rsp *http.Response) (*WaitForBrowserPageResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &WaitForBrowserPageResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case rsp.StatusCode == 204:
+		break // No content-type
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 504:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON504 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error
@@ -13274,6 +13514,9 @@ type ServerInterface interface {
 	// (POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/uploads)
 	AttachBrowserArtifact(c *gin.Context, projectID BrowserProjectID, sessionID BrowserSessionID)
 
+	// (POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/wait)
+	WaitForBrowserPage(c *gin.Context, projectID BrowserProjectID, sessionID BrowserSessionID)
+
 	// (GET /api/v1/projects/{projectID}/capacity)
 	GetProjectCapacity(c *gin.Context, projectID string)
 
@@ -14140,6 +14383,40 @@ func (siw *ServerInterfaceWrapper) AttachBrowserArtifact(c *gin.Context) {
 	}
 
 	siw.Handler.AttachBrowserArtifact(c, projectID, sessionID)
+}
+
+// WaitForBrowserPage operation middleware
+func (siw *ServerInterfaceWrapper) WaitForBrowserPage(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID BrowserProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "sessionID" -------------
+	var sessionID BrowserSessionID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "sessionID", c.Param("sessionID"), &sessionID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter sessionID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.WaitForBrowserPage(c, projectID, sessionID)
 }
 
 // GetProjectCapacity operation middleware
@@ -15343,6 +15620,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID/pages", wrapper.OpenBrowserPage)
 	router.DELETE(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID/pages/:pageID", wrapper.CloseBrowserPage)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID/pages/:pageID", wrapper.GetBrowserPage)
+	router.POST(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID/wait", wrapper.WaitForBrowserPage)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID/text", wrapper.GetBrowserPageText)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID/form", wrapper.ApplyBrowserFormAction)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID/click", wrapper.ClickBrowserPage)

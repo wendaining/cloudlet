@@ -274,6 +274,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{projectID}/browser-sessions/{sessionID}/wait": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["waitForBrowserPage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{projectID}/browser-sessions/{sessionID}/text": {
         parameters: {
             query?: never;
@@ -1095,6 +1114,17 @@ export interface components {
             /** @description 当前标题，最多 512 个 UTF-16 单元 */
             title: string;
             title_truncated: boolean;
+        };
+        WaitForBrowserPageRequest: {
+            /**
+             * @description ready 等待页面加载完成，text 等待默认页面正文包含指定可见文本
+             * @enum {string}
+             */
+            condition: "ready" | "text";
+            /** @description 仅在 condition 为 text 时必填，区分大小写 */
+            text?: string;
+            /** @default 10000 */
+            timeout_ms: number;
         };
         BrowserPageText: {
             title: string;
@@ -1966,6 +1996,41 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    waitForBrowserPage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WaitForBrowserPageRequest"];
+            };
+        };
+        responses: {
+            /** @description 默认页面已满足等待条件 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 在截止时间内未满足等待条件 */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
             };
             default: components["responses"]["Error"];
         };
