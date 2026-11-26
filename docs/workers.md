@@ -66,6 +66,7 @@ GET /api/v1/projects/{projectID}/worker-deployments/{deploymentID}
 客户端使用当前管理会话 Cookie 连接 `/mcp`。先调用 `get_project` 确认项目可访问，再用 `publish_worker` 提交 `project_id`、`name`、`idempotency_key`、`module`、`compatibility_date` 和 `hostname`。管理 API 核查项目所有者或开发者权限。可用结果包含 `worker_id`、`deployment_id`、`operation_id` 与 `operation_outcome`，随后可用 `get_operation` 和同一项目标识查询终态。已记录版本的发布失败也会返回操作标识。重试同一发布时复用原幂等键和参数。
 
 读取活动版本时，管理 API 通过 Docker 核对原执行容器。容器退出后，`execution_state` 为 `stopped`，`last_exit` 记录原因、观察时间以及 Docker 提供的结束时间和退出码。容器重新运行后，执行状态更新为 `running`，最近退出记录仍可查询。发布 Operation 保留原终态。
+
 ### Durable Object 存储
 
 首次发布可声明 SQLite Durable Object 类与绑定。持久卷只授予一个执行写入权限，原容器重启后继续使用原卷。带持久状态的版本升级由 #51 交付，交接时须确认原执行停止后才授予新执行写入权限。
