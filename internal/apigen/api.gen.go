@@ -151,11 +151,23 @@ type BrowserScreenshot struct {
 
 // BrowserSession defines model for BrowserSession.
 type BrowserSession struct {
+	ActualStatus  BrowserSessionStatus `json:"actual_status"`
+	DesiredStatus BrowserSessionStatus `json:"desired_status"`
+
 	// Endpoint 需要项目会话凭据的相对管理 API 地址
-	Endpoint  string               `json:"endpoint"`
-	ExpiresAt time.Time            `json:"expires_at"`
-	Id        openapi_types.UUID   `json:"id"`
+	Endpoint  string             `json:"endpoint"`
+	ExpiresAt time.Time          `json:"expires_at"`
+	Id        openapi_types.UUID `json:"id"`
+
+	// LastError 最近一次平台错误摘要
+	LastError *string              `json:"last_error,omitempty"`
 	Status    BrowserSessionStatus `json:"status"`
+}
+
+// BrowserSessionPage defines model for BrowserSessionPage.
+type BrowserSessionPage struct {
+	Items      []BrowserSession    `json:"items"`
+	NextCursor *openapi_types.UUID `json:"next_cursor,omitempty"`
 }
 
 // BrowserSessionStatus defines model for BrowserSessionStatus.
@@ -546,6 +558,12 @@ type StaticSitePageCursor = string
 // StaticSitePageLimit defines model for StaticSitePageLimit.
 type StaticSitePageLimit = int
 
+// ListBrowserSessionsParams defines parameters for ListBrowserSessions.
+type ListBrowserSessionsParams struct {
+	Limit  *int                `form:"limit,omitempty" json:"limit,omitempty"`
+	Before *openapi_types.UUID `form:"before,omitempty" json:"before,omitempty"`
+}
+
 // GetBrowserPageTextParams defines parameters for GetBrowserPageText.
 type GetBrowserPageTextParams struct {
 	// Selector 可选 CSS 选择器，唯一限定文本范围
@@ -751,6 +769,9 @@ type ClientInterface interface {
 	//
 	// 更新项目显示名称；仅项目所有者可以调用，项目 ID 与成员关系保持不变。.
 	RenameProject(ctx context.Context, projectID string, body RenameProjectJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListBrowserSessions performs a GET /api/v1/projects/{projectID}/browser-sessions (the `ListBrowserSessions` operationId) request.
+	ListBrowserSessions(ctx context.Context, projectID BrowserProjectID, params *ListBrowserSessionsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// CreateBrowserSession performs a POST /api/v1/projects/{projectID}/browser-sessions (the `CreateBrowserSession` operationId) request.
 	CreateBrowserSession(ctx context.Context, projectID BrowserProjectID, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -1139,6 +1160,19 @@ func (c *Client) RenameProjectWithBody(ctx context.Context, projectID string, co
 // 更新项目显示名称；仅项目所有者可以调用，项目 ID 与成员关系保持不变。.
 func (c *Client) RenameProject(ctx context.Context, projectID string, body RenameProjectJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRenameProjectRequest(c.Server, projectID, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListBrowserSessions performs a GET /api/v1/projects/{projectID}/browser-sessions (the `ListBrowserSessions` operationId) request.
+func (c *Client) ListBrowserSessions(ctx context.Context, projectID BrowserProjectID, params *ListBrowserSessionsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListBrowserSessionsRequest(c.Server, projectID, params)
 	if err != nil {
 		return nil, err
 	}
@@ -2157,6 +2191,79 @@ func NewRenameProjectRequestWithBody(server string, projectID string, contentTyp
 	}
 
 	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewListBrowserSessionsRequest constructs an http.Request for the ListBrowserSessions method
+func NewListBrowserSessionsRequest(server string, projectID BrowserProjectID, params *ListBrowserSessionsParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/browser-sessions", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Before != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "before", *params.Before, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: "uuid"}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
 
 	return req, nil
 }
@@ -4122,6 +4229,11 @@ type ClientWithResponsesInterface interface {
 	// 更新项目显示名称；仅项目所有者可以调用，项目 ID 与成员关系保持不变。.
 	RenameProjectWithResponse(ctx context.Context, projectID string, body RenameProjectJSONRequestBody, reqEditors ...RequestEditorFn) (*RenameProjectResponse, error)
 
+	// ListBrowserSessionsWithResponse performs a GET /api/v1/projects/{projectID}/browser-sessions (the `ListBrowserSessions` operationId) request.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	ListBrowserSessionsWithResponse(ctx context.Context, projectID BrowserProjectID, params *ListBrowserSessionsParams, reqEditors ...RequestEditorFn) (*ListBrowserSessionsResponse, error)
+
 	// CreateBrowserSessionWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions (the `CreateBrowserSession` operationId) request.
 	//
 	// Returns a wrapper object for the known response body format(s).
@@ -4906,6 +5018,54 @@ func (r RenameProjectResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r RenameProjectResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListBrowserSessionsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *BrowserSessionPage
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListBrowserSessionsResponse) GetJSON200() *BrowserSessionPage {
+	return r.JSON200
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r ListBrowserSessionsResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r ListBrowserSessionsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListBrowserSessionsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListBrowserSessionsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListBrowserSessionsResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -7870,6 +8030,17 @@ func (c *ClientWithResponses) RenameProjectWithResponse(ctx context.Context, pro
 	return ParseRenameProjectResponse(rsp)
 }
 
+// ListBrowserSessionsWithResponse performs a GET /api/v1/projects/{projectID}/browser-sessions (the `ListBrowserSessions` operationId) request.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) ListBrowserSessionsWithResponse(ctx context.Context, projectID BrowserProjectID, params *ListBrowserSessionsParams, reqEditors ...RequestEditorFn) (*ListBrowserSessionsResponse, error) {
+	rsp, err := c.ListBrowserSessions(ctx, projectID, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListBrowserSessionsResponse(rsp)
+}
+
 // CreateBrowserSessionWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions (the `CreateBrowserSession` operationId) request.
 //
 // Returns a wrapper object for the known response body format(s).
@@ -8829,6 +9000,39 @@ func ParseRenameProjectResponse(rsp *http.Response) (*RenameProjectResponse, err
 			return nil, err
 		}
 		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListBrowserSessionsResponse parses an HTTP response from a ListBrowserSessionsWithResponse call
+func ParseListBrowserSessionsResponse(rsp *http.Response) (*ListBrowserSessionsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListBrowserSessionsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest BrowserSessionPage
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error
@@ -11204,6 +11408,9 @@ type ServerInterface interface {
 	// (PATCH /api/v1/projects/{projectID})
 	RenameProject(c *gin.Context, projectID string)
 
+	// (GET /api/v1/projects/{projectID}/browser-sessions)
+	ListBrowserSessions(c *gin.Context, projectID BrowserProjectID, params ListBrowserSessionsParams)
+
 	// (POST /api/v1/projects/{projectID}/browser-sessions)
 	CreateBrowserSession(c *gin.Context, projectID BrowserProjectID)
 
@@ -11457,6 +11664,50 @@ func (siw *ServerInterfaceWrapper) RenameProject(c *gin.Context) {
 	}
 
 	siw.Handler.RenameProject(c, projectID)
+}
+
+// ListBrowserSessions operation middleware
+func (siw *ServerInterfaceWrapper) ListBrowserSessions(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID BrowserProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListBrowserSessionsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "before" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "before", c.Request.URL.Query(), &params.Before, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter before: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ListBrowserSessions(c, projectID, params)
 }
 
 // CreateBrowserSession operation middleware
@@ -12936,6 +13187,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/members", wrapper.ListProjectMembers)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/members", wrapper.UpsertProjectMember)
 	router.DELETE(options.BaseURL+"/api/v1/projects/:projectID/members/:userID", wrapper.RemoveProjectMember)
+	router.GET(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions", wrapper.ListBrowserSessions)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions", wrapper.CreateBrowserSession)
 	router.DELETE(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID", wrapper.CloseBrowserSession)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID", wrapper.GetBrowserSession)
