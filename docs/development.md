@@ -146,3 +146,21 @@ make dev
 验证管理进程重启接管时，先创建会话、导航并记录 Docker 容器标识。只重启 Go 管理进程，随后对原会话执行截图，核对仍为原页面并确认容器 ID 与启动时间一致。关闭的会话与管理进程停止期间已到期的会话重新连接时应返回 409；查询会话元数据应显示终态。
 
 验收浏览器下载时，在本地页面放置一个文件下载链接。导航后向会话地址的 `/downloads` 发送 POST，JSON 提供链接的 CSS selector。用项目登录会话访问返回的 download_url，比较文件原始字节和 SHA-256。超过 8 MiB 的下载应返回 422，原有产物可继续访问。
+
+### 重放浏览器验收示例
+
+启用上面的 Browser Run 配置并启动开发环境，在管理界面创建一个测试项目。
+从该项目页面的地址复制项目 UUID，在仓库根目录执行：
+
+```sh
+project_id='<测试项目 UUID>'
+bridge_ip=$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}')
+node --env-file=.env.local scripts/browser-acceptance.mjs "$project_id" "$bridge_ip"
+```
+
+脚本在本机 Docker 网桥地址启动临时测试页，使用开发账号调用管理 API，点击按钮，
+保存整页截图并核对摘要和字节数，查询控制台消息，最后关闭会话。它会打印结果目录和产物信息。
+
+打开结果目录中的 screenshot.png，核对按钮显示 `Click verified` 且图片包含页尾
+`Full-page footer`。打开同一目录中的 console.json，查找 `Cloudlet Browser acceptance click`。
+验收记录应包含提交号、系统与 Docker 版本、截图摘要以及看到的按钮、页尾和控制台消息。
