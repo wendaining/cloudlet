@@ -139,6 +139,22 @@ func (p *Publisher) RemoveProject(ctx context.Context, projectID string) (int64,
 	return p.PublishProject(ctx, projectID, nil)
 }
 
+// RemoveResource removes all routes owned by one project resource and applies
+// the committed snapshot. Removing an already absent resource is a no-op.
+func (p *Publisher) RemoveResource(ctx context.Context, projectID, resource string) (int64, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	version, err := p.store.RemoveProjectResourceRoutes(ctx, projectID, resource)
+	if err != nil {
+		return 0, err
+	}
+	appliedVersion, err := p.syncLocked(ctx, version)
+	if err != nil {
+		return version, &SyncError{Version: version, Err: err}
+	}
+	return appliedVersion, nil
+}
+
 // Sync reloads the committed route snapshot and applies it when it is newer
 // than the last applied version.
 func (p *Publisher) Sync(ctx context.Context) (int64, error) {

@@ -5,6 +5,10 @@ go 1.27.4
 require (
 	github.com/alexedwards/scs/postgresstore v0.0.0-20251002162104-209de6e426de
 	github.com/alexedwards/scs/v2 v2.9.0
+	github.com/aws/aws-sdk-go-v2 v1.41.6
+	github.com/aws/aws-sdk-go-v2/credentials v1.19.2
+	github.com/aws/aws-sdk-go-v2/service/s3 v1.97.3
+	github.com/aws/smithy-go v1.25.0
 	github.com/containerd/errdefs v1.0.0
 	github.com/distribution/reference v0.6.0
 	github.com/gin-gonic/gin v1.12.0
@@ -31,6 +35,14 @@ require (
 	github.com/air-verse/air v1.67.4 // indirect
 	github.com/andybalholm/brotli v1.3.0 // indirect
 	github.com/apapsch/go-jsonmerge/v2 v2.0.0 // indirect
+	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.8 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.22 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.22 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/v4a v1.4.22 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.7 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/checksum v1.9.13 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.13.21 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.19.21 // indirect
 	github.com/bep/godartsass/v2 v2.5.0 // indirect
 	github.com/bep/golibsass v1.2.0 // indirect
 	github.com/bits-and-blooms/bitset v1.24.5 // indirect
