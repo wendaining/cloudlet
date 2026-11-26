@@ -395,6 +395,31 @@ paths:
           $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/browser-sessions/{sessionID}/text:
+    parameters:
+      - $ref: '#/components/parameters/BrowserProjectID'
+      - $ref: '#/components/parameters/BrowserSessionID'
+    get:
+      operationId: getBrowserPageText
+      security:
+        - SessionCookie: []
+      parameters:
+        - name: selector
+          in: query
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 1024
+          description: 可选 CSS 选择器，唯一限定文本范围
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 页面标题及限定范围的可见文本
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserPageText'
   /api/v1/projects/{projectID}/browser-sessions/{sessionID}/form:
     parameters:
       - $ref: '#/components/parameters/BrowserProjectID'
@@ -1965,6 +1990,20 @@ components:
       type: string
       enum: [ starting, ready, failed, closed ]
       x-enum-varnames: [ BrowserSessionStatusStarting, BrowserSessionStatusReady, BrowserSessionStatusFailed, BrowserSessionStatusClosed ]
+    BrowserPageText:
+      type: object
+      required: [ title, title_truncated, text, text_truncated ]
+      properties:
+        title:
+          type: string
+          maxLength: 512
+        title_truncated:
+          type: boolean
+        text:
+          type: string
+          maxLength: 4096
+        text_truncated:
+          type: boolean
     BrowserFormActionRequest:
       type: object
       additionalProperties: false

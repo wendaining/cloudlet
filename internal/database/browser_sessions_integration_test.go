@@ -211,6 +211,42 @@ func TestBrowserSessionHTTP(t *testing.T) {
 	}
 	t.Log("console retains 100 messages, truncates long entries, captures uncaught errors and rejects another project")
 
+	navigate(ownerAPI, owner.ID, fixture+"?visible-text", http.StatusOK)
+	readText := func(api *apigen.ClientWithResponses, project string, selector *string, want int) *apigen.BrowserPageText {
+		t.Helper()
+		result, err := api.GetBrowserPageTextWithResponse(ctx, project, session.Id, &apigen.GetBrowserPageTextParams{Selector: selector})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.StatusCode() != want {
+			t.Fatalf("text = %d %s, want %d", result.StatusCode(), result.Body, want)
+		}
+		return result.JSON200
+	}
+	readText(otherAPI, owner.ID, nil, http.StatusNotFound)
+	selector := "#visible"
+	scoped := readText(ownerAPI, owner.ID, &selector, http.StatusOK)
+	if scoped == nil || scoped.Title != "Cloudlet Browser Run" || scoped.Text != "Visible marker" || scoped.TextTruncated {
+		t.Fatalf("incorrect scoped page text: %+v", scoped)
+	}
+	whole := readText(ownerAPI, owner.ID, nil, http.StatusOK)
+	if whole == nil || !strings.HasPrefix(whole.Text, "Visible marker") || strings.Contains(whole.Text, "Hidden marker") ||
+		!whole.TextTruncated || len(whole.Text) != 4096 {
+		t.Fatalf("unexpected visible body or truncation: %+v", whole)
+	}
+	selector = "#hidden"
+	readText(ownerAPI, owner.ID, &selector, http.StatusConflict)
+	selector = "["
+	readText(ownerAPI, owner.ID, &selector, http.StatusBadRequest)
+	t.Log("real Chromium returned the page title, omitted hidden text, bounded the response at 4096 units and rejected another project")
+	navigate(ownerAPI, owner.ID, fixture+"?hidden-body", http.StatusOK)
+	hidden := readText(ownerAPI, owner.ID, nil, http.StatusOK)
+	if hidden == nil || hidden.Title != "Hidden Body" || hidden.Text != "" || hidden.TextTruncated {
+		t.Fatalf("hidden body leaked text: %+v", hidden)
+	}
+	t.Log("CSS-hidden body contributes no text")
+	navigate(ownerAPI, owner.ID, fixture, http.StatusOK)
+
 	captured := capture(ownerAPI, owner.ID, http.StatusCreated)
 	screenshot := captured.JSON201
 	if screenshot == nil || screenshot.Id == uuid.Nil || screenshot.CreatedAt.IsZero() {
@@ -450,6 +486,14 @@ func chromiumPage(t *testing.T, ctx context.Context, docker *client.Client) stri
 		ReadHeaderTimeout: time.Second,
 		Handler: http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 			writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+			if request.URL.Query().Has("hidden-body") {
+				fmt.Fprint(writer, "<!doctype html><title>Hidden Body</title><body style='display:none'>Hidden body marker</body>")
+				return
+			}
+			if request.URL.Query().Has("visible-text") {
+				fmt.Fprint(writer, "<!doctype html><title>Cloudlet Browser Run</title><p id=visible>Visible marker</p><p id=hidden hidden>Hidden marker</p><p>"+strings.Repeat("x", 5000)+"</p>")
+				return
+			}
 			if request.URL.Query().Has("screenshot-too-large") {
 				fmt.Fprint(writer, `<!doctype html><title>Over pixel limit</title><div style="height:6000px"></div>`)
 				return
