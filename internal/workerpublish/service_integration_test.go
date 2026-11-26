@@ -3,6 +3,7 @@
 package workerpublish_test
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -25,6 +26,7 @@ import (
 
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/google/uuid"
+	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/client"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	openapi_types "github.com/oapi-codegen/runtime/types"
@@ -104,7 +106,7 @@ func TestWorkerPublicationHTTP(t *testing.T) {
 			}
 		}
 	})
-	configuration := config.WorkerRuntime{Directory: t.TempDir(), HostID: "publication-" + uuid.NewString(), HostBudget: config.ResourceBudget{CPUMillis: 5000, MemoryBytes: 4 << 30, Instances: 5}, ProjectQuota: config.ResourceBudget{CPUMillis: 3000, MemoryBytes: 1 << 30, Instances: 3}}
+	configuration := config.WorkerRuntime{Directory: t.TempDir(), HostID: "publication-" + uuid.NewString(), HostBudget: config.ResourceBudget{CPUMillis: 6000, MemoryBytes: 4 << 30, Instances: 6}, ProjectQuota: config.ResourceBudget{CPUMillis: 3000, MemoryBytes: 1 << 30, Instances: 3}}
 	newFront := func() *gateway.Handler {
 		front, err := gateway.NewHandler(config.Config{APIAddress: "127.0.0.1:0", GatewayAddress: "127.0.0.1:0"}, slog.Default())
 		if err != nil {
@@ -729,6 +731,81 @@ AND d.state = 'pending' AND o.phase = 'preparing' AND e.container_id <> ''`, pro
 			t.Fatalf("retired Worker container was not removed: %v", err)
 		}
 		t.Logf("same-domain switch %s: version %s to %s, operation %s, old stream completed", hostname, retired.Id, active.Id, activated.Id)
+	})
+	t.Run("stream a Worker response and cancel through the Gateway", func(t *testing.T) {
+		module, err := os.ReadFile(filepath.Join("testdata", "streaming.mjs"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		input := workerpublish.Request{Module: string(module), CompatibilityDate: valid.CompatibilityDate, Hostname: "streaming.localhost"}
+		deployment := decode(request(outsider, http.MethodPost, deployPath(otherProject.ID, "streaming"), "streaming", input, http.StatusCreated))
+		get := func(requestCtx context.Context, path string) *http.Response {
+			t.Helper()
+			req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, public.URL+path, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Host = input.Hostname
+			response, err := outsider.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if response.StatusCode != http.StatusOK {
+				response.Body.Close()
+				t.Fatalf("%s returned HTTP %d", path, response.StatusCode)
+			}
+			return response
+		}
+		streamCtx, cancelStream := context.WithTimeout(ctx, 3*time.Second)
+		defer cancelStream()
+		start := time.Now()
+		partial := get(streamCtx, "/stream/abort")
+		partialReader := bufio.NewReader(partial.Body)
+		first, err := partialReader.ReadString('\n')
+		if err != nil || first != "first\n" {
+			partial.Body.Close()
+			t.Fatalf("first chunk did not arrive before the delayed tail: %q %v", first, err)
+		}
+		elapsed := time.Since(start)
+		cancelStream()
+		if _, err := partialReader.ReadByte(); !errors.Is(err, context.Canceled) {
+			partial.Body.Close()
+			t.Fatalf("client cancellation yielded %v", err)
+		}
+		if err := partial.Body.Close(); err != nil {
+			t.Fatal(err)
+		}
+		// The complete request starts after cancellation and has the same
+		// delayed tail, so its completion spans the canceled tail's deadline.
+		fullCtx, cancelFull := context.WithTimeout(ctx, 15*time.Second)
+		defer cancelFull()
+		full := get(fullCtx, "/stream/full")
+		fullBody, readErr := io.ReadAll(full.Body)
+		closeErr := full.Body.Close()
+		if readErr != nil || closeErr != nil || string(fullBody) != "first\nlast\n" {
+			t.Fatalf("complete streamed body = %q, read=%v, close=%v", fullBody, readErr, closeErr)
+		}
+		logs, err := docker.ContainerLogs(ctx, deployment.ContainerId, client.ContainerLogsOptions{ShowStdout: true, ShowStderr: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var output bytes.Buffer
+		_, readErr = stdcopy.StdCopy(&output, &output, logs)
+		if err := errors.Join(readErr, logs.Close()); err != nil {
+			t.Fatal(err)
+		}
+		text := output.String()
+		if !strings.Contains(text, "cloudlet-stream:full:completed") || !strings.Contains(text, "cloudlet-stream:abort:first") ||
+			!strings.Contains(text, "cloudlet-stream:abort:completed") {
+			t.Fatalf("unexpected workerd streaming logs:\n%s", text)
+		}
+		ready := get(ctx, "/")
+		readyBody, readErr := io.ReadAll(ready.Body)
+		closeErr = ready.Body.Close()
+		if readErr != nil || closeErr != nil || string(readyBody) != "ready" {
+			t.Fatalf("Worker failed subsequent request: %q (%v %v)", readyBody, readErr, closeErr)
+		}
+		t.Logf("Gateway delivered first chunk in %v before the 5s tail. workerd logs:\n%s", elapsed, text)
 	})
 	t.Run("publish and track a Worker through MCP", func(t *testing.T) {
 		session := func(browser *http.Client) *mcp.ClientSession {

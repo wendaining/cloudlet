@@ -13,6 +13,7 @@ import (
 	"unicode/utf16"
 
 	"github.com/google/uuid"
+	"github.com/wendaining/cloudlet/internal/database"
 )
 
 var (
@@ -35,45 +36,52 @@ func (s *Service) Click(ctx context.Context, projectID, id uuid.UUID, selector s
 	if !validClick(selector, timeout) {
 		return ErrClickInput
 	}
+	return s.runPageAction(ctx, session, "/click", struct {
+		Selector string `json:"selector"`
+		Timeout  int    `json:"timeout_ms"`
+	}{Selector: selector, Timeout: timeout}, timeout, pageActionErrors{
+		ErrClickInput, ErrClickTimeout, ErrClickFailed, ErrClickRuntime,
+	})
+}
+
+type pageActionErrors struct {
+	input, timeout, failed, runtime error
+}
+
+func (s *Service) runPageAction(ctx context.Context, session database.BrowserSession, path string, input any, timeout int, result pageActionErrors) error {
 	endpoint, err := s.runtimeEndpoint(ctx, session)
 	if err != nil {
 		return err
 	}
+	body, err := json.Marshal(input)
+	if err != nil {
+		return err
+	}
+	if len(body) > 8192 {
+		return result.input
+	}
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Millisecond+2*time.Second)
 	defer cancel()
-	body, err := json.Marshal(struct {
-		Selector string `json:"selector"`
-		Timeout  int    `json:"timeout_ms"`
-	}{Selector: selector, Timeout: timeout})
-	if err != nil {
-		return err
-	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint+"/click", bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Authorization", "Bearer "+s.token(id))
-	response, err := s.http.Do(request)
+	response, err := s.postRuntime(ctx, endpoint+path, session.ID, bytes.NewReader(body))
 	if errors.Is(err, context.DeadlineExceeded) {
-		return ErrClickTimeout
+		return result.timeout
 	}
 	if err != nil {
-		return fmt.Errorf("%w: %w", ErrClickRuntime, err)
+		return fmt.Errorf("%w: %w", result.runtime, err)
 	}
 	defer response.Body.Close()
 	switch response.StatusCode {
 	case http.StatusNoContent:
 		return nil
 	case http.StatusBadRequest:
-		return ErrClickInput
+		return result.input
 	case http.StatusConflict:
 		return ErrSessionUnavailable
 	case http.StatusUnprocessableEntity:
-		return ErrClickFailed
+		return result.failed
 	case http.StatusGatewayTimeout:
-		return ErrClickTimeout
+		return result.timeout
 	default:
-		return fmt.Errorf("%w: runtime HTTP %d", ErrClickRuntime, response.StatusCode)
+		return fmt.Errorf("%w: runtime HTTP %d", result.runtime, response.StatusCode)
 	}
 }
