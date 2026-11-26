@@ -11,12 +11,12 @@ import (
 	"gorm.io/gorm"
 )
 
-func (h *handler) CaptureBrowserScreenshot(c *gin.Context, projectID string, sessionID uuid.UUID) {
+func (h *handler) CaptureBrowserScreenshot(c *gin.Context, projectID string, sessionID uuid.UUID, params apigen.CaptureBrowserScreenshotParams) {
 	_, project, member, ok := h.projectAccess(c, projectID)
 	if !ok || !h.browserAccess(c, member, true) {
 		return
 	}
-	screenshot, err := h.browser.CaptureScreenshot(c.Request.Context(), uuid.MustParse(project), sessionID)
+	screenshot, err := h.browser.CaptureScreenshot(c.Request.Context(), uuid.MustParse(project), sessionID, params.FullPage != nil && *params.FullPage)
 	switch {
 	case errors.Is(err, browser.ErrScreenshotConflict):
 		c.JSON(http.StatusConflict, apigen.Error{Message: browser.ErrScreenshotConflict.Error()})

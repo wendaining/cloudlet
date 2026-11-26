@@ -6,7 +6,7 @@ export function readViewport(env: NodeJS.ProcessEnv) {
   if (!/^\d+(?:\.\d+)?$/.test(rawScale) || deviceScaleFactor < 1 || deviceScaleFactor > 2) {
     throw new Error('CLOUDLET_BROWSER_DEVICE_SCALE_FACTOR must be a decimal between 1 and 2');
   }
-  if (Math.ceil(width * deviceScaleFactor) * Math.ceil(height * deviceScaleFactor) > 4_194_304) {
+  if (!devicePixelsFit(width, height, deviceScaleFactor)) {
     throw new Error('Browser viewport exceeds 4194304 device pixels');
   }
   return { viewport: { width, height }, deviceScaleFactor };
@@ -19,4 +19,12 @@ function dimension(value: string | undefined, fallback: number, min: number, max
     throw new Error(`${name} must be an integer between ${min} and ${max}`);
   }
   return size;
+}
+
+
+// Apply the same device-pixel budget to viewport and full-page captures.
+export function devicePixelsFit(width: number, height: number, scale: number) {
+  if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width < 1 || height < 1 ||
+      !Number.isFinite(scale) || scale < 1 || scale > 2) return false;
+  return Math.ceil(width * scale) * Math.ceil(height * scale) <= 4_194_304;
 }

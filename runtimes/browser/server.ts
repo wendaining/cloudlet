@@ -7,6 +7,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { chromium, errors, type Page } from 'playwright';
 import { readSessionDeadline } from './session-deadline.ts';
 import { readViewport } from './viewport.ts';
+import { capturePageScreenshot } from './screenshot.ts';
 import { captureDownload } from './download.ts';
 import { collectConsole } from './console-history.ts';
 
@@ -71,11 +72,15 @@ async function readCommand(request: IncomingMessage, screenshot: boolean, click:
     }
     url = target;
   }
+  if (screenshot && 'full_page' in input && typeof input.full_page !== 'boolean') {
+    return { error: 'invalid_full_page', status: 400 } as const;
+  }
+  const fullPage = screenshot && 'full_page' in input && input.full_page === true;
   const timeout = 'timeout_ms' in input ? input.timeout_ms : defaultTimeout;
   if (typeof timeout !== 'number' || !Number.isInteger(timeout) || timeout < 1 || timeout > maxTimeout) {
     return { error: 'invalid_timeout', status: 400 } as const;
   }
-  return { url, selector, formAction, timeout };
+  return { url, selector, formAction, timeout, fullPage };
 }
 
 function isWebURL(url: string) {
@@ -270,8 +275,12 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
   try {
     const result = await Promise.race([
       delay(command.timeout, undefined, { signal: timer.signal }),
-      command.url ? navigate(command.url) : page.screenshot({ type: 'png', fullPage: false, timeout: 0 }),
+      command.url ? navigate(command.url) : capturePageScreenshot(page, command.fullPage, viewportOptions.deviceScaleFactor),
     ]);
+    if (result === null) {
+      send(response, 422, { error: 'screenshot_too_large' });
+      return;
+    }
     if (result) {
       if (!Buffer.isBuffer(result)) {
         send(response, 200, result);
