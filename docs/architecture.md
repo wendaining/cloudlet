@@ -83,6 +83,8 @@ PostgreSQL 当前保存账号、登录会话、项目、操作记录、项目凭
 | /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID} | GET | 项目成员查询指定版本及其产物摘要 |
 | /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/artifact | GET | 项目成员下载原始 ZIP 并读取内容摘要 |
 | /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/publish | POST | 所有者绑定域名、激活首个就绪版本并获取 Gateway 地址 |
+| /api/v1/projects/{projectID}/sites/{siteName}/publication | GET | 项目成员读取当前发布版本和修订值 |
+| /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/activate | POST | 所有者按当前修订值切换活动版本 |
 | /api/v1/projects/{projectID}/postgres-bindings | POST | 所有者验证并登记 PostgreSQL 绑定 |
 | /api/v1/projects/{projectID}/postgres-bindings/{name} | GET | 项目成员查询 PostgreSQL 绑定元数据和验证时间 |
 | /api/v1/projects/{projectID}/s3-bindings | POST | 所有者验证并登记 S3 绑定 |
@@ -115,6 +117,8 @@ Gateway 使用配置中的 `host` 匹配请求域名，匹配时忽略大小写�
 静态站点以项目和名称确定身份。所有者使用 `Content-Type: application/zip` 上传，服务保存原始 ZIP，再展开并登记版本。上传体上限为 64 MiB，展开上限为 256 MiB，ZIP 中央目录在完整解析前检查 10,000 个成员的上限。解包前拒绝超过 255 字节的路径分量。成功响应返回版本标识、SHA-256 摘要、`ready` 状态和用于查询的 `Location`。`ready` 表示文件已准备就绪。
 
 首次发布时，所有者提交一个不带端口的域名。服务先核对版本归属和入口文件，再在同一 PostgreSQL 事务中绑定域名根路由、记录激活版本并递增路由快照版本。快照生效后返回规范域名、版本标识和 Gateway 的 HTTP 地址。发布会保留该项目其他路由。启动配置保留的域名、其他项目已占用的域名和已有根路由均返回 409。相同版本和域名的请求可重试，首次发布接口拒绝切换已有发布的版本或域名。重启时从数据库恢复代理路由和静态站点路由。
+
+项目成员可通过发布查询读取活动版本、域名和修订值。所有者切换版本时提交 `expected_revision`。目标属于同一站点且入口文件就绪才可切换。切换保留域名、路由标识和历史版本，并在同一事务中更新活动引用、修订值与路由快照。对已生效版本的重复请求不推进修订值。若当前版本已经变更，使用旧修订值切换到其他版本会返回 409，客户端应先重新查询。
 
 下载接口先验证项目成员权限和站点版本归属，再按版本摘要打开原始 ZIP 并流式返回。响应提供附件文件名、文件长度和 `Content-Digest`，并声明 `Cache-Control: private, no-store`。
 

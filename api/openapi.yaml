@@ -727,6 +727,71 @@ paths:
           $ref: '#/components/responses/Error'
         '503':
           $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/sites/{siteName}/publication:
+    parameters:
+      - $ref: '#/components/parameters/SiteProjectID'
+      - $ref: '#/components/parameters/SiteName'
+    get:
+      operationId: getStaticSitePublication
+      description: 项目成员读取当前发布版本、固定域名和切换所需的修订值。
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 当前活动版本和修订值
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaticSiteActivePublication'
+        '401':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '503':
+          $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/activate:
+    parameters:
+      - $ref: '#/components/parameters/SiteProjectID'
+      - $ref: '#/components/parameters/SiteName'
+      - name: versionID
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      operationId: activateStaticSiteVersion
+      description: 项目所有者使用当前修订值在现有域名切换版本。目标已经生效时，重复调用不修改路由。
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StaticSiteActivationRequest'
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 当前活动版本和修订值
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaticSiteActivePublication'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+        '503':
+          $ref: '#/components/responses/Error'
   /api/v1/projects/{projectID}/secrets:
     parameters:
       - name: projectID
@@ -1897,6 +1962,33 @@ components:
         url:
           type: string
           format: uri
+    StaticSiteActivationRequest:
+      type: object
+      additionalProperties: false
+      required: [ expected_revision ]
+      properties:
+        expected_revision:
+          type: string
+          format: date-time
+          description: 最近一次从发布查询或切换响应取得的修订值。
+    StaticSiteActivePublication:
+      type: object
+      required: [ site_id, version_id, hostname, url, revision ]
+      properties:
+        site_id:
+          type: string
+          format: uuid
+        version_id:
+          type: string
+          format: uuid
+        hostname:
+          type: string
+        url:
+          type: string
+          format: uri
+        revision:
+          type: string
+          format: date-time
     StaticSiteSummary:
       type: object
       required: [ id, name, created_at ]
