@@ -68,6 +68,11 @@ func (p *Publisher) ReservedHost(host string) bool {
 	return p.gateway.ReservedHost(host)
 }
 
+// DrainProxy waits for requests already sent to a removed proxy endpoint.
+func (p *Publisher) DrainProxy(ctx context.Context, host, target string) error {
+	return p.gateway.DrainProxy(ctx, host, target)
+}
+
 // ActivateStaticSite publishes the first route for a resolved site version.
 func (p *Publisher) ActivateStaticSite(ctx context.Context, projectID string, version database.StaticSiteVersion, hostname string) error {
 	p.mu.Lock()
@@ -132,6 +137,22 @@ func (p *Publisher) PublishProject(ctx context.Context, projectID string, routes
 // RemoveProject removes all routes owned by one project.
 func (p *Publisher) RemoveProject(ctx context.Context, projectID string) (int64, error) {
 	return p.PublishProject(ctx, projectID, nil)
+}
+
+// RemoveResource removes all routes owned by one project resource and applies
+// the committed snapshot. Removing an already absent resource is a no-op.
+func (p *Publisher) RemoveResource(ctx context.Context, projectID, resource string) (int64, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	version, err := p.store.RemoveProjectResourceRoutes(ctx, projectID, resource)
+	if err != nil {
+		return 0, err
+	}
+	appliedVersion, err := p.syncLocked(ctx, version)
+	if err != nil {
+		return version, &SyncError{Version: version, Err: err}
+	}
+	return appliedVersion, nil
 }
 
 // Sync reloads the committed route snapshot and applies it when it is newer

@@ -385,6 +385,9 @@ func checkAdoptedContainer(executionID uuid.UUID, existing containers.Observatio
 	if digest != existing.FilesDigest {
 		return fmt.Errorf("%w: execution %s has different prepared files", ErrExecutionConflict, executionID)
 	}
+	if spec.DataVolume != nil && existing.WritableVolumes[spec.DataVolume.MountPath] != spec.DataVolume.Name {
+		return fmt.Errorf("%w: execution %s has a different writable volume at %s", ErrExecutionConflict, executionID, spec.DataVolume.MountPath)
+	}
 	if existing.Image != spec.Image {
 		return fmt.Errorf("%w: 执行 %s 的容器镜像 %q 与请求 %q 不一致", ErrExecutionConflict, executionID, existing.Image, spec.Image)
 	}

@@ -18,7 +18,7 @@ func TestEnvironmentSnapshot(t *testing.T) {
 	}
 	original := prepared.Environment[0]
 	if !bytes.Contains(prepared.Config, []byte(original.FilePath())) ||
-		!bytes.Contains(preflightConfig(prepared.CompatibilityDate, prepared.Environment), []byte(original.FilePath())) {
+		!bytes.Contains(preflightConfig(prepared.CompatibilityDate, nil, prepared.Environment), []byte(original.FilePath())) {
 		t.Fatal("the same text artifact must be embedded at preflight and runtime")
 	}
 	values["A"] = "new value"

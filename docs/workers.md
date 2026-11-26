@@ -48,6 +48,7 @@ Idempotency-Key: first-publication
 Worker 名称由小写字母、数字和单个连字符分隔的名称段组成，最多 63 个字符。域名不包含端口。兼容日期使用固定 workerd 支持的日期，当前最晚为 2026-10-19。模块及配置按 SHA-256 保存为独立不可变产物。
 
 可选的 `environment` 将名称与字符串映射到 Worker 的 `env` 文本绑定，例如 `{"APP_MODE":"staging"}`。每个版本的运行配置按摘要引用对应值，后续发布会创建新的配置快照。最多可声明 64 个名称，每个值最多 4096 个 UTF-8 字节，所有值合计最多 65536 个字节。值允许为空。普通文本绑定的值保存在项目运行产物中，凭据使用项目凭据管理。
+可选的 `compatibility_flags` 接受最多 64 个显式标志，例如 `["nodejs_compat"]`。兼容日期与声明标志一起交给固定 workerd 验证，未知或与日期冲突的标志会使预检失败。通过验证的标志固定在运行配置与版本记录中，发布响应和版本查询均返回该列表。
 
 发布先预留容量，再预检模块并启动实际 workerd。真实回环端点的 GET `/` 返回 200 至 399 后，在同一事务中登记活动版本、执行标识和域名路由。项目内其他路由保持有效。Gateway 应用已提交快照后返回 201，响应包含 `id`、`worker_id`、`execution_id`、`operation_id`、产物摘要、容器标识和操作终态。`Location` 指向版本查询地址。
 
@@ -64,6 +65,11 @@ GET /api/v1/projects/{projectID}/worker-deployments/{deploymentID}
 ### MCP 发布
 
 客户端使用当前管理会话 Cookie 连接 `/mcp`。先调用 `get_project` 确认项目可访问，再用 `publish_worker` 提交 `project_id`、`name`、`idempotency_key`、`module`、`compatibility_date` 和 `hostname`。管理 API 核查项目所有者或开发者权限。可用结果包含 `worker_id`、`deployment_id`、`operation_id` 与 `operation_outcome`，随后可用 `get_operation` 和同一项目标识查询终态。已记录版本的发布失败也会返回操作标识。重试同一发布时复用原幂等键和参数。
+
+读取活动版本时，管理 API 通过 Docker 核对原执行容器。容器退出后，`execution_state` 为 `stopped`，`last_exit` 记录原因、观察时间以及 Docker 提供的结束时间和退出码。容器重新运行后，执行状态更新为 `running`，最近退出记录仍可查询。发布 Operation 保留原终态。
+### Durable Object 存储
+
+首次发布可声明 SQLite Durable Object 类与绑定。持久卷只授予一个执行写入权限，原容器重启后继续使用原卷。带持久状态的版本升级由 #51 交付，交接时须确认原执行停止后才授予新执行写入权限。
 
 ## 验收
 

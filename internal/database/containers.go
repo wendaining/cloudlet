@@ -252,7 +252,7 @@ func (s *Store) FailContainerExecution(ctx context.Context, projectID, container
 	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&ContainerExecution{}).
 			Where("project_id = ? AND id = ?", projectID, executionID).
-			Updates(map[string]any{"state": "failed", "failure": cause.Error()}).Error; err != nil {
+			Updates(map[string]any{"state": "failed", "failure": cause.Error(), "target": ""}).Error; err != nil {
 			return fmt.Errorf("fail container execution %s: %w", executionID, err)
 		}
 		if err := tx.Model(&Container{}).
@@ -302,4 +302,62 @@ func (s *Store) ContainerOperationFailure(ctx context.Context, projectID, operat
 		return "", false, fmt.Errorf("read container operation %s failure: %w", operationID, err)
 	}
 	return failure, true, nil
+}
+
+// MarkContainerStopped records a confirmed stop after the Docker container is
+// removed and its capacity is released. The execution and container keep their
+// terminal records for queries.
+func (s *Store) MarkContainerStopped(ctx context.Context, projectID, containerID, executionID uuid.UUID) error {
+	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&ContainerExecution{}).
+			Where("project_id = ? AND container_id = ? AND id = ?", projectID, containerID, executionID).
+			Updates(map[string]any{"state": "stopped", "failure": "", "target": ""}).Error; err != nil {
+			return fmt.Errorf("stop container execution %s: %w", executionID, err)
+		}
+		if err := tx.Model(&Container{}).
+			Where("project_id = ? AND id = ?", projectID, containerID).
+			Updates(map[string]any{"active_execution_id": nil, "state": "stopped", "failure": ""}).Error; err != nil {
+			return fmt.Errorf("stop container %s: %w", containerID, err)
+		}
+		return nil
+	}, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+}
+
+// MarkContainerRestartFailed records a failed restart after cleanup. The
+// container returns to stopped so a later restart can be attempted again.
+func (s *Store) MarkContainerRestartFailed(ctx context.Context, projectID, containerID, executionID uuid.UUID, cause error) error {
+	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&ContainerExecution{}).
+			Where("project_id = ? AND container_id = ? AND id = ?", projectID, containerID, executionID).
+			Updates(map[string]any{"state": "failed", "failure": cause.Error(), "target": ""}).Error; err != nil {
+			return fmt.Errorf("fail container execution %s: %w", executionID, err)
+		}
+		if err := tx.Model(&Container{}).
+			Where("project_id = ? AND id = ?", projectID, containerID).
+			Updates(map[string]any{"active_execution_id": nil, "state": "stopped", "failure": cause.Error()}).Error; err != nil {
+			return fmt.Errorf("fail container %s restart: %w", containerID, err)
+		}
+		return nil
+	}, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+}
+
+// DeleteContainer removes the logical container and all execution records after
+// the route and Docker container are gone. Operations remain as audit records.
+func (s *Store) DeleteContainer(ctx context.Context, projectID, containerID uuid.UUID) error {
+	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&Container{}).
+			Where("project_id = ? AND id = ?", projectID, containerID).
+			Update("active_execution_id", nil).Error; err != nil {
+			return fmt.Errorf("clear active execution for container %s: %w", containerID, err)
+		}
+		if err := tx.Where("project_id = ? AND container_id = ?", projectID, containerID).
+			Delete(&ContainerExecution{}).Error; err != nil {
+			return fmt.Errorf("delete container %s executions: %w", containerID, err)
+		}
+		if err := tx.Where("project_id = ? AND id = ?", projectID, containerID).
+			Delete(&Container{}).Error; err != nil {
+			return fmt.Errorf("delete container %s: %w", containerID, err)
+		}
+		return nil
+	}, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 }

@@ -8,7 +8,7 @@
 | npm run lint:config | JSON、YAML、Issue 表单与 Actions 约定 |
 | npm run lint:tooling | 脚本语法、ShellCheck、配置文件与真实端口检查 |
 | make test | Go race 测试、真实 HTTP、Gateway 转发与服务停止 |
-| make test-integration | Docker 中的 PostgreSQL 迁移、账号、会话、项目与成员角色、操作记录、项目凭据、路由快照、容量预留、容器容量准入、项目容量查询与额度调整、就绪检查、workerd 执行、管理 API 容器创建与 Gateway 访问，以及容器启动、观测、HTTP 就绪探测、配额触发、停止与删除 |
+| make test-integration | Docker 中的 PostgreSQL 迁移、账号、会话、项目与成员角色、操作记录、项目凭据、路由快照、容量预留、容器容量准入、项目容量查询与额度调整、就绪检查、workerd 执行、管理 API 容器创建、Gateway 访问与停止/再次启动/删除，以及容器启动、观测、HTTP 就绪探测、配额触发、停止与删除 |
 | make web-check | TypeScript、ESLint、Prettier、Vite 构建与接口生成一致性 |
 | make dev-check | 真实本机进程、数据库、热重载、完整停止、多实例与失败清理 |
 | make test-e2e | 真实 Chromium 在桌面和手机尺寸下完成登录、刷新和退出 |
@@ -68,9 +68,9 @@ go test -race -count=1 -tags=integration ./internal/executions
 
 用例在四核四 GiB 主机预算下预占三核三 GiB 与三个实例，再并发提交八个一核一 GiB、单实例的容器启动请求。只有一个请求成功，其余返回容量不足且没有创建容器；成功启动的固定镜像通过实际发布的回环端口返回预期页面。仅停止容器时预留保持活动；停止并删除容器后容量恢复，后续申请可以再次成功。无效镜像导致创建失败时释放预留且不留下容器；无效用户使 Docker 启动失败时清理容器并释放预留。同一执行标识的并发启动只创建一个容器，并只扣减一次容量。同一执行更换归属或镜像、不同执行复用同一归属都会被拒绝；错误容器标识不会释放容量，绑定容器被外部删除后按归属确认清理。尚未记录容器标识的预留可以在确认没有容器后释放；替换容器清理后释放失败时，原 Stop 请求仍可使用原容器标识重试。256 至 512 字节的摘要固定镜像可以通过准入；Docker 创建失败时正常释放预留。生命周期用例使用真实 PostgreSQL 与 Docker，纯逻辑单元测试只覆盖构造与请求校验、绑定映射和复用配置比较。
 
-## 容器创建验收
+## 容器创建与生命周期验收
 
-使用真实 PostgreSQL、Docker、管理 HTTP API 与 Gateway 验证首个容器创建、就绪和公开访问。
+使用真实 PostgreSQL、Docker、管理 HTTP API 与 Gateway 验证容器创建、就绪、公开访问、停止、再次启动和删除。
 
 ```sh
 export DOCKER_HOST="$(docker context inspect --format '{{.Endpoints.docker.Host}}')"
@@ -79,6 +79,8 @@ go test -race -count=1 -tags=integration -run TestContainerPublicationHTTP -v ./
 ```
 
 用例创建真实项目与成员，验证查看者 403、非成员 404、未登录 401、缺少幂等键与无效请求 400。使用 configs/images.json 中固定镜像和摘要创建容器，核对 201 响应、Operation 成功、Docker 容器运行、归属标签、非 root 用户、CPU、内存、进程与文件句柄限制和回环端口。通过 Gateway 使用大小写与末尾句点变化的域名访问容器，核对实际 HTTP 响应。重复幂等请求返回 200 且不创建第二个容器；更换请求内容、容器名称或域名冲突返回 409，同名冲突和域名冲突使用同一幂等键重试时返回原失败结果。使用会立即退出的命令验证 422、失败原因、容器删除与容量释放；超额 CPU 返回 429 且不创建容器。查询接口验证项目成员可读、非成员返回 404。
+
+生命周期用例停止活动容器，核对公开域名返回 404、Docker 容器已删除、执行和容器状态为 `stopped`、项目容量释放；重复同一幂等键停止返回相同状态。再次启动后核对新的执行序号和 Docker 容器、公开域名恢复响应、容量重新占用。删除后核对公开域名和查询均返回 404、Docker 容器不存在、容量释放；重复同一幂等键删除返回 204。查看者调用生命周期接口返回 403，非成员返回 404。
 
 测试结束后清理所属容器。镜像缓存继续复用。
 
@@ -126,7 +128,7 @@ go test -race -count=1 -tags=integration ./internal/routes
 
 ## workerd 集成验证
 
-Worker 首发验收使用真实 PostgreSQL、Docker、workerd、管理 HTTP 接口与 Gateway。
+Worker 首发与版本激活验收使用真实 PostgreSQL、Docker、workerd、管理 HTTP 接口与 Gateway。
 
 ```sh
 export DOCKER_HOST="$(docker context inspect --format '{{.Endpoints.docker.Host}}')"
@@ -135,6 +137,8 @@ go test -race -count=1 -tags=integration -run TestWorkerPublicationHTTP -v ./int
 ```
 
 用例通过项目会话发布真实 ES Module，核对公开 HTTP 响应、不可变产物摘要、容器归属与资源限制。验证所有者与开发者发布、查看者只读、跨项目拒绝、共享客户端调用和并发幂等。未完成发布的 409 响应提供已登记版本的 `Location`。另一项目在候选 Worker 准备期间实际发布同域路由，验证激活冲突的 409 响应可通过 `Location` 查询失败版本，容器与容量已经释放，已发布的项目路由继续响应。版本登记前的冲突省略查询地址。语法、初始化、就绪、容量与真实存储权限错误保留原始原因，确认失败执行停止后释放容量。重建控制器后查询原版本并访问原执行。真实终止 PostgreSQL 控制连接后，新发布被拒绝，已有 Worker 继续响应。
+
+通过管理 API 发布一个带 SQLite Durable Object 的 Worker，用 Gateway 分别写入和读取两个对象，验证对象隔离与事务回滚。通过 Docker 重启同一执行后，从 Docker 观测到的实际回环端点读取对象，验证对象标识和已提交值保持一致。
 
 使用当前 Docker 连接单独验证 Worker 运行配置。
 
@@ -151,6 +155,20 @@ go test -race -count=1 -tags=integration -v ./internal/workers
 同一入口中的 `TestWorkerdPersistsDurableObjectSQLite` 通过 HTTP 调用名为 `alpha` 和 `beta` 的两个对象。两个对象使用相同的 SQL 表和键保存各自的值。测试停止第一个容器，用原数据卷启动新容器，然后确认两个对象的标识和各自的值都保持不变。
 
 `TestWorkerPreflightReportsRuntimePhase` 使用真实 workerd 分别载入可运行模块、语法错误模块和初始化报错模块，检查返回阶段为 `ready`、`load` 和 `initialize`。
+
+## Worker 流式响应与断开验证
+
+`TestWorkerPublicationHTTP` 通过管理 API 发布 `internal/workerpublish/testdata/streaming.mjs`，再使用真实 HTTP 连接访问 Gateway。完整请求收到 `first` 和 `last` 两段。取消请求在延迟的第二段之前收到第一段，随后终止客户端连接。测试在同一容器完成另一份等长流后读取容器日志，记录取消请求的实际处理。
+
+手工验收时，使用项目所有者或开发者会话调用 [Worker 发布接口](workers.md#管理-api)。用测试模块作为 `module`，兼容日期设为 `2026-10-12`，域名设为 `streaming.localhost`。获取发布响应中的 `container_id`，按开发实例的 Gateway 端口运行以下命令。
+
+```sh
+curl --no-buffer -H 'Host: streaming.localhost' "$CLOUDLET_GATEWAY_URL/stream/full"
+curl --no-buffer --max-time 3 -H 'Host: streaming.localhost' "$CLOUDLET_GATEWAY_URL/stream/abort"
+docker logs "$CLOUDLET_WORKER_CONTAINER_ID"
+```
+
+完整请求会输出两行。限时请求先输出 `first`，再由 curl 以超时状态结束。用 workerd 日志核对 `cloudlet-stream:abort:first` 及后续处理，并访问域名根路径确认 Worker 仍可响应。本机 Docker Engine 29.5.2 和 workerd 1.20261012.1 的用例记录了 `cloudlet-stream:abort:completed`，表明客户端断开后，此 Worker 的延迟任务仍执行到了结束。
 
 ## Worker 构建验证
 

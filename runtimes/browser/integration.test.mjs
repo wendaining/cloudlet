@@ -8,7 +8,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { promisify } from 'node:util';
 import { PNG } from 'pngjs';
 import { readSessionDeadline } from './session-deadline.ts';
-import { readViewport } from './viewport.ts';
+import { devicePixelsFit, readViewport } from './viewport.ts';
 
 const execute = promisify(execFile);
 const directory = fileURLToPath(new URL('.', import.meta.url));
@@ -50,6 +50,14 @@ test('validates viewport defaults, bounds and scaled pixel budget', () => {
     CLOUDLET_BROWSER_VIEWPORT_WIDTH: '1920', CLOUDLET_BROWSER_VIEWPORT_HEIGHT: '1080',
     CLOUDLET_BROWSER_DEVICE_SCALE_FACTOR: '2',
   }), /device pixels/);
+});
+
+test('validates the screenshot device-pixel budget at the boundary', () => {
+  assert.equal(devicePixelsFit(2048, 2048, 1), true);
+  assert.equal(devicePixelsFit(2048, 2049, 1), false);
+  assert.equal(devicePixelsFit(1024, 1024, 2), true);
+  assert.equal(devicePixelsFit(1024, 1025, 2), false);
+  assert.equal(devicePixelsFit(Infinity, 1, 1), false);
 });
 
 test('non-root Chromium navigates, captures PNG and shuts down', { timeout: 300000 }, async (t) => {

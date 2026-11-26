@@ -47,7 +47,7 @@ make dev 检查配置与端口，使用 compose.yaml 和 compose.dev.yaml 启动
 
 开发入口在实例配置中启用 Worker 首发，产物保存到 `.local/实例名称/workers`。主机预算与项目初始配额均配置为 4000 CPU 毫核、四 GiB 内存与四个实例。已有项目配额保持原值。每个 Worker 执行申请 1000 CPU 毫核、256 MiB 内存与一个实例。发布方法见 [Worker 发布](workers.md)。
 
-开发入口同时启用容器创建，与 Worker 共享同一主机预算和项目初始配额。创建请求使用不可变镜像摘要，容器就绪后通过 Gateway 访问所声明的域名。接口、限制和失败清理见 [容器创建与公开访问](containers.md)。
+开发入口同时启用容器创建，与 Worker 共享同一主机预算和项目初始配额。创建请求使用不可变镜像摘要，容器就绪后通过 Gateway 访问所声明的域名。创建、停止、再次启动、删除、限制和失败清理见 [容器生命周期与公开访问](containers.md)。
 
 开发账号使用 CLOUDLET_DEV_EMAIL 与 CLOUDLET_DEV_PASSWORD，走正常登录流程。后续启动保留数据库中已有的账号与密码。生产环境禁止执行开发账号初始化。
 
@@ -137,7 +137,7 @@ make dev
 
 开发时管理进程需要连接本地 Docker Unix socket。测试页面需要监听容器能访问的接口。Linux 默认 Docker 网桥的网关地址可用 `docker network inspect bridge` 查看。不要把测试页面只绑定到宿主的 127.0.0.1。
 
-导航成功后，向会话 endpoint 后追加 `/screenshots` 发送 POST 请求。响应 201 后，使用项目登录会话请求 `download_url`，把返回内容保存为 PNG。打开图片，用 `sha256sum` 和 `wc -c` 核对响应中的 `artifact_digest` 与 `size_bytes`。使用另一项目账号请求同一下载地址，预期返回 404。
+导航成功后，向会话 endpoint 后追加 `/screenshots` 发送 POST 请求。响应 201 后，使用项目登录会话请求 `download_url`，把返回内容保存为 PNG。要测试整页截图，用同一页面向 `/screenshots?full_page=true` 发送 POST，对照视口截图的尺寸及页尾内容。打开图片，用 `sha256sum` 和 `wc -c` 核对响应中的 `artifact_digest` 与 `size_bytes`。使用另一项目账号请求同一下载地址，预期返回 404。
 
 发起 `DELETE` 到会话 endpoint 可以主动关闭会话，响应状态为 `closed`，重复调用仍返回终态。要检查自动回收，可在启动 `make dev` 的终端执行 `export CLOUDLET_BROWSER_SESSION_SECONDS=15`。该值只影响随后创建的会话，有效范围为 5 到 300 秒，默认 300 秒。
 
