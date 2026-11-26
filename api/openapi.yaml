@@ -201,6 +201,36 @@ paths:
           $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
+    patch:
+      operationId: updateProjectCapacity
+      description: 项目所有者调整项目额度。三个额度字段都必须提供且为正整数；新额度低于活动预留占用时返回 409，原额度与预留保持不变。
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProjectCapacityRequest'
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 调整后的项目额度、活动预留占用与剩余量；三个值来自同一数据库事务。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectCapacity'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
   /api/v1/projects/{projectID}/members:
     parameters:
       - name: projectID
@@ -1083,6 +1113,26 @@ components:
           $ref: '#/components/schemas/ResourceAmounts'
         remaining:
           $ref: '#/components/schemas/ResourceAmounts'
+    UpdateProjectCapacityRequest:
+      type: object
+      description: 调整后的项目额度。三个字段都必须提供，单位为 CPU 毫核、内存字节与实例数，非法或非正的单位返回 400。
+      required: [cpu_millis, memory_bytes, instances]
+      properties:
+        cpu_millis:
+          type: integer
+          format: int64
+          minimum: 1
+          description: CPU 毫核，必须为正整数。
+        memory_bytes:
+          type: integer
+          format: int64
+          minimum: 1
+          description: 内存字节，必须为正整数。
+        instances:
+          type: integer
+          format: int64
+          minimum: 1
+          description: 实例数，必须为正整数。
     ProjectMemberRole:
       type: string
       enum: [ developer, viewer ]
