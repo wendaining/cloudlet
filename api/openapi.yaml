@@ -1137,6 +1137,79 @@ paths:
           $ref: "#/components/responses/Error"
         default:
           $ref: "#/components/responses/Error"
+  /api/v1/projects/{projectID}/postgres-bindings:
+    parameters:
+      - name: projectID
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      operationId: createPostgresBinding
+      description: 项目所有者登记 PostgreSQL 绑定。连接验证成功后保存。
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PostgresBindingInput'
+      responses:
+        '201':
+          description: 已验证的绑定
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PostgresBinding'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+        '422':
+          $ref: '#/components/responses/Error'
+        '503':
+          $ref: '#/components/responses/Error'
+        default:
+          $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/postgres-bindings/{name}:
+    parameters:
+      - name: projectID
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+          maxLength: 63
+    get:
+      operationId: getPostgresBinding
+      description: 项目成员查询 PostgreSQL 绑定元数据与验证时间。
+      security:
+        - SessionCookie: []
+      responses:
+        '200':
+          description: 绑定元数据
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PostgresBinding'
+        '401':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        default:
+          $ref: '#/components/responses/Error'
 components:
   parameters:
     BrowserProjectID:
@@ -1229,7 +1302,7 @@ components:
     ClickBrowserPageRequest:
       type: object
       additionalProperties: false
-      required: [selector]
+      required: [ selector ]
       properties:
         selector:
           type: string
@@ -1268,10 +1341,10 @@ components:
           type: string
     ProjectRole:
       type: string
-      enum: [owner, developer, viewer]
+      enum: [ owner, developer, viewer ]
     ResourceAmounts:
       type: object
-      required: [cpu_millis, memory_bytes, instances]
+      required: [ cpu_millis, memory_bytes, instances ]
       properties:
         cpu_millis:
           type: integer
@@ -1291,7 +1364,7 @@ components:
     ProjectCapacity:
       type: object
       description: 项目配额与活动预留快照。used 可能超过 limit；remaining 是按资源钳制后的额度内余量，不表示超用标记。
-      required: [project_id, limit, used, remaining]
+      required: [ project_id, limit, used, remaining ]
       properties:
         project_id:
           type: string
@@ -1305,7 +1378,7 @@ components:
     UpdateProjectCapacityRequest:
       type: object
       description: 调整后的项目额度。三个字段都必须提供，单位为 CPU 毫核、内存字节与实例数，非法或非正的单位返回 400。
-      required: [cpu_millis, memory_bytes, instances]
+      required: [ cpu_millis, memory_bytes, instances ]
       properties:
         cpu_millis:
           type: integer
@@ -1424,7 +1497,7 @@ components:
             $ref: "#/components/schemas/Project"
     BrowserConsoleEntry:
       type: object
-      required: [kind, level, message, truncated]
+      required: [ kind, level, message, truncated ]
       properties:
         kind:
           type: string
@@ -1438,7 +1511,7 @@ components:
           type: boolean
     BrowserConsole:
       type: object
-      required: [entries, dropped]
+      required: [ entries, dropped ]
       properties:
         entries:
           type: array
@@ -1452,7 +1525,7 @@ components:
           description: 已从会话历史移除的旧记录数
     BrowserScreenshot:
       type: object
-      required: [id, artifact_digest, size_bytes, download_url, created_at]
+      required: [ id, artifact_digest, size_bytes, download_url, created_at ]
       properties:
         id:
           type: string
@@ -1474,7 +1547,7 @@ components:
           format: date-time
     CaptureBrowserDownloadRequest:
       type: object
-      required: [selector]
+      required: [ selector ]
       additionalProperties: false
       properties:
         selector:
@@ -1489,7 +1562,7 @@ components:
           default: 10000
     BrowserDownload:
       type: object
-      required: [id, filename, artifact_digest, size_bytes, download_url, created_at]
+      required: [ id, filename, artifact_digest, size_bytes, download_url, created_at ]
       properties:
         id:
           type: string
@@ -1511,11 +1584,11 @@ components:
           format: date-time
     BrowserSessionStatus:
       type: string
-      enum: [starting, ready, failed, closed]
-      x-enum-varnames: [BrowserSessionStatusStarting, BrowserSessionStatusReady, BrowserSessionStatusFailed, BrowserSessionStatusClosed]
+      enum: [ starting, ready, failed, closed ]
+      x-enum-varnames: [ BrowserSessionStatusStarting, BrowserSessionStatusReady, BrowserSessionStatusFailed, BrowserSessionStatusClosed ]
     BrowserSession:
       type: object
-      required: [id, endpoint, expires_at, status]
+      required: [ id, endpoint, expires_at, status ]
       properties:
         id:
           type: string
@@ -1531,14 +1604,14 @@ components:
     NavigateBrowserSessionRequest:
       type: object
       additionalProperties: false
-      required: [url]
+      required: [ url ]
       properties:
         url:
           type: string
           maxLength: 4096
     BrowserNavigation:
       type: object
-      required: [url, title]
+      required: [ url, title ]
       properties:
         url:
           type: string
@@ -1547,7 +1620,7 @@ components:
     StaticSitePublicationRequest:
       type: object
       additionalProperties: false
-      required: [hostname]
+      required: [ hostname ]
       properties:
         hostname:
           type: string
@@ -1556,7 +1629,7 @@ components:
           maxLength: 254
     StaticSitePublication:
       type: object
-      required: [site_id, version_id, hostname, url]
+      required: [ site_id, version_id, hostname, url ]
       properties:
         site_id:
           type: string
@@ -1571,7 +1644,7 @@ components:
           format: uri
     StaticSiteSummary:
       type: object
-      required: [id, name, created_at]
+      required: [ id, name, created_at ]
       properties:
         id:
           type: string
@@ -1583,7 +1656,7 @@ components:
           format: date-time
     StaticSitePage:
       type: object
-      required: [sites]
+      required: [ sites ]
       properties:
         sites:
           type: array
@@ -1594,7 +1667,7 @@ components:
           description: 有更多结果时返回，用于请求下一页。
     StaticSiteVersionPage:
       type: object
-      required: [versions]
+      required: [ versions ]
       properties:
         versions:
           type: array
@@ -1605,7 +1678,7 @@ components:
           description: 有更多结果时返回，用于请求下一页。
     StaticSiteVersion:
       type: object
-      required: [id, site_id, artifact_digest, status, created_at]
+      required: [ id, site_id, artifact_digest, status, created_at ]
       properties:
         id:
           type: string
@@ -1618,7 +1691,7 @@ components:
           pattern: '^[a-f0-9]{64}$'
         status:
           type: string
-          enum: [ready]
+          enum: [ ready ]
           description: 站点文件已通过校验并准备就绪，等待激活。
         created_at:
           type: string
@@ -1916,6 +1989,55 @@ components:
           type: integer
           format: int64
         created_at:
+          type: string
+          format: date-time
+    PostgresBindingInput:
+      type: object
+      required: [ name, host, port, database, secret_version_id ]
+      properties:
+        name:
+          type: string
+          pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+          maxLength: 63
+        host:
+          type: string
+          minLength: 1
+          maxLength: 253
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        database:
+          type: string
+          minLength: 1
+          maxLength: 63
+        secret_version_id:
+          type: string
+          format: uuid
+    PostgresBinding:
+      type: object
+      required: [ name, host, port, database, secret_version_id, verified_at ]
+      properties:
+        name:
+          type: string
+          pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+          maxLength: 63
+        host:
+          type: string
+          minLength: 1
+          maxLength: 253
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        database:
+          type: string
+          minLength: 1
+          maxLength: 63
+        secret_version_id:
+          type: string
+          format: uuid
+        verified_at:
           type: string
           format: date-time
   responses:
