@@ -274,6 +274,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{projectID}/browser-sessions/{sessionID}/text": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        get: operations["getBrowserPageText"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{projectID}/browser-sessions/{sessionID}/click": {
         parameters: {
             query?: never;
@@ -963,6 +982,12 @@ export interface components {
             /** @description 当前标题，最多 512 个 UTF-16 单元 */
             title: string;
             title_truncated: boolean;
+        };
+        BrowserPageText: {
+            title: string;
+            title_truncated: boolean;
+            text: string;
+            text_truncated: boolean;
         };
         BrowserSession: {
             /** Format: uuid */
@@ -1760,6 +1785,33 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getBrowserPageText: {
+        parameters: {
+            query?: {
+                /** @description 可选 CSS 选择器，唯一限定文本范围 */
+                selector?: string;
+            };
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 页面标题及限定范围的可见文本 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrowserPageText"];
+                };
             };
             default: components["responses"]["Error"];
         };

@@ -10,6 +10,7 @@ import { readViewport } from './viewport.ts';
 import { captureDownload } from './download.ts';
 import { collectConsole } from './console-history.ts';
 import { limitPageTitle, pageIDPattern, sessionPages, type PageState } from './pages.ts';
+import { readPageText } from './page-text.ts';
 
 const token = process.env.CLOUDLET_BROWSER_TOKEN;
 if (!token || !/^[A-Za-z0-9_-]{32,}$/.test(token)) {
@@ -31,7 +32,7 @@ function send(response: ServerResponse, status: number, body: object) {
   }).end(JSON.stringify(body));
 }
 
-async function readCommand(request: IncomingMessage, screenshot: boolean, click: boolean) {
+async function readCommand(request: IncomingMessage, screenshot: boolean, click: boolean, form: boolean) {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request.iterator({ destroyOnReturn: false })) {
@@ -52,12 +53,20 @@ async function readCommand(request: IncomingMessage, screenshot: boolean, click:
   let url: URL | undefined;
   let pageID: string | undefined;
   let selector: string | undefined;
-  if (click) {
+  let formAction: { action: 'fill' | 'select'; value: string } | undefined;
+  if (click || form) {
     if (!('selector' in input) || typeof input.selector !== 'string' ||
         !input.selector.trim() || input.selector.length > 1024 || /\p{Cc}/u.test(input.selector)) {
       return { error: 'invalid_selector', status: 400 } as const;
     }
     selector = input.selector;
+    if (form) {
+      if (!('action' in input) || (input.action !== 'fill' && input.action !== 'select') ||
+          !('value' in input) || typeof input.value !== 'string' || input.value.length > 1024 || input.value.includes('\0')) {
+        return { error: 'invalid_form_action', status: 400 } as const;
+      }
+      formAction = { action: input.action, value: input.value };
+    }
   } else if (!screenshot) {
     const target = 'url' in input && typeof input.url === 'string' ? URL.parse(input.url) : null;
     if (!target || !isWebURL(target.href) || target.username || target.password) {
@@ -75,7 +84,7 @@ async function readCommand(request: IncomingMessage, screenshot: boolean, click:
   if (typeof timeout !== 'number' || !Number.isInteger(timeout) || timeout < 1 || timeout > maxTimeout) {
     return { error: 'invalid_timeout', status: 400 } as const;
   }
-  return { url, selector, timeout, pageID };
+  return { url, selector, formAction, timeout, pageID };
 }
 
 function isWebURL(url: string) {
@@ -98,7 +107,7 @@ const browser = await chromium.launch({
 });
 let stopping = false;
 let expiryTimer: ReturnType<typeof setTimeout> | undefined;
-let activeCommand: 'navigation' | 'screenshot' | 'pages' | 'click' | 'download' | undefined;
+let activeCommand: 'navigation' | 'screenshot' | 'pages' | 'text' | 'click' | 'form' | 'download' | undefined;
 const server = createServer({ requestTimeout: 15000, headersTimeout: 5000 }, (request, response) => {
   void handle(request, response).catch(() => {
     if (response.destroyed) return;
@@ -180,6 +189,7 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
   }
   const screenshot = request.url === '/screenshot';
   const click = request.url === '/click';
+  const form = request.url === '/form';
   const download = request.url === '/download';
   const viewport = request.method === 'GET' && request.url === '/viewport';
   const consoleHistory = request.method === 'GET' && request.url === '/console';
@@ -187,7 +197,9 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
   const namedPage = request.url?.startsWith('/pages/') ? request.url.slice('/pages/'.length) : undefined;
   const pageRequest = openPage || (namedPage !== undefined && pageIDPattern.test(namedPage) &&
     (request.method === 'GET' || request.method === 'DELETE'));
-  if (!viewport && !consoleHistory && !pageRequest && (request.method !== 'POST' || (!screenshot && !click && !download && request.url !== '/navigate'))) {
+  const text = request.method === 'GET' && (request.url === '/text' || request.url?.startsWith('/text?'));
+  if (!viewport && !consoleHistory && !text && !pageRequest &&
+      (request.method !== 'POST' || (!screenshot && !click && !form && !download && request.url !== '/navigate'))) {
     send(response, 404, { error: 'not_found' });
     return;
   }
@@ -202,7 +214,7 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
     send(response, 200, consoleLog.read());
     return;
   }
-  const command = viewport || pageRequest ? undefined : await readCommand(request, screenshot, click || download);
+  const command = viewport || text || pageRequest ? undefined : await readCommand(request, screenshot, click || download, form);
   if (command?.error) {
     if (command.status === 413) {
       response.setHeader('Connection', 'close');
@@ -244,6 +256,45 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
     }
     return;
   }
+  if (text) {
+    const state = defaultPage;
+    const page = state.page;
+    if (!state.hasPage || page.isClosed() || !isWebURL(page.url())) {
+      send(response, 409, { error: 'no_page' });
+      return;
+    }
+    const selector = new URL(request.url!, 'http://runtime').searchParams.get('selector');
+    if (selector !== null && (!selector.trim() || selector.length > 1024 || /\p{Cc}/u.test(selector))) {
+      send(response, 400, { error: 'invalid_scope' });
+      return;
+    }
+    activeCommand = 'text';
+    const timer = new AbortController();
+    let expired = false;
+    try {
+      const result = await Promise.race([
+        delay(defaultTimeout, undefined, { signal: timer.signal }),
+        readPageText(page, selector),
+      ]);
+      if (!result) {
+        expired = true;
+        if (response.destroyed) {
+          void shutdown(0);
+        } else {
+          response.once('close', () => void shutdown(0));
+          send(response, 504, { error: 'text_timeout' });
+        }
+      } else if (result.error) {
+        send(response, result.error === 'invalid_scope' ? 400 : 409, result);
+      } else {
+        send(response, 200, result);
+      }
+    } finally {
+      timer.abort();
+      if (!expired) activeCommand = undefined;
+    }
+    return;
+  }
   const state = command?.pageID ? additionalPages.get(command.pageID) : defaultPage;
   if (!state || (command?.pageID && state.page.isClosed())) {
     send(response, 404, { error: 'page_not_found' });
@@ -259,13 +310,14 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
     send(response, 200, { ...size, device_scale_factor: viewportOptions.deviceScaleFactor });
     return;
   }
-  if ((screenshot || click || download) && (!state.hasPage || page.isClosed() || !isWebURL(page.url()))) {
+  if ((screenshot || click || form || download) && (!state.hasPage || page.isClosed() || !isWebURL(page.url()))) {
     send(response, 409, { error: 'no_page' });
     return;
   }
 
   if (command.selector !== undefined) {
-    activeCommand = download ? 'download' : 'click';
+    const kind = download ? 'download' : command.formAction ? 'form' : 'click';
+    activeCommand = kind;
     try {
       if (download) {
         const result = await captureDownload(browser, page, downloadsPath, command.selector, command.timeout);
@@ -282,13 +334,21 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
         return;
       }
       // Playwright enforces strict, actionable CSS selection and its own deadline.
-      await page.locator('css=' + command.selector).click({ timeout: command.timeout });
+      const target = page.locator('css=' + command.selector);
+      const options = { timeout: command.timeout };
+      if (command.formAction?.action === 'fill') {
+        await target.fill(command.formAction.value, options);
+      } else if (command.formAction?.action === 'select') {
+        await target.selectOption({ value: command.formAction.value }, options);
+      } else {
+        await target.click(options);
+      }
       response.writeHead(204, { 'Cache-Control': 'no-store' }).end();
     } catch (error: unknown) {
       if (error instanceof errors.TimeoutError) {
-        send(response, 504, { error: download ? 'download_timeout' : 'click_timeout' });
+        send(response, 504, { error: `${kind}_timeout` });
       } else {
-        send(response, 422, { error: download ? 'download_failed' : 'click_failed' });
+        send(response, 422, { error: `${kind}_failed` });
       }
     } finally {
       activeCommand = undefined;
