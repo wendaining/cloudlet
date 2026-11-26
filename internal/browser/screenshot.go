@@ -31,28 +31,28 @@ var (
 	ErrScreenshot         = errors.New("浏览器截图失败")
 )
 
-func openScreenshotStore(directory string) (*artifacts.Store, error) {
+func openBrowserArtifactStore(directory string, maxBytes int64) (*artifacts.Store, error) {
 	if !filepath.IsAbs(directory) {
-		return nil, fmt.Errorf("configure browser screenshot storage: absolute directory required: %w", fs.ErrInvalid)
+		return nil, fmt.Errorf("configure browser artifact storage: absolute directory required: %w", fs.ErrInvalid)
 	}
 	if err := os.MkdirAll(directory, 0o700); err != nil {
-		return nil, fmt.Errorf("create browser screenshot storage: %w", err)
+		return nil, fmt.Errorf("create browser artifact storage: %w", err)
 	}
 	probe, err := os.CreateTemp(directory, ".write-check-")
 	if err != nil {
-		return nil, fmt.Errorf("check browser screenshot storage is writable: %w", err)
+		return nil, fmt.Errorf("check browser artifact storage is writable: %w", err)
 	}
 	if err := errors.Join(probe.Close(), os.Remove(probe.Name())); err != nil {
-		return nil, fmt.Errorf("clean browser screenshot storage check: %w", err)
+		return nil, fmt.Errorf("clean browser artifact storage check: %w", err)
 	}
 	parent, err := os.Open(filepath.Dir(directory))
 	if err != nil {
-		return nil, fmt.Errorf("open browser screenshot parent directory: %w", err)
+		return nil, fmt.Errorf("open browser artifact parent directory: %w", err)
 	}
 	if err := errors.Join(parent.Sync(), parent.Close()); err != nil {
-		return nil, fmt.Errorf("persist browser screenshot directory: %w", err)
+		return nil, fmt.Errorf("persist browser artifact directory: %w", err)
 	}
-	return artifacts.New(directory, maxScreenshotBytes)
+	return artifacts.New(directory, maxBytes)
 }
 
 func (s *Service) CaptureScreenshot(ctx context.Context, projectID, sessionID uuid.UUID, fullPage bool) (database.BrowserScreenshot, error) {
@@ -73,7 +73,7 @@ func (s *Service) CaptureScreenshot(ctx context.Context, projectID, sessionID uu
 	}
 	digest, err := s.screenshots.Put(bytes.NewReader(image))
 	if err != nil {
-		return database.BrowserScreenshot{}, fmt.Errorf("persist browser screenshot: %w", err)
+		return database.BrowserScreenshot{}, fmt.Errorf("persist browser artifact: %w", err)
 	}
 	return s.store.RegisterBrowserScreenshot(ctx, sessionID, digest, int64(len(image)))
 }
@@ -131,8 +131,11 @@ func readScreenshot(reader io.Reader) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: decode PNG header: %w", ErrScreenshot, err)
 	}
-	if config.Width <= 0 || config.Height <= 0 || config.Height > maxScreenshotPixels/config.Width {
+	if config.Width <= 0 || config.Height <= 0 {
 		return nil, fmt.Errorf("%w: invalid PNG dimensions", ErrScreenshot)
+	}
+	if config.Height > maxScreenshotPixels/config.Width {
+		return nil, ErrScreenshotTooLarge
 	}
 	if _, err := png.Decode(bytes.NewReader(data)); err != nil {
 		return nil, fmt.Errorf("%w: decode PNG: %w", ErrScreenshot, err)

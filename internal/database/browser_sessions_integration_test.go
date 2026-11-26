@@ -248,6 +248,7 @@ func TestBrowserSessionHTTP(t *testing.T) {
 	}
 	t.Logf("screenshot HTTP 201; download HTTP 200, %d bytes, PNG 1280x720, SHA-256 %s; cross-project download HTTP 404", screenshot.SizeBytes, hash)
 	verifyScreenshotModes(t, store, ownerAPI, owner.ID, session.Id, fixture)
+	verifyBrowserDownloads(t, ctx, store, ownerAPI, otherAPI, owner.ID, session.Id, fixture)
 	second, err := ownerAPI.CreateBrowserSessionWithResponse(ctx, owner.ID)
 	if err != nil {
 		t.Fatal(err)

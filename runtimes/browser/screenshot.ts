@@ -18,7 +18,3 @@ export async function capturePageScreenshot(page: Page, fullPage: boolean, scale
   // Bound the capture rectangle even if layout grows after measurement.
   return page.screenshot({ type: 'png', fullPage: true, timeout: 0, clip: { x: 0, y: 0, ...size } });
 }
-
-export function screenshotFits(png: Buffer) {
-  return png.length >= 24 && devicePixelsFit(png.readUInt32BE(16), png.readUInt32BE(20), 1);
-}
