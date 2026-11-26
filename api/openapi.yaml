@@ -201,6 +201,36 @@ paths:
           $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
+    patch:
+      operationId: updateProjectCapacity
+      description: 项目所有者调整项目额度。三个额度字段都必须提供且为正整数；新额度低于活动预留占用时返回 409，原额度与预留保持不变。
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateProjectCapacityRequest'
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 调整后的项目额度、活动预留占用与剩余量；三个值来自同一数据库事务。
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectCapacity'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
   /api/v1/projects/{projectID}/members:
     parameters:
       - name: projectID
@@ -339,6 +369,25 @@ paths:
           $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/browser-sessions/{sessionID}/click:
+    parameters:
+      - $ref: '#/components/parameters/BrowserProjectID'
+      - $ref: '#/components/parameters/BrowserSessionID'
+    post:
+      operationId: clickBrowserPage
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClickBrowserPageRequest'
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '204':
+          description: 已点击当前页面的指定元素
   /api/v1/projects/{projectID}/browser-sessions/{sessionID}/navigate:
     parameters:
       - $ref: '#/components/parameters/BrowserProjectID'
@@ -452,6 +501,59 @@ paths:
           $ref: '#/components/responses/Error'
         '503':
           $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/browser-sessions/{sessionID}/downloads:
+    parameters:
+      - $ref: '#/components/parameters/BrowserProjectID'
+      - $ref: '#/components/parameters/BrowserSessionID'
+    post:
+      operationId: captureBrowserDownload
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CaptureBrowserDownloadRequest'
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '201':
+          description: 完整下载已保存为项目产物
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserDownload'
+        '422':
+          description: 下载失败或超过 8 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/projects/{projectID}/browser-sessions/{sessionID}/downloads/{downloadID}:
+    parameters:
+      - $ref: '#/components/parameters/BrowserProjectID'
+      - $ref: '#/components/parameters/BrowserSessionID'
+      - name: downloadID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getBrowserDownload
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 已保存下载产物的原始字节
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
   /api/v1/projects/{projectID}/sites/{siteName}/versions:
     parameters:
       - $ref: '#/components/parameters/SiteProjectID'
@@ -899,6 +1001,142 @@ paths:
           $ref: "#/components/responses/Error"
         default:
           $ref: "#/components/responses/Error"
+  /api/v1/projects/{projectID}/containers:
+    parameters:
+      - name: projectID
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      operationId: createContainer
+      description: 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用。同一幂等键复用操作。
+      security:
+        - SessionCookie: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateContainerRequest"
+      responses:
+        "200":
+          description: 已存在的容器创建结果
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Container"
+          headers:
+            Location:
+              description: 已登记容器的项目内查询地址。容器尚未登记时省略。
+              schema:
+                type: string
+        "201":
+          description: 新容器创建结果
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Container"
+          headers:
+            Location:
+              description: 已登记容器的项目内查询地址。容器尚未登记时省略。
+              schema:
+                type: string
+        "400":
+          description: 容器创建请求参数无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          description: 容器名称、路由或幂等键冲突
+          headers:
+            Location:
+              description: 已登记容器的项目内查询地址。容器尚未登记时省略。
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: 镜像准备、容器启动或 HTTP 就绪检查失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Container"
+          headers:
+            Location:
+              description: 已登记容器的项目内查询地址。容器尚未登记时省略。
+              schema:
+                type: string
+        "429":
+          description: 容量不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Container"
+          headers:
+            Location:
+              description: 已登记容器的项目内查询地址。容器尚未登记时省略。
+              schema:
+                type: string
+        "500":
+          description: 容器创建步骤失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/projects/{projectID}/containers/{containerID}:
+    parameters:
+      - name: projectID
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: containerID
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: getContainer
+      description: 项目成员查询容器配置、执行与操作结果。
+      security:
+        - SessionCookie: []
+      responses:
+        "200":
+          description: 容器创建结果
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Container"
+        "401":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
   /api/v1/projects/{projectID}/postgres-bindings:
     parameters:
       - name: projectID
@@ -972,7 +1210,6 @@ paths:
           $ref: '#/components/responses/Error'
         default:
           $ref: '#/components/responses/Error'
-
 components:
   parameters:
     BrowserProjectID:
@@ -1062,6 +1299,21 @@ components:
         database_version:
           type: integer
           format: int64
+    ClickBrowserPageRequest:
+      type: object
+      additionalProperties: false
+      required: [ selector ]
+      properties:
+        selector:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          description: 唯一定位当前页面元素的 CSS 选择器
+        timeout_ms:
+          type: integer
+          minimum: 1
+          maximum: 30000
+          default: 10000
     CreateProjectRequest:
       type: object
       additionalProperties: false
@@ -1087,61 +1339,12 @@ components:
           format: uuid
         name:
           type: string
-    PostgresBindingInput:
-      type: object
-      required: [ name, host, port, database, secret_version_id ]
-      properties:
-        name:
-          type: string
-          pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
-          maxLength: 63
-        host:
-          type: string
-          minLength: 1
-          maxLength: 253
-        port:
-          type: integer
-          minimum: 1
-          maximum: 65535
-        database:
-          type: string
-          minLength: 1
-          maxLength: 63
-        secret_version_id:
-          type: string
-          format: uuid
-    PostgresBinding:
-      type: object
-      required: [ name, host, port, database, secret_version_id, verified_at ]
-      properties:
-        name:
-          type: string
-          pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
-          maxLength: 63
-        host:
-          type: string
-          minLength: 1
-          maxLength: 253
-        port:
-          type: integer
-          minimum: 1
-          maximum: 65535
-        database:
-          type: string
-          minLength: 1
-          maxLength: 63
-        secret_version_id:
-          type: string
-          format: uuid
-        verified_at:
-          type: string
-          format: date-time
     ProjectRole:
       type: string
-      enum: [owner, developer, viewer]
+      enum: [ owner, developer, viewer ]
     ResourceAmounts:
       type: object
-      required: [cpu_millis, memory_bytes, instances]
+      required: [ cpu_millis, memory_bytes, instances ]
       properties:
         cpu_millis:
           type: integer
@@ -1161,7 +1364,7 @@ components:
     ProjectCapacity:
       type: object
       description: 项目配额与活动预留快照。used 可能超过 limit；remaining 是按资源钳制后的额度内余量，不表示超用标记。
-      required: [project_id, limit, used, remaining]
+      required: [ project_id, limit, used, remaining ]
       properties:
         project_id:
           type: string
@@ -1172,6 +1375,26 @@ components:
           $ref: '#/components/schemas/ResourceAmounts'
         remaining:
           $ref: '#/components/schemas/ResourceAmounts'
+    UpdateProjectCapacityRequest:
+      type: object
+      description: 调整后的项目额度。三个字段都必须提供，单位为 CPU 毫核、内存字节与实例数，非法或非正的单位返回 400。
+      required: [ cpu_millis, memory_bytes, instances ]
+      properties:
+        cpu_millis:
+          type: integer
+          format: int64
+          minimum: 1
+          description: CPU 毫核，必须为正整数。
+        memory_bytes:
+          type: integer
+          format: int64
+          minimum: 1
+          description: 内存字节，必须为正整数。
+        instances:
+          type: integer
+          format: int64
+          minimum: 1
+          description: 实例数，必须为正整数。
     ProjectMemberRole:
       type: string
       enum: [ developer, viewer ]
@@ -1274,7 +1497,7 @@ components:
             $ref: "#/components/schemas/Project"
     BrowserConsoleEntry:
       type: object
-      required: [kind, level, message, truncated]
+      required: [ kind, level, message, truncated ]
       properties:
         kind:
           type: string
@@ -1288,7 +1511,7 @@ components:
           type: boolean
     BrowserConsole:
       type: object
-      required: [entries, dropped]
+      required: [ entries, dropped ]
       properties:
         entries:
           type: array
@@ -1302,7 +1525,7 @@ components:
           description: 已从会话历史移除的旧记录数
     BrowserScreenshot:
       type: object
-      required: [id, artifact_digest, size_bytes, download_url, created_at]
+      required: [ id, artifact_digest, size_bytes, download_url, created_at ]
       properties:
         id:
           type: string
@@ -1322,13 +1545,50 @@ components:
         created_at:
           type: string
           format: date-time
+    CaptureBrowserDownloadRequest:
+      type: object
+      required: [ selector ]
+      additionalProperties: false
+      properties:
+        selector:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          description: 触发下载的主框架控件的 CSS 选择器
+        timeout_ms:
+          type: integer
+          minimum: 1
+          maximum: 30000
+          default: 10000
+    BrowserDownload:
+      type: object
+      required: [ id, filename, artifact_digest, size_bytes, download_url, created_at ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        filename:
+          type: string
+        artifact_digest:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+        size_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 8388608
+        download_url:
+          type: string
+        created_at:
+          type: string
+          format: date-time
     BrowserSessionStatus:
       type: string
-      enum: [starting, ready, failed, closed]
-      x-enum-varnames: [BrowserSessionStatusStarting, BrowserSessionStatusReady, BrowserSessionStatusFailed, BrowserSessionStatusClosed]
+      enum: [ starting, ready, failed, closed ]
+      x-enum-varnames: [ BrowserSessionStatusStarting, BrowserSessionStatusReady, BrowserSessionStatusFailed, BrowserSessionStatusClosed ]
     BrowserSession:
       type: object
-      required: [id, endpoint, expires_at, status]
+      required: [ id, endpoint, expires_at, status ]
       properties:
         id:
           type: string
@@ -1344,14 +1604,14 @@ components:
     NavigateBrowserSessionRequest:
       type: object
       additionalProperties: false
-      required: [url]
+      required: [ url ]
       properties:
         url:
           type: string
           maxLength: 4096
     BrowserNavigation:
       type: object
-      required: [url, title]
+      required: [ url, title ]
       properties:
         url:
           type: string
@@ -1360,7 +1620,7 @@ components:
     StaticSitePublicationRequest:
       type: object
       additionalProperties: false
-      required: [hostname]
+      required: [ hostname ]
       properties:
         hostname:
           type: string
@@ -1369,7 +1629,7 @@ components:
           maxLength: 254
     StaticSitePublication:
       type: object
-      required: [site_id, version_id, hostname, url]
+      required: [ site_id, version_id, hostname, url ]
       properties:
         site_id:
           type: string
@@ -1384,7 +1644,7 @@ components:
           format: uri
     StaticSiteSummary:
       type: object
-      required: [id, name, created_at]
+      required: [ id, name, created_at ]
       properties:
         id:
           type: string
@@ -1396,7 +1656,7 @@ components:
           format: date-time
     StaticSitePage:
       type: object
-      required: [sites]
+      required: [ sites ]
       properties:
         sites:
           type: array
@@ -1407,7 +1667,7 @@ components:
           description: 有更多结果时返回，用于请求下一页。
     StaticSiteVersionPage:
       type: object
-      required: [versions]
+      required: [ versions ]
       properties:
         versions:
           type: array
@@ -1418,7 +1678,7 @@ components:
           description: 有更多结果时返回，用于请求下一页。
     StaticSiteVersion:
       type: object
-      required: [id, site_id, artifact_digest, status, created_at]
+      required: [ id, site_id, artifact_digest, status, created_at ]
       properties:
         id:
           type: string
@@ -1431,7 +1691,7 @@ components:
           pattern: '^[a-f0-9]{64}$'
         status:
           type: string
-          enum: [ready]
+          enum: [ ready ]
           description: 站点文件已通过校验并准备就绪，等待激活。
         created_at:
           type: string
@@ -1461,6 +1721,177 @@ components:
       properties:
         message:
           type: string
+    CreateContainerRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - name
+        - image
+        - port
+        - hostname
+        - cpu_millis
+        - memory_bytes
+      properties:
+        name:
+          type: string
+          maxLength: 63
+          pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+          description: 项目内稳定的容器名称。
+        image:
+          type: string
+          maxLength: 512
+          description: 包含不可变摘要的镜像引用，格式为 repository@sha256:digest。仅使用标签的引用会被拒绝。
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+          description: 容器内 HTTP 服务监听的 TCP 端口。
+        hostname:
+          type: string
+          maxLength: 253
+          description: 无端口的公开域名，由 Gateway 提供根路径路由。
+        cpu_millis:
+          type: integer
+          format: int64
+          minimum: 1
+          maximum: 1000000
+          description: 申请并限制的 CPU 毫核。
+        memory_bytes:
+          type: integer
+          format: int64
+          minimum: 1
+          description: 申请并限制的内存字节。
+        user:
+          type: string
+          maxLength: 128
+          description: 非 root 运行身份，格式为 user 或 user:group。省略时使用 1000:1000。
+        command:
+          type: array
+          maxItems: 64
+          items:
+            type: string
+          description: 覆盖镜像命令的参数数组。省略时使用镜像默认命令。
+        env:
+          type: array
+          maxItems: 128
+          items:
+            type: string
+          description: KEY=value 形式的环境变量。请求体总大小最多 64 KiB。
+        health_check_path:
+          type: string
+          maxLength: 2048
+          default: /
+          description: 就绪探测的绝对请求路径。
+        health_check_timeout_ms:
+          type: integer
+          format: int64
+          minimum: 1000
+          maximum: 60000
+          default: 15000
+          description: 就绪探测的总截止时间。接受 200 至 399 的最终 HTTP 状态。
+    Container:
+      type: object
+      required:
+        - id
+        - project_id
+        - execution_id
+        - operation_id
+        - name
+        - image
+        - image_digest
+        - port
+        - hostname
+        - path_prefix
+        - cpu_millis
+        - memory_bytes
+        - pids
+        - open_files
+        - user
+        - health_check_path
+        - health_check_timeout_ms
+        - state
+        - failure
+        - execution_state
+        - docker_container_id
+        - target
+        - operation_phase
+        - operation_outcome
+        - generation
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+        execution_id:
+          type: string
+          format: uuid
+        operation_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        image:
+          type: string
+        image_digest:
+          type: string
+        port:
+          type: integer
+        hostname:
+          type: string
+        path_prefix:
+          type: string
+        cpu_millis:
+          type: integer
+          format: int64
+        memory_bytes:
+          type: integer
+          format: int64
+        pids:
+          type: integer
+          format: int64
+        open_files:
+          type: integer
+          format: int64
+        user:
+          type: string
+        command:
+          type: array
+          items:
+            type: string
+        env:
+          type: array
+          items:
+            type: string
+        health_check_path:
+          type: string
+        health_check_timeout_ms:
+          type: integer
+          format: int64
+        state:
+          type: string
+          description: 容器目标状态，取值为 pending、active 或 failed。
+        failure:
+          type: string
+        execution_state:
+          type: string
+          description: 实际执行状态，取值为 pending、running、stopped 或 failed。
+        docker_container_id:
+          type: string
+        target:
+          type: string
+        operation_phase:
+          type: string
+        operation_outcome:
+          type: string
+        generation:
+          type: integer
+          format: int64
+        created_at:
+          type: string
+          format: date-time
     DeployWorkerRequest:
       type: object
       additionalProperties: false
@@ -1558,6 +1989,55 @@ components:
           type: integer
           format: int64
         created_at:
+          type: string
+          format: date-time
+    PostgresBindingInput:
+      type: object
+      required: [ name, host, port, database, secret_version_id ]
+      properties:
+        name:
+          type: string
+          pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+          maxLength: 63
+        host:
+          type: string
+          minLength: 1
+          maxLength: 253
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        database:
+          type: string
+          minLength: 1
+          maxLength: 63
+        secret_version_id:
+          type: string
+          format: uuid
+    PostgresBinding:
+      type: object
+      required: [ name, host, port, database, secret_version_id, verified_at ]
+      properties:
+        name:
+          type: string
+          pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+          maxLength: 63
+        host:
+          type: string
+          minLength: 1
+          maxLength: 253
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        database:
+          type: string
+          minLength: 1
+          maxLength: 63
+        secret_version_id:
+          type: string
+          format: uuid
+        verified_at:
           type: string
           format: date-time
   responses:
