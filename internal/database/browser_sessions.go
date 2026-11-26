@@ -16,6 +16,7 @@ type BrowserSession struct {
 	Status    string
 	CreatedAt time.Time
 	ExpiresAt time.Time
+	LastError string
 }
 
 func (s *Store) CreateBrowserSession(ctx context.Context, session BrowserSession) error {
@@ -51,6 +52,32 @@ func (s *Store) SetBrowserSessionStatus(ctx context.Context, session BrowserSess
 		UpdateColumn("status", status)
 	if result.Error != nil {
 		return fmt.Errorf("update browser session %s status: %w", session.ID, result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+func (s *Store) ProjectBrowserSessions(ctx context.Context, projectID uuid.UUID, hostID string, before *uuid.UUID, limit int) ([]BrowserSession, error) {
+	query := s.DB.WithContext(ctx).Where("project_id = ? AND host_id = ?", projectID, hostID)
+	if before != nil {
+		cursor, err := s.BrowserSession(ctx, projectID, *before, hostID)
+		if err != nil {
+			return nil, err
+		}
+		query = query.Where("(created_at, id) < (?, ?)", cursor.CreatedAt, cursor.ID)
+	}
+	var sessions []BrowserSession
+	err := query.Order("created_at DESC, id DESC").Limit(limit).Find(&sessions).Error
+	return sessions, err
+}
+
+func (s *Store) RecordBrowserSessionError(ctx context.Context, projectID, id uuid.UUID, hostID, message string) error {
+	result := s.DB.WithContext(ctx).Model(&BrowserSession{}).Where("project_id = ? AND id = ? AND host_id = ?", projectID, id, hostID).
+		UpdateColumn("last_error", message)
+	if result.Error != nil {
+		return fmt.Errorf("record error for browser session %s: %w", id, result.Error)
 	}
 	if result.RowsAffected == 0 {
 		return gorm.ErrRecordNotFound

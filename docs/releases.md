@@ -12,7 +12,7 @@ master 更新和 PR 变化时，CI 根据改动路径选择检查任务。路径
 | 路由快照与 Gateway 动态路由 | 真实 PostgreSQL、HTTP 上游与 Gateway 的发布、冲突、恢复与并发验证 |
 | Worker 运行配置、发布接口与镜像 | 真实 PostgreSQL、workerd 与 Gateway 的首发、权限、幂等、错误清理和 HTTP 验证 |
 | Browser Run 执行服务与镜像 | 真实 Chromium 容器的认证、导航和退出验证 |
-| 容器适配器、管理 API 与 Docker 执行 | 真实 Docker 中的容器创建、启动、观测、归属校验、HTTP 就绪探测、Gateway 公开访问、配额触发、停止与端口释放 |
+| 容器适配器、管理 API 与 Docker 执行 | 真实 Docker 中的容器创建、启动、观测、归属校验、HTTP 就绪探测、Gateway 公开访问、停止、再次启动、删除、配额触发与端口释放 |
 | 前端与接口类型 | 前端静态检查、构建与生成一致性 |
 | 开发入口、Compose 与实例配置 | 真实开发环境、热重载、停止、多实例与失败清理 |
 | 页面、认证与页面测试 | 真实 Chromium 中的登录、会话与退出 |
