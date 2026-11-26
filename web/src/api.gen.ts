@@ -389,6 +389,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{projectID}/browser-sessions/{sessionID}/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 将同项目内的截图或浏览器下载产物放入默认页面的文件输入。 */
+        post: operations["attachBrowserArtifact"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{projectID}/browser-sessions/{sessionID}/downloads": {
         parameters: {
             query?: never;
@@ -975,6 +995,18 @@ export interface components {
             download_url: string;
             /** Format: date-time */
             created_at: string;
+        };
+        AttachBrowserArtifactRequest: {
+            /** @enum {string} */
+            artifact_kind: "screenshot" | "download";
+            /** Format: uuid */
+            source_session_id: string;
+            /** Format: uuid */
+            artifact_id: string;
+            /** @description 唯一定位文件输入的 CSS 选择器 */
+            selector: string;
+            /** @default 10000 */
+            timeout_ms: number;
         };
         CaptureBrowserDownloadRequest: {
             /** @description 触发下载的主框架控件的 CSS 选择器 */
@@ -2007,6 +2039,32 @@ export interface operations {
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
             503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    attachBrowserArtifact: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AttachBrowserArtifactRequest"];
+            };
+        };
+        responses: {
+            /** @description 文件已放入输入控件，可通过点击命令提交表单 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             default: components["responses"]["Error"];
         };
     };

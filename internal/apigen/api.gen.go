@@ -19,6 +19,24 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
+// Defines values for AttachBrowserArtifactRequestArtifactKind.
+const (
+	Download   AttachBrowserArtifactRequestArtifactKind = "download"
+	Screenshot AttachBrowserArtifactRequestArtifactKind = "screenshot"
+)
+
+// Valid indicates whether the value is a known member of the AttachBrowserArtifactRequestArtifactKind enum.
+func (e AttachBrowserArtifactRequestArtifactKind) Valid() bool {
+	switch e {
+	case Download:
+		return true
+	case Screenshot:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for BrowserFormActionRequestAction.
 const (
 	Fill   BrowserFormActionRequestAction = "fill"
@@ -114,6 +132,20 @@ func (e StaticSiteVersionStatus) Valid() bool {
 		return false
 	}
 }
+
+// AttachBrowserArtifactRequest defines model for AttachBrowserArtifactRequest.
+type AttachBrowserArtifactRequest struct {
+	ArtifactId   openapi_types.UUID                       `json:"artifact_id"`
+	ArtifactKind AttachBrowserArtifactRequestArtifactKind `json:"artifact_kind"`
+
+	// Selector 唯一定位文件输入的 CSS 选择器
+	Selector        string             `json:"selector"`
+	SourceSessionId openapi_types.UUID `json:"source_session_id"`
+	TimeoutMs       *int               `json:"timeout_ms,omitempty"`
+}
+
+// AttachBrowserArtifactRequestArtifactKind defines model for AttachBrowserArtifactRequest.ArtifactKind.
+type AttachBrowserArtifactRequestArtifactKind string
 
 // BrowserConsole defines model for BrowserConsole.
 type BrowserConsole struct {
@@ -686,6 +718,9 @@ type ApplyBrowserFormActionJSONRequestBody = BrowserFormActionRequest
 // NavigateBrowserSessionJSONRequestBody defines body for NavigateBrowserSession for application/json ContentType.
 type NavigateBrowserSessionJSONRequestBody = NavigateBrowserSessionRequest
 
+// AttachBrowserArtifactJSONRequestBody defines body for AttachBrowserArtifact for application/json ContentType.
+type AttachBrowserArtifactJSONRequestBody = AttachBrowserArtifactRequest
+
 // UpdateProjectCapacityJSONRequestBody defines body for UpdateProjectCapacity for application/json ContentType.
 type UpdateProjectCapacityJSONRequestBody = UpdateProjectCapacityRequest
 
@@ -894,6 +929,18 @@ type ClientInterface interface {
 
 	// GetBrowserPageText performs a GET /api/v1/projects/{projectID}/browser-sessions/{sessionID}/text (the `GetBrowserPageText` operationId) request.
 	GetBrowserPageText(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, params *GetBrowserPageTextParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// AttachBrowserArtifactWithBody performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/uploads (the `AttachBrowserArtifact` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// 将同项目内的截图或浏览器下载产物放入默认页面的文件输入。.
+	AttachBrowserArtifactWithBody(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// AttachBrowserArtifact performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/uploads (the `AttachBrowserArtifact` operationId) request.
+	// Takes a body of the `application/json` content type.
+	//
+	// 将同项目内的截图或浏览器下载产物放入默认页面的文件输入。.
+	AttachBrowserArtifact(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, body AttachBrowserArtifactJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetProjectCapacity performs a GET /api/v1/projects/{projectID}/capacity (the `GetProjectCapacity` operationId) request.
 	//
@@ -1484,6 +1531,38 @@ func (c *Client) DownloadBrowserScreenshot(ctx context.Context, projectID Browse
 // GetBrowserPageText performs a GET /api/v1/projects/{projectID}/browser-sessions/{sessionID}/text (the `GetBrowserPageText` operationId) request.
 func (c *Client) GetBrowserPageText(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, params *GetBrowserPageTextParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetBrowserPageTextRequest(c.Server, projectID, sessionID, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// AttachBrowserArtifactWithBody performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/uploads (the `AttachBrowserArtifact` operationId) request,
+// with any type of body and a specified content type.
+//
+// 将同项目内的截图或浏览器下载产物放入默认页面的文件输入。.
+func (c *Client) AttachBrowserArtifactWithBody(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewAttachBrowserArtifactRequestWithBody(c.Server, projectID, sessionID, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// AttachBrowserArtifact performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/uploads (the `AttachBrowserArtifact` operationId) request.
+// Takes a body of the `application/json` content type.
+//
+// 将同项目内的截图或浏览器下载产物放入默认页面的文件输入。.
+func (c *Client) AttachBrowserArtifact(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, body AttachBrowserArtifactJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewAttachBrowserArtifactRequest(c.Server, projectID, sessionID, body)
 	if err != nil {
 		return nil, err
 	}
@@ -3037,6 +3116,60 @@ func NewGetBrowserPageTextRequest(server string, projectID BrowserProjectID, ses
 	if err != nil {
 		return nil, err
 	}
+
+	return req, nil
+}
+
+// NewAttachBrowserArtifactRequest calls the generic AttachBrowserArtifact builder with application/json body
+func NewAttachBrowserArtifactRequest(server string, projectID BrowserProjectID, sessionID BrowserSessionID, body AttachBrowserArtifactJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewAttachBrowserArtifactRequestWithBody(server, projectID, sessionID, "application/json", bodyReader)
+}
+
+// NewAttachBrowserArtifactRequestWithBody constructs an http.Request for the AttachBrowserArtifact method, with any body, and a specified content type
+func NewAttachBrowserArtifactRequestWithBody(server string, projectID BrowserProjectID, sessionID BrowserSessionID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "sessionID", sessionID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/browser-sessions/%s/uploads", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -4671,6 +4804,20 @@ type ClientWithResponsesInterface interface {
 	// Returns a wrapper object for the known response body format(s).
 	GetBrowserPageTextWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, params *GetBrowserPageTextParams, reqEditors ...RequestEditorFn) (*GetBrowserPageTextResponse, error)
 
+	// AttachBrowserArtifactWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/uploads (the `AttachBrowserArtifact` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// 将同项目内的截图或浏览器下载产物放入默认页面的文件输入。.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	AttachBrowserArtifactWithBodyWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AttachBrowserArtifactResponse, error)
+
+	// AttachBrowserArtifactWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/uploads (the `AttachBrowserArtifact` operationId) request.
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// 将同项目内的截图或浏览器下载产物放入默认页面的文件输入。.
+	AttachBrowserArtifactWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, body AttachBrowserArtifactJSONRequestBody, reqEditors ...RequestEditorFn) (*AttachBrowserArtifactResponse, error)
+
 	// GetProjectCapacityWithResponse performs a GET /api/v1/projects/{projectID}/capacity (the `GetProjectCapacity` operationId) request.
 	//
 	// 返回项目成员可见的项目额度、活动预留占用和剩余量；三个值来自同一数据库快照。.
@@ -6042,6 +6189,47 @@ func (r GetBrowserPageTextResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetBrowserPageTextResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type AttachBrowserArtifactResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r AttachBrowserArtifactResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r AttachBrowserArtifactResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r AttachBrowserArtifactResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r AttachBrowserArtifactResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r AttachBrowserArtifactResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -8816,6 +9004,32 @@ func (c *ClientWithResponses) GetBrowserPageTextWithResponse(ctx context.Context
 	return ParseGetBrowserPageTextResponse(rsp)
 }
 
+// AttachBrowserArtifactWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/uploads (the `AttachBrowserArtifact` operationId) request,
+// with any type of body and a specified content type.
+//
+// 将同项目内的截图或浏览器下载产物放入默认页面的文件输入。.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) AttachBrowserArtifactWithBodyWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*AttachBrowserArtifactResponse, error) {
+	rsp, err := c.AttachBrowserArtifactWithBody(ctx, projectID, sessionID, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseAttachBrowserArtifactResponse(rsp)
+}
+
+// AttachBrowserArtifactWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/uploads (the `AttachBrowserArtifact` operationId) request.
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// 将同项目内的截图或浏览器下载产物放入默认页面的文件输入。.
+func (c *ClientWithResponses) AttachBrowserArtifactWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, body AttachBrowserArtifactJSONRequestBody, reqEditors ...RequestEditorFn) (*AttachBrowserArtifactResponse, error) {
+	rsp, err := c.AttachBrowserArtifact(ctx, projectID, sessionID, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseAttachBrowserArtifactResponse(rsp)
+}
+
 // GetProjectCapacityWithResponse performs a GET /api/v1/projects/{projectID}/capacity (the `GetProjectCapacity` operationId) request.
 //
 // 返回项目成员可见的项目额度、活动预留占用和剩余量；三个值来自同一数据库快照。.
@@ -10119,6 +10333,35 @@ func ParseGetBrowserPageTextResponse(rsp *http.Response) (*GetBrowserPageTextRes
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseAttachBrowserArtifactResponse parses an HTTP response from a AttachBrowserArtifactWithResponse call
+func ParseAttachBrowserArtifactResponse(rsp *http.Response) (*AttachBrowserArtifactResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &AttachBrowserArtifactResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case rsp.StatusCode == 204:
+		break // No content-type
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error
@@ -12270,6 +12513,9 @@ type ServerInterface interface {
 	// (GET /api/v1/projects/{projectID}/browser-sessions/{sessionID}/text)
 	GetBrowserPageText(c *gin.Context, projectID BrowserProjectID, sessionID BrowserSessionID, params GetBrowserPageTextParams)
 
+	// (POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/uploads)
+	AttachBrowserArtifact(c *gin.Context, projectID BrowserProjectID, sessionID BrowserSessionID)
+
 	// (GET /api/v1/projects/{projectID}/capacity)
 	GetProjectCapacity(c *gin.Context, projectID string)
 
@@ -12979,6 +13225,40 @@ func (siw *ServerInterfaceWrapper) GetBrowserPageText(c *gin.Context) {
 	}
 
 	siw.Handler.GetBrowserPageText(c, projectID, sessionID, params)
+}
+
+// AttachBrowserArtifact operation middleware
+func (siw *ServerInterfaceWrapper) AttachBrowserArtifact(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID BrowserProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "sessionID" -------------
+	var sessionID BrowserSessionID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "sessionID", c.Param("sessionID"), &sessionID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter sessionID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.AttachBrowserArtifact(c, projectID, sessionID)
 }
 
 // GetProjectCapacity operation middleware
@@ -14153,6 +14433,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID/screenshots", wrapper.CaptureBrowserScreenshot)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID/screenshots/:screenshotID", wrapper.DownloadBrowserScreenshot)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/sites", wrapper.ListStaticSites)
+	router.POST(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID/uploads", wrapper.AttachBrowserArtifact)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID/downloads", wrapper.CaptureBrowserDownload)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID/downloads/:downloadID", wrapper.GetBrowserDownload)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/sites/:siteName/versions", wrapper.ListStaticSiteVersions)

@@ -3,6 +3,7 @@ package browser
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -57,7 +58,11 @@ func (s *Service) runPageAction(ctx context.Context, session database.BrowserSes
 	if err != nil {
 		return err
 	}
-	if len(body) > 8192 {
+	limit := 8192
+	if path == "/upload" {
+		limit += base64.StdEncoding.EncodedLen(maxDownloadBytes)
+	}
+	if len(body) > limit {
 		return result.input
 	}
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeout)*time.Millisecond+2*time.Second)

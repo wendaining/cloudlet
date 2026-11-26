@@ -20,6 +20,8 @@ if (!token || !/^[A-Za-z0-9_-]{32,}$/.test(token)) {
 const credential = Buffer.from(`Bearer ${token}`);
 const sessionDeadline = readSessionDeadline(process.env.CLOUDLET_BROWSER_DEADLINE);
 const maxBodyBytes = 8192;
+const maxUploadBytes = 8 * 1024 * 1024;
+const maxUploadBodyBytes = maxBodyBytes + 4 * Math.ceil(maxUploadBytes / 3);
 const defaultTimeout = 10000;
 const maxTimeout = 30000;
 const maxScreenshotBytes = 2 * 1024 * 1024;
@@ -32,12 +34,12 @@ function send(response: ServerResponse, status: number, body: object) {
   }).end(JSON.stringify(body));
 }
 
-async function readCommand(request: IncomingMessage, screenshot: boolean, click: boolean, form: boolean) {
+async function readCommand(request: IncomingMessage, screenshot: boolean, click: boolean, form: boolean, upload: boolean) {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request.iterator({ destroyOnReturn: false })) {
     size += chunk.length;
-    if (size > maxBodyBytes) return { error: 'body_too_large', status: 413 } as const;
+    if (size > (upload ? maxUploadBodyBytes : maxBodyBytes)) return { error: 'body_too_large', status: 413 } as const;
     chunks.push(chunk);
   }
 
@@ -53,7 +55,8 @@ async function readCommand(request: IncomingMessage, screenshot: boolean, click:
   let url: URL | undefined;
   let selector: string | undefined;
   let formAction: { action: 'fill' | 'select'; value: string } | undefined;
-  if (click || form) {
+  let file: { name: string; mimeType: string; buffer: Buffer } | undefined;
+  if (click || form || upload) {
     if (!('selector' in input) || typeof input.selector !== 'string' ||
         !input.selector.trim() || input.selector.length > 1024 || /\p{Cc}/u.test(input.selector)) {
       return { error: 'invalid_selector', status: 400 } as const;
@@ -65,6 +68,19 @@ async function readCommand(request: IncomingMessage, screenshot: boolean, click:
         return { error: 'invalid_form_action', status: 400 } as const;
       }
       formAction = { action: input.action, value: input.value };
+    }
+    if (upload) {
+      if (!('filename' in input) || typeof input.filename !== 'string' || !input.filename.trim() ||
+          [...input.filename].length > 128 || /[\\/\p{Cc}]/u.test(input.filename) || input.filename === '.' || input.filename === '..' ||
+          !('mime_type' in input) || (input.mime_type !== 'image/png' && input.mime_type !== 'application/octet-stream') ||
+          !('content' in input) || typeof input.content !== 'string') {
+        return { error: 'invalid_upload', status: 400 } as const;
+      }
+      const buffer = Buffer.from(input.content, 'base64');
+      if (buffer.length > maxUploadBytes || buffer.toString('base64') !== input.content) {
+        return { error: 'invalid_upload', status: 400 } as const;
+      }
+      file = { name: input.filename, mimeType: input.mime_type, buffer };
     }
   } else if (!screenshot) {
     const target = 'url' in input && typeof input.url === 'string' ? URL.parse(input.url) : null;
@@ -81,7 +97,7 @@ async function readCommand(request: IncomingMessage, screenshot: boolean, click:
   if (typeof timeout !== 'number' || !Number.isInteger(timeout) || timeout < 1 || timeout > maxTimeout) {
     return { error: 'invalid_timeout', status: 400 } as const;
   }
-  return { url, selector, formAction, timeout, fullPage };
+  return { url, selector, formAction, file, timeout, fullPage };
 }
 
 function isWebURL(url: string) {
@@ -104,7 +120,7 @@ const browser = await chromium.launch({
 });
 let stopping = false;
 let expiryTimer: ReturnType<typeof setTimeout> | undefined;
-let activeCommand: 'navigation' | 'screenshot' | 'text' | 'click' | 'form' | 'download' | undefined;
+let activeCommand: 'navigation' | 'screenshot' | 'text' | 'click' | 'form' | 'download' | 'upload' | undefined;
 let hasPage = false;
 const server = createServer({ requestTimeout: 15000, headersTimeout: 5000 }, (request, response) => {
   void handle(request, response).catch(() => {
@@ -185,10 +201,11 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
   const click = request.url === '/click';
   const download = request.url === '/download';
   const form = request.url === '/form';
+  const upload = request.url === '/upload';
   const viewport = request.method === 'GET' && request.url === '/viewport';
   const consoleHistory = request.method === 'GET' && request.url === '/console';
   const text = request.method === 'GET' && (request.url === '/text' || request.url?.startsWith('/text?'));
-  if (!viewport && !consoleHistory && !text && (request.method !== 'POST' || (!screenshot && !click && !form && !download && request.url !== '/navigate'))) {
+  if (!viewport && !consoleHistory && !text && (request.method !== 'POST' || (!screenshot && !click && !form && !download && !upload && request.url !== '/navigate'))) {
     send(response, 404, { error: 'not_found' });
     return;
   }
@@ -203,7 +220,7 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
     send(response, 200, readConsole());
     return;
   }
-  const command = viewport || text ? undefined : await readCommand(request, screenshot, click || download, form);
+  const command = viewport || text ? undefined : await readCommand(request, screenshot, click || download, form, upload);
   if (command?.error) {
     if (command.status === 413) {
       response.setHeader('Connection', 'close');
@@ -262,13 +279,13 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
     send(response, 200, { ...size, device_scale_factor: viewportOptions.deviceScaleFactor });
     return;
   }
-  if ((screenshot || click || form || download) && (!hasPage || page.isClosed() || !isWebURL(page.url()))) {
+  if ((screenshot || click || form || download || upload) && (!hasPage || page.isClosed() || !isWebURL(page.url()))) {
     send(response, 409, { error: 'no_page' });
     return;
   }
 
   if (command.selector !== undefined) {
-    const kind = download ? 'download' : command.formAction ? 'form' : 'click';
+    const kind = download ? 'download' : command.file ? 'upload' : command.formAction ? 'form' : 'click';
     activeCommand = kind;
     try {
       if (download) {
@@ -288,7 +305,9 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
       // Playwright enforces strict, actionable CSS selection and its own deadline.
       const target = page.locator('css=' + command.selector);
       const options = { timeout: command.timeout };
-      if (command.formAction?.action === 'fill') {
+      if (command.file) {
+        await target.setInputFiles(command.file, options);
+      } else if (command.formAction?.action === 'fill') {
         await target.fill(command.formAction.value, options);
       } else if (command.formAction?.action === 'select') {
         await target.selectOption({ value: command.formAction.value }, options);
