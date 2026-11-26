@@ -390,6 +390,12 @@ func TestBrowserSessionHTTP(t *testing.T) {
 		t.Fatalf("previous session console leaked into new session: %+v", isolated)
 	}
 	t.Log("a second real Chromium session has no logs from the first")
+	if err := expire(replacement.JSON201.Id); err != nil {
+		t.Fatal(err)
+	}
+	t.Run("replay acceptance example", func(t *testing.T) {
+		verifyBrowserAcceptanceExample(t, ctx, server.URL, owner.ID, fixture, emails[0], password)
+	})
 }
 
 func browserRuntimeImage(t *testing.T, ctx context.Context) (string, string) {
