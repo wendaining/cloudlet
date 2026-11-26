@@ -112,3 +112,38 @@ func routeWriteError(operation string, err error) error {
 	}
 	return fmt.Errorf("%s: %w", operation, err)
 }
+
+// RemoveProjectResourceRoutes removes every route owned by one resource in a
+// project. It increments the snapshot only when a route was removed, so a
+// repeated lifecycle operation does not advance the version.
+func (s *Store) RemoveProjectResourceRoutes(ctx context.Context, projectID, resource string) (int64, error) {
+	parsedID, err := uuid.Parse(projectID)
+	if err != nil {
+		return 0, fmt.Errorf("remove project resource routes: project ID %q is invalid: %w", projectID, fs.ErrInvalid)
+	}
+	if resource == "" {
+		return 0, fmt.Errorf("remove project resource routes: resource is required: %w", fs.ErrInvalid)
+	}
+	projectID = parsedID.String()
+	var version int64
+	err = s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Raw(`SELECT version FROM route_snapshot WHERE id = 1 FOR UPDATE`).Row().Scan(&version); err != nil {
+			return fmt.Errorf("lock route snapshot version: %w", err)
+		}
+		result := tx.Exec(`DELETE FROM project_routes WHERE project_id = ? AND resource = ?`, projectID, resource)
+		if result.Error != nil {
+			return fmt.Errorf("delete project %s resource %s routes: %w", projectID, resource, result.Error)
+		}
+		if result.RowsAffected == 0 {
+			return nil
+		}
+		if err := tx.Raw(`UPDATE route_snapshot SET version = version + 1 WHERE id = 1 RETURNING version`).Row().Scan(&version); err != nil {
+			return fmt.Errorf("advance route snapshot version: %w", err)
+		}
+		return nil
+	}, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	if err != nil {
+		return 0, err
+	}
+	return version, nil
+}

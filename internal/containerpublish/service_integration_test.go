@@ -339,6 +339,20 @@ func TestContainerPublicationHTTP(t *testing.T) {
 		}
 	}
 	getPublic("CONTAINER.localhost.:8081")
+	publicStatus := func(host string) int {
+		t.Helper()
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, public.URL+"/", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Host = host
+		response, err := publicClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		return response.StatusCode
+	}
 
 	_, replay := request(developer, http.MethodPost, path, "web-key", valid, http.StatusOK)
 	replayed := decode(replay)
@@ -379,6 +393,87 @@ func TestContainerPublicationHTTP(t *testing.T) {
 		t.Fatalf("project usage = %+v", usage.Used)
 	}
 
+	stopPath := itemPath(project.ID, created.Id) + "/stop"
+	restartPath := itemPath(project.ID, created.Id) + "/restart"
+	request(viewer, http.MethodPost, stopPath, "viewer-stop", nil, http.StatusForbidden)
+	request(outsider, http.MethodPost, stopPath, "outsider-stop", nil, http.StatusNotFound)
+	request(owner, http.MethodPost, stopPath, "", nil, http.StatusBadRequest)
+	_, data = request(owner, http.MethodPost, stopPath, "web-stop", nil, http.StatusOK)
+	stopped := decode(data)
+	if stopped.State != "stopped" || stopped.ExecutionState != "stopped" || stopped.Target != "" {
+		t.Fatalf("stopped container: %+v", stopped)
+	}
+	if status := publicStatus("container.localhost"); status != http.StatusNotFound {
+		t.Fatalf("stopped container public status = %d", status)
+	}
+	if _, err := docker.ContainerInspect(ctx, created.DockerContainerId, client.ContainerInspectOptions{}); !cerrdefs.IsNotFound(err) {
+		t.Fatalf("stopped container still exists: %v", err)
+	}
+	usage, err = capacityStore.ProjectUsage(ctx, uuid.MustParse(project.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.Used != (capacity.Resources{}) {
+		t.Fatalf("stopped container retained capacity: %+v", usage.Used)
+	}
+	_, data = request(owner, http.MethodPost, stopPath, "web-stop", nil, http.StatusOK)
+	if decode(data).State != "stopped" {
+		t.Fatal("idempotent stop did not return the stopped state")
+	}
+	_, data = request(viewer, http.MethodGet, itemPath(project.ID, created.Id), "", nil, http.StatusOK)
+	if decode(data).State != "stopped" {
+		t.Fatal("stopped container is not readable")
+	}
+
+	request(viewer, http.MethodPost, restartPath, "viewer-restart", nil, http.StatusForbidden)
+	_, data = request(owner, http.MethodPost, restartPath, "web-restart", nil, http.StatusOK)
+	restarted := decode(data)
+	if restarted.State != "active" || restarted.ExecutionState != "running" || restarted.Generation != 2 {
+		t.Fatalf("restarted container: %+v", restarted)
+	}
+	if restarted.DockerContainerId == "" || restarted.DockerContainerId == created.DockerContainerId {
+		t.Fatalf("restart Docker container = %q, want a new container", restarted.DockerContainerId)
+	}
+	getPublic("container.localhost")
+	request(owner, http.MethodPost, restartPath, "web-restart-active", nil, http.StatusConflict)
+	usage, err = capacityStore.ProjectUsage(ctx, uuid.MustParse(project.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.Used != (capacity.Resources{CPUMillis: 500, MemoryBytes: 128 << 20, Instances: 1}) {
+		t.Fatalf("restarted container capacity = %+v", usage.Used)
+	}
+
+	request(viewer, http.MethodDelete, itemPath(project.ID, created.Id), "viewer-delete", nil, http.StatusForbidden)
+	request(outsider, http.MethodDelete, itemPath(project.ID, created.Id), "outsider-delete", nil, http.StatusNotFound)
+	request(owner, http.MethodDelete, itemPath(project.ID, created.Id), "", nil, http.StatusBadRequest)
+	request(owner, http.MethodDelete, itemPath(project.ID, created.Id), "web-delete", nil, http.StatusNoContent)
+	if status := publicStatus("container.localhost"); status != http.StatusNotFound {
+		t.Fatalf("deleted container public status = %d", status)
+	}
+	request(viewer, http.MethodGet, itemPath(project.ID, created.Id), "", nil, http.StatusNotFound)
+	var deletedContainers, deletedExecutions int64
+	if err := store.DB.Model(&database.Container{}).Where("project_id = ? AND id = ?", project.ID, created.Id).Count(&deletedContainers).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DB.Model(&database.ContainerExecution{}).Where("project_id = ? AND container_id = ?", project.ID, created.Id).Count(&deletedExecutions).Error; err != nil {
+		t.Fatal(err)
+	}
+	if deletedContainers != 0 || deletedExecutions != 0 {
+		t.Fatalf("deleted container rows = %d, executions = %d", deletedContainers, deletedExecutions)
+	}
+	if _, err := docker.ContainerInspect(ctx, restarted.DockerContainerId, client.ContainerInspectOptions{}); !cerrdefs.IsNotFound(err) {
+		t.Fatalf("deleted container still exists: %v", err)
+	}
+	usage, err = capacityStore.ProjectUsage(ctx, uuid.MustParse(project.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if usage.Used != (capacity.Resources{}) {
+		t.Fatalf("deleted container retained capacity: %+v", usage.Used)
+	}
+	request(owner, http.MethodDelete, itemPath(project.ID, created.Id), "web-delete", nil, http.StatusNoContent)
+
 	failureProject, err := store.CreateProject(ctx, ownerUser.ID, "Container failure")
 	if err != nil {
 		t.Fatal(err)
@@ -396,8 +491,8 @@ func TestContainerPublicationHTTP(t *testing.T) {
 		t.Fatal("failed container did not record its Docker container")
 	}
 	_, replay = request(owner, http.MethodPost, collectionPath(failureProject.ID), "broken-key", broken, http.StatusOK)
-	if decode(replay).State != "failed" {
-		t.Fatal("failed container replay did not return the recorded failure")
+	if replayedFailure := decode(replay); replayedFailure.State != "failed" {
+		t.Fatalf("failed container replay did not return the recorded failure: %+v", replayedFailure)
 	}
 	if _, err := docker.ContainerInspect(ctx, brokenResult.DockerContainerId, client.ContainerInspectOptions{}); !cerrdefs.IsNotFound(err) {
 		t.Fatalf("failed container still exists: %v", err)
