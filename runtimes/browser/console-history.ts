@@ -10,7 +10,7 @@ export type ConsoleEntry = {
   truncated: boolean;
 };
 
-export function collectConsole(page: Page) {
+export function collectConsole() {
   const entries: ConsoleEntry[] = [];
   let dropped = 0;
 
@@ -26,8 +26,10 @@ export function collectConsole(page: Page) {
     });
   }
 
-  page.on('console', message => add('console', message.type(), message.text()));
-  page.on('pageerror', error => add('page_error', 'error', error.message));
+  function attach(page: Page) {
+    page.on('console', message => add('console', message.type(), message.text()));
+    page.on('pageerror', error => add('page_error', 'error', error.message));
+  }
 
-  return () => ({ entries, dropped });
+  return { attach, read: () => ({ entries, dropped }) };
 }

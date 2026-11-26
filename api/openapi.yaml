@@ -395,6 +395,59 @@ paths:
           $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/browser-sessions/{sessionID}/pages:
+    parameters:
+      - $ref: '#/components/parameters/BrowserProjectID'
+      - $ref: '#/components/parameters/BrowserSessionID'
+    post:
+      operationId: openBrowserPage
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '201':
+          description: 已打开的额外页面
+          headers:
+            Location:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserPage'
+  /api/v1/projects/{projectID}/browser-sessions/{sessionID}/pages/{pageID}:
+    parameters:
+      - $ref: '#/components/parameters/BrowserProjectID'
+      - $ref: '#/components/parameters/BrowserSessionID'
+      - name: pageID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getBrowserPage
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 页面当前地址与标题
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserPage'
+    delete:
+      operationId: closeBrowserPage
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '204':
+          description: 额外页面已关闭
   /api/v1/projects/{projectID}/browser-sessions/{sessionID}/text:
     parameters:
       - $ref: '#/components/parameters/BrowserProjectID'
@@ -2028,6 +2081,25 @@ components:
       type: string
       enum: [ starting, ready, failed, closed ]
       x-enum-varnames: [ BrowserSessionStatusStarting, BrowserSessionStatusReady, BrowserSessionStatusFailed, BrowserSessionStatusClosed ]
+    BrowserPage:
+      type: object
+      required: [ id, url, title, url_truncated, title_truncated ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        url:
+          type: string
+          maxLength: 4096
+          description: 当前地址，最多 4096 个 UTF-8 字节
+        url_truncated:
+          type: boolean
+        title:
+          type: string
+          maxLength: 512
+          description: 当前标题，最多 512 个 UTF-16 单元
+        title_truncated:
+          type: boolean
     BrowserPageText:
       type: object
       required: [ title, title_truncated, text, text_truncated ]
@@ -2105,6 +2177,10 @@ components:
         url:
           type: string
           maxLength: 4096
+        page_id:
+          type: string
+          format: uuid
+          description: 额外页面标识，省略时导航默认页面
     BrowserNavigation:
       type: object
       required: [ url, title ]

@@ -235,6 +235,45 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{projectID}/browser-sessions/{sessionID}/pages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["openBrowserPage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/browser-sessions/{sessionID}/pages/{pageID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+                pageID: string;
+            };
+            cookie?: never;
+        };
+        get: operations["getBrowserPage"];
+        put?: never;
+        post?: never;
+        delete: operations["closeBrowserPage"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{projectID}/browser-sessions/{sessionID}/text": {
         parameters: {
             query?: never;
@@ -1015,6 +1054,16 @@ export interface components {
         };
         /** @enum {string} */
         BrowserSessionStatus: "starting" | "ready" | "failed" | "closed";
+        BrowserPage: {
+            /** Format: uuid */
+            id: string;
+            /** @description 当前地址，最多 4096 个 UTF-8 字节 */
+            url: string;
+            url_truncated: boolean;
+            /** @description 当前标题，最多 512 个 UTF-16 单元 */
+            title: string;
+            title_truncated: boolean;
+        };
         BrowserPageText: {
             title: string;
             title_truncated: boolean;
@@ -1051,6 +1100,11 @@ export interface components {
         };
         NavigateBrowserSessionRequest: {
             url: string;
+            /**
+             * Format: uuid
+             * @description 额外页面标识，省略时导航默认页面
+             */
+            page_id?: string;
         };
         BrowserNavigation: {
             url: string;
@@ -1808,6 +1862,79 @@ export interface operations {
             };
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    openBrowserPage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已打开的额外页面 */
+            201: {
+                headers: {
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrowserPage"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getBrowserPage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+                pageID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 页面当前地址与标题 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrowserPage"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    closeBrowserPage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+                pageID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 额外页面已关闭 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             default: components["responses"]["Error"];
         };
     };
