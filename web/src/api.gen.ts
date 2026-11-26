@@ -626,7 +626,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description 发布首个无状态 Worker 版本，等待真实运行时就绪并激活域名。所有者和开发者可以调用。同一幂等键复用操作。 */
+        /** @description 发布首个无状态 Worker 版本并激活域名，或通过 stage 准备后续版本。所有者和开发者可以调用。同一幂等键复用操作。 */
         post: operations["deployWorker"];
         delete?: never;
         options?: never;
@@ -806,6 +806,26 @@ export interface paths {
         get: operations["getS3Binding"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/worker-deployments/{deploymentID}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+                deploymentID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 由项目所有者或开发者显式激活已就绪的候选版本。同一版本的重复激活返回原操作，域名保持不变。 */
+        post: operations["activateWorkerDeployment"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1202,6 +1222,11 @@ export interface components {
             compatibility_date: string;
             /** @description 无端口的公开域名。 */
             hostname: string;
+            /**
+             * @description 现有 Worker 的候选版本使用 true，域名须与活动版本相同。候选版本就绪后需显式激活。
+             * @default false
+             */
+            stage: boolean;
         };
         WorkerDeployment: {
             /** Format: uuid */
@@ -2956,6 +2981,36 @@ export interface operations {
             };
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    activateWorkerDeployment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+                deploymentID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 激活已完成 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Operation"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            503: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };

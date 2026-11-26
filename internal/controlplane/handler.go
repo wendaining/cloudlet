@@ -648,14 +648,7 @@ func (h *handler) ListProjectOperations(c *gin.Context, projectID string) {
 	}
 	response := make([]apigen.Operation, 0, len(operations))
 	for _, operation := range operations {
-		response = append(response, apigen.Operation{
-			Id:        operation.ID,
-			Action:    operation.Action,
-			Phase:     string(operation.Phase),
-			Outcome:   string(operation.Outcome),
-			CreatedAt: operation.CreatedAt,
-			UpdatedAt: operation.UpdatedAt,
-		})
+		response = append(response, operationResponse(operation))
 	}
 	c.JSON(http.StatusOK, response)
 }
