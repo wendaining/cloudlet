@@ -216,13 +216,28 @@ func TestAdapterNetworkAccess(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	networkName := createTestNetwork(ctx, t, docker)
 	ownership := containers.Ownership{
 		Environment: "integration",
 		Project:     "project-" + rand.Text(),
 		Resource:    "container-" + rand.Text(),
 		Generation:  1,
 	}
+	networkSpec := containers.NetworkSpec{Environment: ownership.Environment, Project: ownership.Project}
+	projectNetwork, err := adapter.EnsureNetwork(ctx, networkSpec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cleanupCancel()
+		if err := adapter.RemoveNetwork(cleanupCtx, networkSpec); err != nil && !errors.Is(err, containers.ErrNetworkNotFound) {
+			t.Errorf("cleanup network: %v", err)
+		}
+		if _, err := docker.NetworkInspect(cleanupCtx, projectNetwork.ID, client.NetworkInspectOptions{}); err == nil {
+			_, _ = docker.NetworkRemove(cleanupCtx, projectNetwork.ID, client.NetworkRemoveOptions{})
+		}
+	})
+	networkName := projectNetwork.Name
 	spec := containers.Spec{
 		Ownership: ownership,
 		Image:     image,
@@ -392,21 +407,28 @@ func TestAdapterCreateRejectsNetworkIDPrefix(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	networkName := createTestNetwork(ctx, t, docker)
-	networkInfo, err := docker.NetworkInspect(ctx, networkName, client.NetworkInspectOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Docker resolves a network ID prefix even though the adapter requires a
-	// name. The mismatch must be reported as a missing network, not as an
-	// invalid spec.
-	prefix := networkInfo.Network.ID[:12]
 	ownership := containers.Ownership{
 		Environment: "integration",
 		Project:     "project-" + rand.Text(),
 		Resource:    "container-" + rand.Text(),
 		Generation:  1,
 	}
+	networkSpec := containers.NetworkSpec{Environment: ownership.Environment, Project: ownership.Project}
+	projectNetwork, err := adapter.EnsureNetwork(ctx, networkSpec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cleanupCancel()
+		if err := adapter.RemoveNetwork(cleanupCtx, networkSpec); err != nil && !errors.Is(err, containers.ErrNetworkNotFound) {
+			t.Errorf("cleanup network: %v", err)
+		}
+	})
+	// Docker resolves a network ID prefix even though the adapter requires a
+	// name. The mismatch must be reported as a missing network, not as an
+	// invalid spec.
+	prefix := projectNetwork.ID[:12]
 	spec := containers.Spec{
 		Ownership: ownership,
 		Image:     httpImage(t),
@@ -452,20 +474,31 @@ func TestAdapterStartReportsMissingNetwork(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	networkName := createTestNetwork(ctx, t, docker)
 	ownership := containers.Ownership{
 		Environment: "integration",
 		Project:     "project-" + rand.Text(),
 		Resource:    "container-" + rand.Text(),
 		Generation:  1,
 	}
+	networkSpec := containers.NetworkSpec{Environment: ownership.Environment, Project: ownership.Project}
+	projectNetwork, err := adapter.EnsureNetwork(ctx, networkSpec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cleanupCancel()
+		if err := adapter.RemoveNetwork(cleanupCtx, networkSpec); err != nil && !errors.Is(err, containers.ErrNetworkNotFound) {
+			t.Errorf("cleanup network: %v", err)
+		}
+	})
 	spec := containers.Spec{
 		Ownership: ownership,
 		Image:     image,
 		User:      "101",
 		Port:      8080,
 		Access:    containers.AccessNetwork,
-		Network:   networkName,
+		Network:   projectNetwork.Name,
 		Limits: containers.Limits{
 			CPUMillis:   500,
 			MemoryBytes: 128 << 20,
@@ -493,8 +526,8 @@ func TestAdapterStartReportsMissingNetwork(t *testing.T) {
 
 	// A created container does not keep its network alive. Removing the network
 	// must surface as a network error, not as a missing container.
-	if _, err := docker.NetworkRemove(ctx, networkName, client.NetworkRemoveOptions{}); err != nil {
-		t.Fatalf("remove network %s: %v", networkName, err)
+	if err := adapter.RemoveNetwork(ctx, networkSpec); err != nil {
+		t.Fatalf("remove network %s: %v", projectNetwork.Name, err)
 	}
 	_, startErr := adapter.Start(ctx, ownership, created.ID)
 	if !errors.Is(startErr, containers.ErrNetworkNotFound) {
@@ -825,23 +858,6 @@ func waitForPortRelease(t *testing.T, ctx context.Context, address string) {
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
-}
-
-func createTestNetwork(ctx context.Context, t *testing.T, docker *client.Client) string {
-	t.Helper()
-	name := "cloudlet-test-" + strings.ToLower(rand.Text())
-	result, err := docker.NetworkCreate(ctx, name, client.NetworkCreateOptions{Driver: "bridge"})
-	if err != nil {
-		t.Fatalf("create network %s: %v", name, err)
-	}
-	t.Cleanup(func() {
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), time.Minute)
-		defer cleanupCancel()
-		if _, err := docker.NetworkRemove(cleanupCtx, result.ID, client.NetworkRemoveOptions{}); err != nil && !cerrdefs.IsNotFound(err) {
-			t.Errorf("remove network %s: %v", name, err)
-		}
-	})
-	return name
 }
 
 func assertCreatedNetworkContainer(t *testing.T, ctx context.Context, docker *client.Client, created containers.Container, spec containers.Spec) {

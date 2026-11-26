@@ -1,9 +1,13 @@
 import { timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { chromium, errors, type Page } from 'playwright';
 import { readSessionDeadline } from './session-deadline.ts';
 import { readViewport } from './viewport.ts';
+import { captureDownload } from './download.ts';
 import { collectConsole } from './console-history.ts';
 
 const token = process.env.CLOUDLET_BROWSER_TOKEN;
@@ -78,10 +82,12 @@ function isWebURL(url: string) {
   return url.startsWith('http:') || url.startsWith('https:');
 }
 
+const downloadsPath = mkdtempSync(join(tmpdir(), 'cloudlet-downloads-'));
+process.once('exit', () => rmSync(downloadsPath, { recursive: true, force: true }));
 const launchTimeout = 30000;
 const remainingAtLaunch = sessionDeadline === undefined ? Infinity : sessionDeadline - Date.now();
 const browser = await chromium.launch({
-  chromiumSandbox: true, handleSIGTERM: false, handleSIGINT: false,
+  downloadsPath, chromiumSandbox: true, handleSIGTERM: false, handleSIGINT: false,
   timeout: Math.min(launchTimeout, Math.max(1, remainingAtLaunch)),
 }).catch((error: unknown) => {
   if (error instanceof errors.TimeoutError && remainingAtLaunch <= launchTimeout &&
@@ -92,7 +98,7 @@ const browser = await chromium.launch({
 });
 let stopping = false;
 let expiryTimer: ReturnType<typeof setTimeout> | undefined;
-let activeCommand: 'navigation' | 'screenshot' | 'click' | 'form' | undefined;
+let activeCommand: 'navigation' | 'screenshot' | 'click' | 'form' | 'download' | undefined;
 let hasPage = false;
 const server = createServer({ requestTimeout: 15000, headersTimeout: 5000 }, (request, response) => {
   void handle(request, response).catch(() => {
@@ -171,10 +177,11 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
   }
   const screenshot = request.url === '/screenshot';
   const click = request.url === '/click';
+  const download = request.url === '/download';
   const form = request.url === '/form';
   const viewport = request.method === 'GET' && request.url === '/viewport';
   const consoleHistory = request.method === 'GET' && request.url === '/console';
-  if (!viewport && !consoleHistory && (request.method !== 'POST' || (!screenshot && !click && !form && request.url !== '/navigate'))) {
+  if (!viewport && !consoleHistory && (request.method !== 'POST' || (!screenshot && !click && !form && !download && request.url !== '/navigate'))) {
     send(response, 404, { error: 'not_found' });
     return;
   }
@@ -189,7 +196,7 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
     send(response, 200, readConsole());
     return;
   }
-  const command = viewport ? undefined : await readCommand(request, screenshot, click, form);
+  const command = viewport ? undefined : await readCommand(request, screenshot, click || download, form);
   if (command?.error) {
     if (command.status === 413) {
       response.setHeader('Connection', 'close');
@@ -211,15 +218,29 @@ async function handle(request: IncomingMessage, response: ServerResponse) {
     send(response, 200, { ...size, device_scale_factor: viewportOptions.deviceScaleFactor });
     return;
   }
-  if ((screenshot || click || form) && (!hasPage || page.isClosed() || !isWebURL(page.url()))) {
+  if ((screenshot || click || form || download) && (!hasPage || page.isClosed() || !isWebURL(page.url()))) {
     send(response, 409, { error: 'no_page' });
     return;
   }
 
   if (command.selector !== undefined) {
-    const kind = command.formAction ? 'form' : 'click';
+    const kind = download ? 'download' : command.formAction ? 'form' : 'click';
     activeCommand = kind;
     try {
+      if (download) {
+        const result = await captureDownload(browser, page, downloadsPath, command.selector, command.timeout);
+        if (result.status !== 200) {
+          send(response, result.status, { error: result.status === 504 ? 'download_timeout' : 'download_rejected' });
+        } else {
+          response.writeHead(200, {
+            'Content-Type': 'application/octet-stream',
+            'Content-Length': result.data.length,
+            'X-Cloudlet-Download-Name': encodeURIComponent(result.name.toWellFormed()),
+            'Cache-Control': 'no-store',
+          }).end(result.data);
+        }
+        return;
+      }
       // Playwright enforces strict, actionable CSS selection and its own deadline.
       const target = page.locator('css=' + command.selector);
       const options = { timeout: command.timeout };
