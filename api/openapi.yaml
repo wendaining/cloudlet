@@ -1137,6 +1137,188 @@ paths:
           $ref: "#/components/responses/Error"
         default:
           $ref: "#/components/responses/Error"
+    delete:
+      operationId: deleteContainer
+      description: 所有者或开发者删除容器，撤销公开路由并释放实际资源。删除确认后容器不再存在。同一幂等键重试返回相同结果。
+      security:
+        - SessionCookie: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+      responses:
+        "204":
+          description: 容器已删除
+        "400":
+          description: 删除请求参数无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          description: 容器状态不允许删除
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: 删除步骤失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/projects/{projectID}/containers/{containerID}/stop:
+    parameters:
+      - name: projectID
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: containerID
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      operationId: stopContainer
+      description: 所有者或开发者停止容器，先撤销公开路由，再停止并删除 Docker 容器，确认清理后释放容量。同一幂等键重试返回停止状态。
+      security:
+        - SessionCookie: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+      responses:
+        "200":
+          description: 容器已停止
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Container"
+        "400":
+          description: 停止请求参数无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          description: 容器状态不允许停止或存在未完成操作
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: 停止运行时失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Container"
+        "500":
+          description: 停止步骤失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/projects/{projectID}/containers/{containerID}/restart:
+    parameters:
+      - name: projectID
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: containerID
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      operationId: restartContainer
+      description: 所有者或开发者使用最近保存的配置再次启动容器，就绪后重新注册公开路由。同一幂等键重试返回当前状态。
+      security:
+        - SessionCookie: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+      responses:
+        "200":
+          description: 容器已启动
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Container"
+        "400":
+          description: 再次启动请求参数无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          description: 容器状态不允许再次启动
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: 镜像准备、容器启动或 HTTP 就绪检查失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Container"
+        "429":
+          description: 容量不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Container"
+        "500":
+          description: 再次启动步骤失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
   /api/v1/projects/{projectID}/postgres-bindings:
     parameters:
       - name: projectID
@@ -1872,7 +2054,7 @@ components:
           format: int64
         state:
           type: string
-          description: 容器目标状态，取值为 pending、active 或 failed。
+          description: 容器目标状态，取值为 pending、active、stopped 或 failed。
         failure:
           type: string
         execution_state:
