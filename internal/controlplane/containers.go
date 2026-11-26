@@ -153,3 +153,125 @@ func containerResponse(result containerpublish.Result) apigen.Container {
 	}
 	return response
 }
+
+func (h *handler) StopContainer(c *gin.Context, projectID, containerID string, params apigen.StopContainerParams) {
+	normalizedID, ok := h.containerLifecycleAccess(c, projectID)
+	if !ok {
+		return
+	}
+	id, ok := containerIDFromPath(c, containerID)
+	if !ok {
+		return
+	}
+	result, err := h.containers.Stop(c.Request.Context(), uuid.MustParse(normalizedID), id, params.IdempotencyKey)
+	if result.Container.ID != uuid.Nil {
+		c.Header("Location", containerLocation(normalizedID, result.Container.ID))
+	}
+	if err != nil {
+		h.containerLifecycleFailure(c, normalizedID, result, err)
+		return
+	}
+	c.JSON(http.StatusOK, containerResponse(result))
+}
+
+func (h *handler) RestartContainer(c *gin.Context, projectID, containerID string, params apigen.RestartContainerParams) {
+	normalizedID, ok := h.containerLifecycleAccess(c, projectID)
+	if !ok {
+		return
+	}
+	id, ok := containerIDFromPath(c, containerID)
+	if !ok {
+		return
+	}
+	result, err := h.containers.Restart(c.Request.Context(), uuid.MustParse(normalizedID), id, params.IdempotencyKey)
+	if result.Container.ID != uuid.Nil {
+		c.Header("Location", containerLocation(normalizedID, result.Container.ID))
+	}
+	if err != nil {
+		h.containerLifecycleFailure(c, normalizedID, result, err)
+		return
+	}
+	c.JSON(http.StatusOK, containerResponse(result))
+}
+
+func (h *handler) DeleteContainer(c *gin.Context, projectID, containerID string, params apigen.DeleteContainerParams) {
+	normalizedID, ok := h.containerLifecycleAccess(c, projectID)
+	if !ok {
+		return
+	}
+	id, ok := containerIDFromPath(c, containerID)
+	if !ok {
+		return
+	}
+	if err := h.containers.Delete(c.Request.Context(), uuid.MustParse(normalizedID), id, params.IdempotencyKey); err != nil {
+		h.containerLifecycleFailure(c, normalizedID, containerpublish.Result{}, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (h *handler) containerLifecycleAccess(c *gin.Context, projectID string) (string, bool) {
+	_, normalizedID, membership, ok := h.projectAccess(c, projectID)
+	if !ok {
+		return "", false
+	}
+	if membership.Role != "owner" && membership.Role != "developer" {
+		c.JSON(http.StatusForbidden, apigen.Error{Message: "只有项目所有者和开发者可以操作容器"})
+		return "", false
+	}
+	if h.containers == nil {
+		c.JSON(http.StatusServiceUnavailable, apigen.Error{Message: "容器执行环境未配置"})
+		return "", false
+	}
+	return normalizedID, true
+}
+
+func containerIDFromPath(c *gin.Context, value string) (uuid.UUID, bool) {
+	id, err := uuid.Parse(value)
+	if err != nil {
+		c.JSON(http.StatusNotFound, apigen.Error{Message: "容器不存在"})
+		return uuid.Nil, false
+	}
+	return id, true
+}
+
+func (h *handler) containerLifecycleFailure(c *gin.Context, projectID string, result containerpublish.Result, err error) {
+	switch {
+	case errors.Is(err, fs.ErrInvalid):
+		c.JSON(http.StatusBadRequest, apigen.Error{Message: err.Error()})
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		c.JSON(http.StatusNotFound, apigen.Error{Message: "容器不存在"})
+	case errors.Is(err, database.ErrContainerAlreadyActive),
+		errors.Is(err, database.ErrContainerPublicationPending),
+		errors.Is(err, database.ErrRouteConflict),
+		errors.Is(err, operations.ErrIdempotencyConflict),
+		errors.Is(err, containerpublish.ErrLifecycleState),
+		errors.Is(err, containerpublish.ErrLifecycleFailed),
+		errors.Is(err, capacity.ErrIdempotencyConflict),
+		errors.Is(err, capacity.ErrOwnershipConflict),
+		errors.Is(err, capacity.ErrExecutionReleased),
+		errors.Is(err, executions.ErrExecutionConflict):
+		c.JSON(http.StatusConflict, apigen.Error{Message: err.Error()})
+	case errors.Is(err, capacity.ErrInsufficientCapacity):
+		if result.Container.ID == uuid.Nil {
+			h.failure(c, err)
+			return
+		}
+		c.JSON(http.StatusTooManyRequests, containerResponse(result))
+	case errors.Is(err, containers.ErrImagePull),
+		errors.Is(err, containers.ErrImageDigestMismatch),
+		errors.Is(err, containers.ErrNotReady),
+		errors.Is(err, containerpublish.ErrRuntimeNotReady),
+		errors.Is(err, containerpublish.ErrRuntimeStop),
+		errors.Is(err, containers.ErrConflict),
+		errors.Is(err, containers.ErrNetworkNotFound):
+		if result.Container.ID == uuid.Nil {
+			h.failure(c, err)
+			return
+		}
+		c.JSON(http.StatusUnprocessableEntity, containerResponse(result))
+	default:
+		h.logger.Error("container lifecycle operation failed", "project", projectID, "container", result.Container.ID, "operation", result.Operation.ID, "error", err)
+		h.failure(c, err)
+	}
+}
