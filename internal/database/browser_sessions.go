@@ -32,6 +32,13 @@ func (s *Store) BrowserSession(ctx context.Context, projectID, id uuid.UUID, hos
 	return session, err
 }
 
+func (s *Store) RecoverableBrowserSessions(ctx context.Context, hostID string) ([]BrowserSession, error) {
+	var sessions []BrowserSession
+	err := s.DB.WithContext(ctx).Where("host_id = ? AND status IN ('starting', 'ready')", hostID).
+		Order("expires_at, id").Find(&sessions).Error
+	return sessions, err
+}
+
 func (s *Store) ExpiredBrowserSessions(ctx context.Context, hostID string, now time.Time) ([]BrowserSession, error) {
 	var sessions []BrowserSession
 	err := s.DB.WithContext(ctx).Where("host_id = ? AND expires_at <= ? AND status IN ('starting', 'ready')", hostID, now).

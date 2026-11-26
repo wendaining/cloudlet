@@ -656,7 +656,7 @@ func TestSpecValidateAcceptsNetworkAccess(t *testing.T) {
 
 func TestVerifyNetwork(t *testing.T) {
 	valid := network.Inspect{Network: network.Network{Name: "cloudlet-execution", Scope: "local", Driver: "bridge"}}
-	if err := verifyNetwork("cloudlet-execution", valid); err != nil {
+	if err := verifyNetwork("cloudlet-execution", valid.Network); err != nil {
 		t.Fatal(err)
 	}
 	tests := []struct {
@@ -673,7 +673,7 @@ func TestVerifyNetwork(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			info := valid
 			test.change(&info)
-			if err := verifyNetwork("cloudlet-execution", info); !errors.Is(err, test.want) {
+			if err := verifyNetwork("cloudlet-execution", info.Network); !errors.Is(err, test.want) {
 				t.Fatalf("verifyNetwork() = %v, want %v", err, test.want)
 			}
 		})
