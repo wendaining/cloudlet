@@ -493,6 +493,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{projectID}/sites/{siteName}/publication": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["SiteProjectID"];
+                siteName: components["parameters"]["SiteName"];
+            };
+            cookie?: never;
+        };
+        /** @description 项目成员读取当前发布版本、固定域名和切换所需的修订值。 */
+        get: operations["getStaticSitePublication"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["SiteProjectID"];
+                siteName: components["parameters"]["SiteName"];
+                versionID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 项目所有者使用当前修订值在现有域名切换版本。目标已经生效时，重复调用不修改路由。 */
+        post: operations["activateStaticSiteVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{projectID}/secrets": {
         parameters: {
             query?: never;
@@ -982,6 +1023,24 @@ export interface components {
             hostname: string;
             /** Format: uri */
             url: string;
+        };
+        StaticSiteActivationRequest: {
+            /**
+             * Format: date-time
+             * @description 最近一次从发布查询或切换响应取得的修订值。
+             */
+            expected_revision: string;
+        };
+        StaticSiteActivePublication: {
+            /** Format: uuid */
+            site_id: string;
+            /** Format: uuid */
+            version_id: string;
+            hostname: string;
+            /** Format: uri */
+            url: string;
+            /** Format: date-time */
+            revision: string;
         };
         StaticSiteSummary: {
             /** Format: uuid */
@@ -2104,6 +2163,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StaticSitePublication"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getStaticSitePublication: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["SiteProjectID"];
+                siteName: components["parameters"]["SiteName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 当前活动版本和修订值 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaticSiteActivePublication"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    activateStaticSiteVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["SiteProjectID"];
+                siteName: components["parameters"]["SiteName"];
+                versionID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaticSiteActivationRequest"];
+            };
+        };
+        responses: {
+            /** @description 当前活动版本和修订值 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaticSiteActivePublication"];
                 };
             };
             400: components["responses"]["Error"];
