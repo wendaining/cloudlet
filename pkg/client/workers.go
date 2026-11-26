@@ -11,11 +11,15 @@ import (
 type WorkerPublicationRequest = apigen.DeployWorkerRequest
 type WorkerDeployment = apigen.WorkerDeployment
 
-// PublishWorker uses the shared API with time for publication and failure cleanup.
-func (c *Client) PublishWorker(ctx context.Context, projectID, name, key string, request WorkerPublicationRequest) (WorkerDeployment, error) {
+func (c *Client) workerAPI() (*apigen.ClientWithResponses, error) {
 	transport := *c.apiHTTP
 	transport.Timeout = 95 * time.Second
-	api, err := apigen.NewClientWithResponses(c.endpoint.String(), apigen.WithHTTPClient(&transport), apigen.WithRequestEditorFn(c.addSessionCookie))
+	return apigen.NewClientWithResponses(c.endpoint.String(), apigen.WithHTTPClient(&transport), apigen.WithRequestEditorFn(c.addSessionCookie))
+}
+
+// PublishWorker uses the shared API with time for publication and failure cleanup.
+func (c *Client) PublishWorker(ctx context.Context, projectID, name, key string, request WorkerPublicationRequest) (WorkerDeployment, error) {
+	api, err := c.workerAPI()
 	if err != nil {
 		return WorkerDeployment{}, fmt.Errorf("create Worker publication client: %w", err)
 	}
@@ -49,4 +53,20 @@ func (c *Client) GetWorkerDeployment(ctx context.Context, projectID, deploymentI
 		return *response.JSON200, nil
 	}
 	return WorkerDeployment{}, responseError("get Worker deployment", response.StatusCode(), response.JSON401, response.JSON404, response.JSON503, response.JSONDefault)
+}
+
+// ActivateWorkerDeployment switches a ready version and returns its durable operation.
+func (c *Client) ActivateWorkerDeployment(ctx context.Context, projectID, deploymentID string) (apigen.Operation, error) {
+	api, err := c.workerAPI()
+	if err != nil {
+		return apigen.Operation{}, fmt.Errorf("create Worker activation client: %w", err)
+	}
+	response, err := api.ActivateWorkerDeploymentWithResponse(ctx, projectID, deploymentID)
+	if err != nil {
+		return apigen.Operation{}, fmt.Errorf("activate Worker deployment %s in project %s: %w", deploymentID, projectID, err)
+	}
+	if response.JSON200 != nil {
+		return *response.JSON200, nil
+	}
+	return apigen.Operation{}, responseError("activate Worker deployment", response.StatusCode(), response.JSON401, response.JSON403, response.JSON404, response.JSON409, response.JSON422, response.JSON503, response.JSONDefault)
 }

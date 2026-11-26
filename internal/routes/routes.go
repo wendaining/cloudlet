@@ -69,6 +69,11 @@ func (p *Publisher) ReservedHost(host string) bool {
 	return p.gateway.ReservedHost(host)
 }
 
+// DrainProxy waits for requests already sent to a removed proxy endpoint.
+func (p *Publisher) DrainProxy(ctx context.Context, host, target string) error {
+	return p.gateway.DrainProxy(ctx, host, target)
+}
+
 // ActivateStaticSite publishes the first route for a resolved site version.
 func (p *Publisher) ActivateStaticSite(ctx context.Context, projectID string, version database.StaticSiteVersion, hostname string) error {
 	p.mu.Lock()

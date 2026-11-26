@@ -395,6 +395,59 @@ paths:
           $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/browser-sessions/{sessionID}/pages:
+    parameters:
+      - $ref: '#/components/parameters/BrowserProjectID'
+      - $ref: '#/components/parameters/BrowserSessionID'
+    post:
+      operationId: openBrowserPage
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '201':
+          description: 已打开的额外页面
+          headers:
+            Location:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserPage'
+  /api/v1/projects/{projectID}/browser-sessions/{sessionID}/pages/{pageID}:
+    parameters:
+      - $ref: '#/components/parameters/BrowserProjectID'
+      - $ref: '#/components/parameters/BrowserSessionID'
+      - name: pageID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getBrowserPage
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 页面当前地址与标题
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserPage'
+    delete:
+      operationId: closeBrowserPage
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '204':
+          description: 额外页面已关闭
   /api/v1/projects/{projectID}/browser-sessions/{sessionID}/text:
     parameters:
       - $ref: '#/components/parameters/BrowserProjectID'
@@ -1033,7 +1086,7 @@ paths:
           type: string
     post:
       operationId: deployWorker
-      description: 发布首个无状态 Worker 版本，等待真实运行时就绪并激活域名。所有者和开发者可以调用。同一幂等键复用操作。
+      description: 发布首个无状态 Worker 版本并激活域名，或通过 stage 准备后续版本。所有者和开发者可以调用。同一幂等键复用操作。
       security:
         - SessionCookie: []
       parameters:
@@ -1634,6 +1687,44 @@ paths:
           $ref: '#/components/responses/Error'
         default:
           $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/worker-deployments/{deploymentID}/activate:
+    parameters:
+      - name: projectID
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: deploymentID
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      operationId: activateWorkerDeployment
+      description: 由项目所有者或开发者显式激活已就绪的候选版本。同一版本的重复激活返回原操作，域名保持不变。
+      security:
+        - SessionCookie: []
+      responses:
+        "200":
+          description: 激活已完成
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Operation"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          $ref: "#/components/responses/Error"
+        "422":
+          $ref: "#/components/responses/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
 components:
   parameters:
     BrowserProjectID:
@@ -2034,6 +2125,25 @@ components:
       type: string
       enum: [ starting, ready, failed, closed ]
       x-enum-varnames: [ BrowserSessionStatusStarting, BrowserSessionStatusReady, BrowserSessionStatusFailed, BrowserSessionStatusClosed ]
+    BrowserPage:
+      type: object
+      required: [ id, url, title, url_truncated, title_truncated ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        url:
+          type: string
+          maxLength: 4096
+          description: 当前地址，最多 4096 个 UTF-8 字节
+        url_truncated:
+          type: boolean
+        title:
+          type: string
+          maxLength: 512
+          description: 当前标题，最多 512 个 UTF-16 单元
+        title_truncated:
+          type: boolean
     BrowserPageText:
       type: object
       required: [ title, title_truncated, text, text_truncated ]
@@ -2111,6 +2221,10 @@ components:
         url:
           type: string
           maxLength: 4096
+        page_id:
+          type: string
+          format: uuid
+          description: 额外页面标识，省略时导航默认页面
     BrowserNavigation:
       type: object
       required: [ url, title ]
@@ -2441,6 +2555,10 @@ components:
           type: string
           maxLength: 253
           description: 无端口的公开域名。
+        stage:
+          type: boolean
+          default: false
+          description: 现有 Worker 的候选版本使用 true，域名须与活动版本相同。候选版本就绪后需显式激活。
     WorkerDeployment:
       type: object
       required:
