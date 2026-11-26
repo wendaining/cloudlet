@@ -39,18 +39,32 @@ func TestPostgresMigrationAccountsSessionsAndProjects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := provider.UpTo(ctx, 9); err != nil {
-		t.Fatalf("迁移到浏览器会话版本 9: %v", err)
+	if _, err := provider.UpTo(ctx, 13); err != nil {
+		t.Fatalf("迁移到容器版本 13: %v", err)
+	}
+	const email = "developer@cloudlet.local"
+	const password = "integration-account-password"
+	if err := store.SeedUser(ctx, email, password); err != nil {
+		t.Fatal(err)
+	}
+	var containersBefore, downloadsBefore bool
+	if err := store.SQL.QueryRowContext(ctx, "SELECT to_regclass('containers') IS NOT NULL, to_regclass('browser_downloads') IS NOT NULL").Scan(&containersBefore, &downloadsBefore); err != nil {
+		t.Fatal(err)
+	}
+	if !containersBefore || downloadsBefore {
+		t.Fatalf("版本 13 的容器表和下载表状态为 %v、%v", containersBefore, downloadsBefore)
 	}
 	for range 2 {
 		if err := store.Migrate(ctx); err != nil {
 			t.Fatal(err)
 		}
 	}
-	const email = "developer@cloudlet.local"
-	const password = "integration-account-password"
-	if err := store.SeedUser(ctx, email, password); err != nil {
+	var downloadTable bool
+	if err := store.SQL.QueryRowContext(ctx, "SELECT to_regclass('browser_downloads') IS NOT NULL").Scan(&downloadTable); err != nil {
 		t.Fatal(err)
+	}
+	if !downloadTable {
+		t.Fatal("升级后缺少浏览器下载表")
 	}
 	if err := store.SeedUser(ctx, email, "another-account-password"); err != nil {
 		t.Fatal(err)

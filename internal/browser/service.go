@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -36,6 +37,7 @@ var ErrSessionUnavailable = errors.New("浏览器会话未就绪或已结束")
 
 type Service struct {
 	screenshots *artifacts.Store
+	downloads   *artifacts.Store
 	store       *database.Store
 	capacity    *capacity.Store
 	executions  *executions.Service
@@ -89,22 +91,26 @@ func NewService(ctx context.Context, store *database.Store, docker *client.Clien
 	if err != nil {
 		return nil, err
 	}
-	screenshots, err := openScreenshotStore(screenshotDirectory)
+	screenshots, err := openBrowserArtifactStore(screenshotDirectory, maxScreenshotBytes)
 	if err != nil {
 		return nil, err
+	}
+	downloads, err := openBrowserArtifactStore(filepath.Join(filepath.Dir(screenshotDirectory), "browser-downloads"), maxDownloadBytes)
+	if err != nil {
+		return nil, errors.Join(err, screenshots.Close())
 	}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = nil
 	transport.DisableKeepAlives = true
 	transport.MaxResponseHeaderBytes = 64 << 10
 	return &Service{
-		store: store, screenshots: screenshots, capacity: reservations, executions: runner, adapter: adapter,
+		store: store, screenshots: screenshots, downloads: downloads, capacity: reservations, executions: runner, adapter: adapter,
 		http:   &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }},
 		hostID: hostID, image: imageID, profile: profile.String(), key: bytes.Clone(key),
 	}, nil
 }
 
-func (s *Service) Close() error { return s.screenshots.Close() }
+func (s *Service) Close() error { return errors.Join(s.screenshots.Close(), s.downloads.Close()) }
 
 func (s *Service) Create(ctx context.Context, projectID uuid.UUID, lifetime time.Duration) (database.BrowserSession, error) {
 	if lifetime == 0 {
@@ -159,8 +165,13 @@ func (s *Service) Create(ctx context.Context, projectID uuid.UUID, lifetime time
 	if err != nil {
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cleanupTimeout)
 		defer cancel()
+		message := "浏览器会话启动失败"
+		if errors.Is(err, capacity.ErrInsufficientCapacity) {
+			message = "浏览器会话容量不足"
+		}
+		recordErr := s.store.RecordBrowserSessionError(cleanupCtx, projectID, session.ID, s.hostID, message)
 		_, cleanupErr := s.finish(cleanupCtx, session, "failed")
-		return database.BrowserSession{}, errors.Join(err, cleanupErr)
+		return database.BrowserSession{}, errors.Join(err, recordErr, cleanupErr)
 	}
 	session.Status = "ready"
 	return session, nil
@@ -171,6 +182,10 @@ func (s *Service) Session(ctx context.Context, projectID, id uuid.UUID) (databas
 	if err != nil {
 		return database.BrowserSession{}, err
 	}
+	return s.reconcileExpiredSession(ctx, session)
+}
+
+func (s *Service) reconcileExpiredSession(ctx context.Context, session database.BrowserSession) (database.BrowserSession, error) {
 	if !terminalSession(session) && !time.Now().Before(session.ExpiresAt) {
 		return s.closeSession(ctx, session)
 	}

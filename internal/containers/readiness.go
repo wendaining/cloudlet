@@ -223,6 +223,12 @@ func readinessError(result Readiness, lastStatus int, lastErr error, cause error
 		container, target, detail, result.Attempts, result.Elapsed.Round(time.Millisecond), ErrNotReady, cause)
 }
 
+// ValidateReadinessProbe reports whether the probe configuration is complete
+// without contacting Docker Engine.
+func ValidateReadinessProbe(probe ReadinessProbe) error {
+	return probe.validate()
+}
+
 func (p ReadinessProbe) validate() error {
 	if p.Port == 0 {
 		return fmt.Errorf("validate readiness probe: port must be between 1 and 65535: %w", fs.ErrInvalid)

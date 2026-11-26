@@ -15,6 +15,7 @@ import (
 	"github.com/wendaining/cloudlet/internal/capacity"
 	"github.com/wendaining/cloudlet/internal/containers"
 	"github.com/wendaining/cloudlet/internal/database"
+	"github.com/wendaining/cloudlet/internal/executions"
 )
 
 var (
@@ -46,13 +47,29 @@ func (s *Service) Navigate(ctx context.Context, projectID, id uuid.UUID, value s
 	if err != nil {
 		return Navigation{}, err
 	}
-	return s.navigate(ctx, endpoint+"/navigate", id, value)
+	page, err := s.navigate(ctx, endpoint+"/navigate", id, value)
+	if errors.Is(err, ErrNavigationTimeout) || errors.Is(err, ErrNavigation) {
+		recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+		defer cancel()
+		message := ErrNavigation.Error()
+		if errors.Is(err, ErrNavigationTimeout) {
+			message = ErrNavigationTimeout.Error()
+		}
+		if recordErr := s.store.RecordBrowserSessionError(recordCtx, projectID, id, s.hostID, message); recordErr != nil {
+			return Navigation{}, errors.Join(err, fmt.Errorf("record browser navigation failure: %w", recordErr))
+		}
+	}
+	return page, err
 }
 
 func (s *Service) runtimeEndpoint(ctx context.Context, session database.BrowserSession) (string, error) {
 	if session.Status != "ready" {
 		return "", ErrSessionUnavailable
 	}
+	return s.boundRuntimeEndpoint(ctx, session)
+}
+
+func (s *Service) boundRuntimeEndpoint(ctx context.Context, session database.BrowserSession) (string, error) {
 	bound, err := s.capacity.GetReservation(ctx, session.ProjectID, session.ID)
 	if errors.Is(err, capacity.ErrReservationNotFound) {
 		return "", ErrSessionUnavailable
@@ -63,12 +80,21 @@ func (s *Service) runtimeEndpoint(ctx context.Context, session database.BrowserS
 	if bound.State != capacity.Active || bound.ContainerID == "" {
 		return "", ErrSessionUnavailable
 	}
-	observation, err := s.adapter.Observe(ctx, ownership(session), bound.ContainerID)
+	owner := ownership(session)
+	if bound.HostID != session.HostID || bound.Binding.Environment != owner.Environment ||
+		bound.Binding.Project != owner.Project || bound.Binding.Resource != owner.Resource ||
+		bound.Binding.Generation != owner.Generation || bound.Binding.Image == "" {
+		return "", fmt.Errorf("verify browser session %s reservation: %w", session.ID, executions.ErrExecutionConflict)
+	}
+	observation, err := s.adapter.Observe(ctx, owner, bound.ContainerID)
 	if errors.Is(err, containers.ErrNotFound) {
 		return "", ErrSessionUnavailable
 	}
 	if err != nil {
 		return "", err
+	}
+	if observation.Image != bound.Binding.Image {
+		return "", fmt.Errorf("verify browser session %s container image: %w", session.ID, executions.ErrExecutionConflict)
 	}
 	if !observation.Running {
 		return "", ErrSessionUnavailable
