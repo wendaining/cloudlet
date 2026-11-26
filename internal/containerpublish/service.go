@@ -55,6 +55,9 @@ var (
 	ErrPublicationIncomplete = errors.New("容器创建尚未完成")
 	ErrRuntimeNotReady       = errors.New("容器执行尚未就绪")
 	ErrRecordedFailure       = errors.New("容器创建已失败")
+	ErrLifecycleState        = errors.New("容器状态不允许该操作")
+	ErrLifecycleFailed       = errors.New("容器生命周期操作失败")
+	ErrRuntimeStop           = errors.New("容器执行停止失败")
 )
 
 // RecordedFailure returns a failure that happened before a container execution
@@ -544,6 +547,354 @@ func (s *Service) finish(ctx context.Context, result *Result) error {
 	if _, err := s.publisher.Sync(ctx); err != nil {
 		return fmt.Errorf("apply container Gateway route: %w", err)
 	}
+	if result.Operation.Phase != operations.Finalizing {
+		if err := s.advance(ctx, result, operations.Progress{Phase: operations.Finalizing, Outcome: operations.InProgress}); err != nil {
+			return err
+		}
+	}
+	return s.advance(ctx, result, operations.Progress{Phase: operations.Finalizing, Outcome: operations.Succeeded})
+}
+
+// Stop removes the public route, stops and removes the Docker container, then
+// releases capacity. Repeated calls with the same key return the stopped state.
+func (s *Service) Stop(ctx context.Context, projectID, containerID uuid.UUID, key string) (result Result, err error) {
+	if err := validateLifecycleRequest(projectID, containerID, key); err != nil {
+		return result, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	stopCancellation := context.AfterFunc(s.controlContext, cancel)
+	defer stopCancellation()
+	if err := s.Ready(ctx); err != nil {
+		return result, fmt.Errorf("verify container controller ownership: %w", err)
+	}
+	op, fresh, err := s.registerLifecycle(ctx, projectID, containerID, "container.stop", key)
+	if err != nil {
+		return result, err
+	}
+	result.Operation = op
+	container, execution, err := s.store.ContainerResult(ctx, projectID, containerID)
+	if err != nil {
+		if fresh && errors.Is(err, gorm.ErrRecordNotFound) {
+			err = errors.Join(err, s.advance(ctx, &result, operations.Progress{Phase: result.Operation.Phase, Outcome: operations.Failed}))
+		}
+		return result, err
+	}
+	result.Container, result.Execution = container, execution
+	if op.Outcome == operations.Succeeded {
+		return result, nil
+	}
+	if op.Outcome == operations.Failed {
+		return result, fmt.Errorf("%w: %s", ErrLifecycleFailed, container.Failure)
+	}
+	if container.State == "pending" {
+		return result, database.ErrContainerPublicationPending
+	}
+	if container.State != "active" && container.State != "stopped" && container.State != "failed" {
+		return result, fmt.Errorf("%w: %s", ErrLifecycleState, container.State)
+	}
+	if result.Operation.Phase == operations.Received {
+		if err = s.advance(ctx, &result, operations.Progress{Phase: operations.Preparing, Outcome: operations.InProgress}); err != nil {
+			return result, err
+		}
+	}
+	if err = s.stopContainer(ctx, &result); err != nil {
+		return result, err
+	}
+	return result, s.finishLifecycle(ctx, &result)
+}
+
+// Restart starts a new execution from the latest stored configuration, waits
+// for HTTP readiness and reactivates the public route. It is allowed from a
+// stopped or failed container; a new request against an active container is a
+// conflict, while a retried request completes its recorded operation.
+func (s *Service) Restart(ctx context.Context, projectID, containerID uuid.UUID, key string) (result Result, err error) {
+	if err := validateLifecycleRequest(projectID, containerID, key); err != nil {
+		return result, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+	stopCancellation := context.AfterFunc(s.controlContext, cancel)
+	defer stopCancellation()
+	if err := s.Ready(ctx); err != nil {
+		return result, fmt.Errorf("verify container controller ownership: %w", err)
+	}
+	op, fresh, err := s.registerLifecycle(ctx, projectID, containerID, "container.restart", key)
+	if err != nil {
+		return result, err
+	}
+	result.Operation = op
+	container, execution, err := s.store.ContainerResult(ctx, projectID, containerID)
+	if err != nil {
+		if fresh && errors.Is(err, gorm.ErrRecordNotFound) {
+			err = errors.Join(err, s.advance(ctx, &result, operations.Progress{Phase: result.Operation.Phase, Outcome: operations.Failed}))
+		}
+		return result, err
+	}
+	result.Container, result.Execution = container, execution
+	if op.Outcome == operations.Succeeded {
+		return result, nil
+	}
+	if op.Outcome == operations.Failed {
+		return result, fmt.Errorf("%w: %s", ErrLifecycleFailed, container.Failure)
+	}
+	if container.State == "pending" {
+		return result, database.ErrContainerPublicationPending
+	}
+	if container.State == "active" {
+		if fresh {
+			return result, database.ErrContainerAlreadyActive
+		}
+		if result.Operation.Outcome == operations.InProgress {
+			err = s.finish(ctx, &result)
+		}
+		return result, err
+	}
+	if container.State != "stopped" && container.State != "failed" {
+		return result, fmt.Errorf("%w: %s", ErrLifecycleState, container.State)
+	}
+	if !fresh {
+		_, prior, priorErr := s.store.ContainerByOperation(ctx, projectID, op.ID)
+		if priorErr == nil {
+			if prior.State == "failed" {
+				advanceErr := s.advance(ctx, &result, operations.Progress{Phase: result.Operation.Phase, Outcome: operations.Failed})
+				return result, errors.Join(fmt.Errorf("%w: %s", ErrLifecycleFailed, prior.Failure), advanceErr)
+			}
+			return result, fmt.Errorf("%w: restart execution is %s", ErrLifecycleFailed, prior.State)
+		}
+		if !errors.Is(priorErr, gorm.ErrRecordNotFound) {
+			return result, priorErr
+		}
+	}
+	if result.Operation.Phase == operations.Received {
+		if err = s.advance(ctx, &result, operations.Progress{Phase: operations.Preparing, Outcome: operations.InProgress}); err != nil {
+			return result, err
+		}
+	}
+	next := database.ContainerExecution{
+		ID: uuid.New(), ProjectID: projectID, OperationID: op.ID,
+		Image: execution.Image, ImageDigest: execution.ImageDigest, Port: execution.Port,
+		Hostname: execution.Hostname, PathPrefix: execution.PathPrefix,
+		CPUMillis: execution.CPUMillis, MemoryBytes: execution.MemoryBytes,
+		PIDs: execution.PIDs, OpenFiles: execution.OpenFiles, UserName: execution.UserName,
+		Command: append([]string(nil), execution.Command...), Env: append([]string(nil), execution.Env...),
+		HealthPath: execution.HealthPath, HealthTimeoutMS: execution.HealthTimeoutMS,
+	}
+	container, execution, err = s.store.CreateContainerExecution(ctx, container.Name, next)
+	if err != nil {
+		return result, err
+	}
+	result.Container, result.Execution = container, execution
+	reserved, activated, recorded := false, false, true
+	defer func() {
+		if err != nil && context.Cause(s.controlContext) != nil {
+			err = errors.Join(err, context.Cause(s.controlContext))
+		}
+		if err == nil || activated {
+			return
+		}
+		cause := err
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+		defer cleanupCancel()
+		cleaned := !reserved
+		if reserved {
+			cleanupErr := s.executions.Stop(cleanupCtx, executions.StopRequest{
+				ExecutionID: result.Execution.ID, ProjectID: projectID,
+				Ownership: s.ownership(result), ContainerID: result.Execution.DockerContainerID,
+			})
+			cleaned = cleanupErr == nil
+			err = errors.Join(err, cleanupErr)
+		}
+		if recorded && cleaned {
+			err = errors.Join(err, s.store.MarkContainerRestartFailed(cleanupCtx, projectID, container.ID, execution.ID, cause))
+			result.Container.State, result.Container.Failure = "stopped", cause.Error()
+			result.Execution.State, result.Execution.Failure = "failed", cause.Error()
+		}
+		if cleaned {
+			err = errors.Join(err, s.advance(cleanupCtx, &result, operations.Progress{Phase: result.Operation.Phase, Outcome: operations.Failed}))
+		}
+	}()
+	image, err := s.containers.PrepareImage(ctx, execution.Image)
+	if err != nil {
+		return result, err
+	}
+	if image.Digest != execution.ImageDigest {
+		return result, fmt.Errorf("prepared image digest %s does not match stored digest %s: %w", image.Digest, execution.ImageDigest, containers.ErrImageDigestMismatch)
+	}
+	if err = s.reservations.EnsureProjectQuota(ctx, projectID, resources(s.configuration.ProjectQuota)); err != nil {
+		return result, err
+	}
+	ownership := s.ownership(result)
+	_, _, err = s.reservations.Reserve(ctx, capacity.Request{
+		ExecutionID: result.Execution.ID, HostID: s.configuration.HostID, ProjectID: projectID,
+		Resources: capacity.Resources{CPUMillis: execution.CPUMillis, MemoryBytes: execution.MemoryBytes, Instances: 1},
+		Binding: capacity.Binding{
+			Environment: ownership.Environment, Project: ownership.Project, Resource: ownership.Resource,
+			Generation: ownership.Generation, Image: image.Reference,
+		},
+	})
+	if err != nil {
+		return result, err
+	}
+	reserved = true
+	executionResult, err := s.executions.Start(ctx, executions.StartRequest{ExecutionID: result.Execution.ID, ProjectID: projectID, Spec: containers.Spec{
+		Ownership: ownership, Image: image.Reference, User: execution.UserName,
+		Command: execution.Command, Env: execution.Env, Port: execution.Port,
+		Access: containers.AccessPublished,
+		Limits: containers.Limits{CPUMillis: execution.CPUMillis, MemoryBytes: execution.MemoryBytes, PIDs: execution.PIDs, OpenFiles: execution.OpenFiles},
+	}})
+	result.Execution.DockerContainerID = executionResult.Container.ID
+	if result.Execution.DockerContainerID != "" {
+		err = errors.Join(err, s.store.SetContainerExecutionDockerID(ctx, projectID, result.Execution.ID, result.Execution.DockerContainerID))
+	}
+	if err != nil {
+		return result, fmt.Errorf("%w: %w", ErrRuntimeNotReady, err)
+	}
+	readiness, err := s.containers.WaitReady(ctx, ownership, executionResult.Container.ID, containers.ReadinessProbe{
+		Port: execution.Port, Path: execution.HealthPath, Timeout: time.Duration(execution.HealthTimeoutMS) * time.Millisecond,
+		Interval: healthInterval, Statuses: acceptedStatuses(),
+	})
+	if err != nil {
+		return result, fmt.Errorf("%w: %w", ErrRuntimeNotReady, err)
+	}
+	target, err := publishedTarget(readiness.Observation, execution.Port)
+	if err != nil {
+		return result, err
+	}
+	if err := config.ValidateRoutes([]config.Route{{Host: execution.Hostname, Target: target}}); err != nil {
+		return result, fmt.Errorf("validate container route target: %w: %w", fs.ErrInvalid, err)
+	}
+	if result.Operation.Phase != operations.Activating {
+		if err = s.advance(ctx, &result, operations.Progress{Phase: operations.Activating, Outcome: operations.InProgress}); err != nil {
+			return result, err
+		}
+	}
+	if _, err = s.store.ActivateContainer(ctx, result.Container, result.Execution, target); err != nil {
+		checkCtx, checkCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer checkCancel()
+		actual, _, checkErr := s.store.ContainerResult(checkCtx, projectID, result.Container.ID)
+		if checkErr != nil || actual.State == "active" {
+			activated = true
+			err = errors.Join(err, checkErr)
+		}
+		return result, err
+	}
+	activated = true
+	result.Container.State, result.Execution.State = "active", "running"
+	result.Execution.Target = target
+	err = s.finish(ctx, &result)
+	return result, err
+}
+
+// Delete removes the public route and Docker container, then removes the
+// logical container and all execution records. A repeated delete is idempotent.
+func (s *Service) Delete(ctx context.Context, projectID, containerID uuid.UUID, key string) (err error) {
+	if err := validateLifecycleRequest(projectID, containerID, key); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	stopCancellation := context.AfterFunc(s.controlContext, cancel)
+	defer stopCancellation()
+	if err := s.Ready(ctx); err != nil {
+		return fmt.Errorf("verify container controller ownership: %w", err)
+	}
+	op, fresh, err := s.registerLifecycle(ctx, projectID, containerID, "container.delete", key)
+	if err != nil {
+		return err
+	}
+	result := Result{Operation: op}
+	if !fresh && op.Outcome == operations.Succeeded {
+		return nil
+	}
+	if !fresh && op.Outcome == operations.Failed {
+		return gorm.ErrRecordNotFound
+	}
+	container, execution, err := s.store.ContainerResult(ctx, projectID, containerID)
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			if !fresh {
+				if op.Outcome == operations.InProgress && op.Phase != operations.Received {
+					if _, routeErr := s.publisher.RemoveResource(ctx, projectID.String(), containerID.String()); routeErr != nil {
+						return fmt.Errorf("remove container route: %w", routeErr)
+					}
+					return s.finishLifecycle(ctx, &result)
+				}
+				return gorm.ErrRecordNotFound
+			}
+			advanceErr := s.advance(ctx, &result, operations.Progress{Phase: result.Operation.Phase, Outcome: operations.Failed})
+			return errors.Join(gorm.ErrRecordNotFound, advanceErr)
+		}
+		return err
+	}
+	result.Container, result.Execution = container, execution
+	if container.State == "pending" {
+		return database.ErrContainerPublicationPending
+	}
+	if result.Operation.Phase == operations.Received {
+		if err = s.advance(ctx, &result, operations.Progress{Phase: operations.Preparing, Outcome: operations.InProgress}); err != nil {
+			return err
+		}
+	}
+	if container.State == "active" || execution.State == "running" {
+		if err = s.stopContainer(ctx, &result); err != nil {
+			return err
+		}
+	} else if _, err = s.publisher.RemoveResource(ctx, projectID.String(), containerID.String()); err != nil {
+		return fmt.Errorf("remove container route: %w", err)
+	}
+	if err = s.store.DeleteContainer(ctx, projectID, containerID); err != nil {
+		return err
+	}
+	return s.finishLifecycle(ctx, &result)
+}
+
+func validateLifecycleRequest(projectID, containerID uuid.UUID, key string) error {
+	if projectID == uuid.Nil || containerID == uuid.Nil || len(key) > 256 || strings.TrimSpace(key) == "" || strings.ContainsRune(key, 0) || !utf8.ValidString(key) {
+		return fmt.Errorf("container project, container ID and Idempotency-Key are invalid: %w", fs.ErrInvalid)
+	}
+	return nil
+}
+
+func (s *Service) registerLifecycle(ctx context.Context, projectID, containerID uuid.UUID, action, key string) (operations.Operation, bool, error) {
+	return s.operations.Register(ctx, operations.Registration{
+		ProjectID: projectID, Action: action + ":" + containerID.String(),
+		IdempotencyKey: key, RequestFingerprint: containerID.String(),
+	})
+}
+
+func (s *Service) stopContainer(ctx context.Context, result *Result) error {
+	if result.Execution.State == "pending" {
+		return database.ErrContainerPublicationPending
+	}
+	if _, err := s.publisher.RemoveResource(ctx, result.Container.ProjectID.String(), result.Container.ID.String()); err != nil {
+		return fmt.Errorf("remove container route: %w", err)
+	}
+	if result.Container.State == "active" || result.Execution.State == "running" {
+		if err := s.executions.Stop(ctx, executions.StopRequest{
+			ExecutionID: result.Execution.ID, ProjectID: result.Container.ProjectID,
+			Ownership: s.ownership(*result), ContainerID: result.Execution.DockerContainerID,
+		}); err != nil {
+			return fmt.Errorf("%w: stop container execution %s: %w", ErrRuntimeStop, result.Execution.ID, err)
+		}
+	}
+	if err := s.store.MarkContainerStopped(ctx, result.Container.ProjectID, result.Container.ID, result.Execution.ID); err != nil {
+		return err
+	}
+	result.Container.State, result.Container.Failure = "stopped", ""
+	result.Container.ActiveExecutionID = nil
+	result.Execution.State, result.Execution.Failure = "stopped", ""
+	result.Execution.Target = ""
+	return nil
+}
+
+func (s *Service) finishLifecycle(ctx context.Context, result *Result) error {
 	if result.Operation.Phase != operations.Finalizing {
 		if err := s.advance(ctx, result, operations.Progress{Phase: operations.Finalizing, Outcome: operations.InProgress}); err != nil {
 			return err

@@ -607,6 +607,125 @@ export interface paths {
         get: operations["getContainer"];
         put?: never;
         post?: never;
+        /** @description 所有者或开发者删除容器，撤销公开路由并释放实际资源。删除确认后容器不再存在。同一幂等键重试返回相同结果。 */
+        delete: operations["deleteContainer"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/containers/{containerID}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+                containerID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 所有者或开发者停止容器，先撤销公开路由，再停止并删除 Docker 容器，确认清理后释放容量。同一幂等键重试返回停止状态。 */
+        post: operations["stopContainer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/containers/{containerID}/restart": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+                containerID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 所有者或开发者使用最近保存的配置再次启动容器，就绪后重新注册公开路由。同一幂等键重试返回当前状态。 */
+        post: operations["restartContainer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/postgres-bindings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 项目所有者登记 PostgreSQL 绑定。连接验证成功后保存。 */
+        post: operations["createPostgresBinding"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/postgres-bindings/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        /** @description 项目成员查询 PostgreSQL 绑定元数据与验证时间。 */
+        get: operations["getPostgresBinding"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/s3-bindings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 项目所有者登记 S3 绑定。连接验证成功后保存。 */
+        post: operations["createS3Binding"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/s3-bindings/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        /** @description 项目成员查询 S3 绑定元数据与验证时间。 */
+        get: operations["getS3Binding"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -936,7 +1055,7 @@ export interface components {
             health_check_path: string;
             /** Format: int64 */
             health_check_timeout_ms: number;
-            /** @description 容器目标状态，取值为 pending、active 或 failed。 */
+            /** @description 容器目标状态，取值为 pending、active、stopped 或 failed。 */
             state: string;
             failure: string;
             /** @description 实际执行状态，取值为 pending、running、stopped 或 failed。 */
@@ -1000,6 +1119,42 @@ export interface components {
             generation: number;
             /** Format: date-time */
             created_at: string;
+        };
+        PostgresBindingInput: {
+            name: string;
+            host: string;
+            port: number;
+            database: string;
+            /** Format: uuid */
+            secret_version_id: string;
+        };
+        PostgresBinding: {
+            name: string;
+            host: string;
+            port: number;
+            database: string;
+            /** Format: uuid */
+            secret_version_id: string;
+            /** Format: date-time */
+            verified_at: string;
+        };
+        S3BindingInput: {
+            name: string;
+            endpoint: string;
+            region: string;
+            bucket: string;
+            /** Format: uuid */
+            secret_version_id: string;
+        };
+        S3Binding: {
+            name: string;
+            endpoint: string;
+            region: string;
+            bucket: string;
+            /** Format: uuid */
+            secret_version_id: string;
+            /** Format: date-time */
+            verified_at: string;
         };
     };
     responses: {
@@ -2216,6 +2371,322 @@ export interface operations {
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
             503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    deleteContainer: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                projectID: string;
+                containerID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 容器已删除 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 删除请求参数无效 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            /** @description 容器状态不允许删除 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 删除步骤失败 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    stopContainer: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                projectID: string;
+                containerID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 容器已停止 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Container"];
+                };
+            };
+            /** @description 停止请求参数无效 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            /** @description 容器状态不允许停止或存在未完成操作 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 停止运行时失败 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Container"];
+                };
+            };
+            /** @description 停止步骤失败 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    restartContainer: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                projectID: string;
+                containerID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 容器已启动 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Container"];
+                };
+            };
+            /** @description 再次启动请求参数无效 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            /** @description 容器状态不允许再次启动 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 镜像准备、容器启动或 HTTP 就绪检查失败 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Container"];
+                };
+            };
+            /** @description 容量不足 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Container"];
+                };
+            };
+            /** @description 再次启动步骤失败 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createPostgresBinding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PostgresBindingInput"];
+            };
+        };
+        responses: {
+            /** @description 已验证的绑定 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PostgresBinding"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getPostgresBinding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 绑定元数据 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PostgresBinding"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createS3Binding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["S3BindingInput"];
+            };
+        };
+        responses: {
+            /** @description 已验证的绑定 */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["S3Binding"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            422: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getS3Binding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 绑定元数据 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["S3Binding"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };
