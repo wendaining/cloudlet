@@ -113,6 +113,16 @@ type BrowserConsoleEntry struct {
 	Truncated bool   `json:"truncated"`
 }
 
+// BrowserDownload defines model for BrowserDownload.
+type BrowserDownload struct {
+	ArtifactDigest string             `json:"artifact_digest"`
+	CreatedAt      time.Time          `json:"created_at"`
+	DownloadUrl    string             `json:"download_url"`
+	Filename       string             `json:"filename"`
+	Id             openapi_types.UUID `json:"id"`
+	SizeBytes      int64              `json:"size_bytes"`
+}
+
 // BrowserNavigation defines model for BrowserNavigation.
 type BrowserNavigation struct {
 	Title string `json:"title"`
@@ -142,6 +152,92 @@ type BrowserSession struct {
 
 // BrowserSessionStatus defines model for BrowserSessionStatus.
 type BrowserSessionStatus string
+
+// CaptureBrowserDownloadRequest defines model for CaptureBrowserDownloadRequest.
+type CaptureBrowserDownloadRequest struct {
+	// Selector 触发下载的主框架控件的 CSS 选择器
+	Selector  string `json:"selector"`
+	TimeoutMs *int   `json:"timeout_ms,omitempty"`
+}
+
+// ClickBrowserPageRequest defines model for ClickBrowserPageRequest.
+type ClickBrowserPageRequest struct {
+	// Selector 唯一定位当前页面元素的 CSS 选择器
+	Selector  string `json:"selector"`
+	TimeoutMs *int   `json:"timeout_ms,omitempty"`
+}
+
+// Container defines model for Container.
+type Container struct {
+	Command           *[]string          `json:"command,omitempty"`
+	CpuMillis         int64              `json:"cpu_millis"`
+	CreatedAt         time.Time          `json:"created_at"`
+	DockerContainerId string             `json:"docker_container_id"`
+	Env               *[]string          `json:"env,omitempty"`
+	ExecutionId       openapi_types.UUID `json:"execution_id"`
+
+	// ExecutionState 实际执行状态，取值为 pending、running、stopped 或 failed。
+	ExecutionState       string             `json:"execution_state"`
+	Failure              string             `json:"failure"`
+	Generation           int64              `json:"generation"`
+	HealthCheckPath      string             `json:"health_check_path"`
+	HealthCheckTimeoutMs int64              `json:"health_check_timeout_ms"`
+	Hostname             string             `json:"hostname"`
+	Id                   openapi_types.UUID `json:"id"`
+	Image                string             `json:"image"`
+	ImageDigest          string             `json:"image_digest"`
+	MemoryBytes          int64              `json:"memory_bytes"`
+	Name                 string             `json:"name"`
+	OpenFiles            int64              `json:"open_files"`
+	OperationId          openapi_types.UUID `json:"operation_id"`
+	OperationOutcome     string             `json:"operation_outcome"`
+	OperationPhase       string             `json:"operation_phase"`
+	PathPrefix           string             `json:"path_prefix"`
+	Pids                 int64              `json:"pids"`
+	Port                 int                `json:"port"`
+	ProjectId            openapi_types.UUID `json:"project_id"`
+
+	// State 容器目标状态，取值为 pending、active 或 failed。
+	State  string `json:"state"`
+	Target string `json:"target"`
+	User   string `json:"user"`
+}
+
+// CreateContainerRequest defines model for CreateContainerRequest.
+type CreateContainerRequest struct {
+	// Command 覆盖镜像命令的参数数组。省略时使用镜像默认命令。
+	Command *[]string `json:"command,omitempty"`
+
+	// CpuMillis 申请并限制的 CPU 毫核。
+	CpuMillis int64 `json:"cpu_millis"`
+
+	// Env KEY=value 形式的环境变量。请求体总大小最多 64 KiB。
+	Env *[]string `json:"env,omitempty"`
+
+	// HealthCheckPath 就绪探测的绝对请求路径。
+	HealthCheckPath *string `json:"health_check_path,omitempty"`
+
+	// HealthCheckTimeoutMs 就绪探测的总截止时间。接受 200 至 399 的最终 HTTP 状态。
+	HealthCheckTimeoutMs *int64 `json:"health_check_timeout_ms,omitempty"`
+
+	// Hostname 无端口的公开域名，由 Gateway 提供根路径路由。
+	Hostname string `json:"hostname"`
+
+	// Image 包含不可变摘要的镜像引用，格式为 repository@sha256:digest。仅使用标签的引用会被拒绝。
+	Image string `json:"image"`
+
+	// MemoryBytes 申请并限制的内存字节。
+	MemoryBytes int64 `json:"memory_bytes"`
+
+	// Name 项目内稳定的容器名称。
+	Name string `json:"name"`
+
+	// Port 容器内 HTTP 服务监听的 TCP 端口。
+	Port int `json:"port"`
+
+	// User 非 root 运行身份，格式为 user 或 user:group。省略时使用 1000:1000。
+	User *string `json:"user,omitempty"`
+}
 
 // CreateProjectRequest defines model for CreateProjectRequest.
 type CreateProjectRequest struct {
@@ -299,6 +395,13 @@ type Session struct {
 	User     User      `json:"user"`
 }
 
+// StaticSitePage defines model for StaticSitePage.
+type StaticSitePage struct {
+	// NextCursor 有更多结果时返回，用于请求下一页。
+	NextCursor *string             `json:"next_cursor,omitempty"`
+	Sites      []StaticSiteSummary `json:"sites"`
+}
+
 // StaticSitePublication defines model for StaticSitePublication.
 type StaticSitePublication struct {
 	Hostname  string             `json:"hostname"`
@@ -311,6 +414,13 @@ type StaticSitePublication struct {
 type StaticSitePublicationRequest struct {
 	// Hostname 不带端口的域名，国际化域名使用 ASCII 形式。
 	Hostname string `json:"hostname"`
+}
+
+// StaticSiteSummary defines model for StaticSiteSummary.
+type StaticSiteSummary struct {
+	CreatedAt time.Time          `json:"created_at"`
+	Id        openapi_types.UUID `json:"id"`
+	Name      string             `json:"name"`
 }
 
 // StaticSiteVersion defines model for StaticSiteVersion.
@@ -326,6 +436,25 @@ type StaticSiteVersion struct {
 
 // StaticSiteVersionStatus 站点文件已通过校验并准备就绪，等待激活。
 type StaticSiteVersionStatus string
+
+// StaticSiteVersionPage defines model for StaticSiteVersionPage.
+type StaticSiteVersionPage struct {
+	// NextCursor 有更多结果时返回，用于请求下一页。
+	NextCursor *string             `json:"next_cursor,omitempty"`
+	Versions   []StaticSiteVersion `json:"versions"`
+}
+
+// UpdateProjectCapacityRequest 调整后的项目额度。三个字段都必须提供，单位为 CPU 毫核、内存字节与实例数，非法或非正的单位返回 400。
+type UpdateProjectCapacityRequest struct {
+	// CpuMillis CPU 毫核，必须为正整数。
+	CpuMillis int64 `json:"cpu_millis"`
+
+	// Instances 实例数，必须为正整数。
+	Instances int64 `json:"instances"`
+
+	// MemoryBytes 内存字节，必须为正整数。
+	MemoryBytes int64 `json:"memory_bytes"`
+}
 
 // UpsertProjectMemberRequest defines model for UpsertProjectMemberRequest.
 type UpsertProjectMemberRequest struct {
@@ -384,6 +513,33 @@ type SiteName = string
 // SiteProjectID defines model for SiteProjectID.
 type SiteProjectID = string
 
+// StaticSitePageCursor defines model for StaticSitePageCursor.
+type StaticSitePageCursor = string
+
+// StaticSitePageLimit defines model for StaticSitePageLimit.
+type StaticSitePageLimit = int
+
+// CreateContainerParams defines parameters for CreateContainer.
+type CreateContainerParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// ListStaticSitesParams defines parameters for ListStaticSites.
+type ListStaticSitesParams struct {
+	Limit *StaticSitePageLimit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor 同一个列表接口上一页返回的 next_cursor。首次查询时省略。
+	Cursor *StaticSitePageCursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
+// ListStaticSiteVersionsParams defines parameters for ListStaticSiteVersions.
+type ListStaticSiteVersionsParams struct {
+	Limit *StaticSitePageLimit `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// Cursor 同一个列表接口上一页返回的 next_cursor。首次查询时省略。
+	Cursor *StaticSitePageCursor `form:"cursor,omitempty" json:"cursor,omitempty"`
+}
+
 // DeployWorkerParams defines parameters for DeployWorker.
 type DeployWorkerParams struct {
 	IdempotencyKey string `json:"Idempotency-Key"`
@@ -398,8 +554,20 @@ type CreateProjectJSONRequestBody = CreateProjectRequest
 // RenameProjectJSONRequestBody defines body for RenameProject for application/json ContentType.
 type RenameProjectJSONRequestBody = RenameProjectRequest
 
+// ClickBrowserPageJSONRequestBody defines body for ClickBrowserPage for application/json ContentType.
+type ClickBrowserPageJSONRequestBody = ClickBrowserPageRequest
+
+// CaptureBrowserDownloadJSONRequestBody defines body for CaptureBrowserDownload for application/json ContentType.
+type CaptureBrowserDownloadJSONRequestBody = CaptureBrowserDownloadRequest
+
 // NavigateBrowserSessionJSONRequestBody defines body for NavigateBrowserSession for application/json ContentType.
 type NavigateBrowserSessionJSONRequestBody = NavigateBrowserSessionRequest
+
+// UpdateProjectCapacityJSONRequestBody defines body for UpdateProjectCapacity for application/json ContentType.
+type UpdateProjectCapacityJSONRequestBody = UpdateProjectCapacityRequest
+
+// CreateContainerJSONRequestBody defines body for CreateContainer for application/json ContentType.
+type CreateContainerJSONRequestBody = CreateContainerRequest
 
 // UpsertProjectMemberJSONRequestBody defines body for UpsertProjectMember for application/json ContentType.
 type UpsertProjectMemberJSONRequestBody = UpsertProjectMemberRequest
@@ -544,8 +712,27 @@ type ClientInterface interface {
 	// GetBrowserSession performs a GET /api/v1/projects/{projectID}/browser-sessions/{sessionID} (the `GetBrowserSession` operationId) request.
 	GetBrowserSession(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ClickBrowserPageWithBody performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/click (the `ClickBrowserPage` operationId) request,
+	// with any type of body and a specified content type.
+	ClickBrowserPageWithBody(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ClickBrowserPage performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/click (the `ClickBrowserPage` operationId) request.
+	// Takes a body of the `application/json` content type.
+	ClickBrowserPage(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, body ClickBrowserPageJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetBrowserConsole performs a GET /api/v1/projects/{projectID}/browser-sessions/{sessionID}/console (the `GetBrowserConsole` operationId) request.
 	GetBrowserConsole(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CaptureBrowserDownloadWithBody performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/downloads (the `CaptureBrowserDownload` operationId) request,
+	// with any type of body and a specified content type.
+	CaptureBrowserDownloadWithBody(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CaptureBrowserDownload performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/downloads (the `CaptureBrowserDownload` operationId) request.
+	// Takes a body of the `application/json` content type.
+	CaptureBrowserDownload(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, body CaptureBrowserDownloadJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetBrowserDownload performs a GET /api/v1/projects/{projectID}/browser-sessions/{sessionID}/downloads/{downloadID} (the `GetBrowserDownload` operationId) request.
+	GetBrowserDownload(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, downloadID openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// NavigateBrowserSessionWithBody performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/navigate (the `NavigateBrowserSession` operationId) request,
 	// with any type of body and a specified content type.
@@ -565,6 +752,35 @@ type ClientInterface interface {
 	//
 	// 返回项目成员可见的项目额度、活动预留占用和剩余量；三个值来自同一数据库快照。.
 	GetProjectCapacity(ctx context.Context, projectID string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UpdateProjectCapacityWithBody performs a PATCH /api/v1/projects/{projectID}/capacity (the `UpdateProjectCapacity` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// 项目所有者调整项目额度。三个额度字段都必须提供且为正整数；新额度低于活动预留占用时返回 409，原额度与预留保持不变。.
+	UpdateProjectCapacityWithBody(ctx context.Context, projectID string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UpdateProjectCapacity performs a PATCH /api/v1/projects/{projectID}/capacity (the `UpdateProjectCapacity` operationId) request.
+	// Takes a body of the `application/json` content type.
+	//
+	// 项目所有者调整项目额度。三个额度字段都必须提供且为正整数；新额度低于活动预留占用时返回 409，原额度与预留保持不变。.
+	UpdateProjectCapacity(ctx context.Context, projectID string, body UpdateProjectCapacityJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateContainerWithBody performs a POST /api/v1/projects/{projectID}/containers (the `CreateContainer` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用。同一幂等键复用操作。.
+	CreateContainerWithBody(ctx context.Context, projectID string, params *CreateContainerParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateContainer performs a POST /api/v1/projects/{projectID}/containers (the `CreateContainer` operationId) request.
+	// Takes a body of the `application/json` content type.
+	//
+	// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用。同一幂等键复用操作。.
+	CreateContainer(ctx context.Context, projectID string, params *CreateContainerParams, body CreateContainerJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetContainer performs a GET /api/v1/projects/{projectID}/containers/{containerID} (the `GetContainer` operationId) request.
+	//
+	// 项目成员查询容器配置、执行与操作结果。.
+	GetContainer(ctx context.Context, projectID string, containerID string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListProjectMembers performs a GET /api/v1/projects/{projectID}/members (the `ListProjectMembers` operationId) request.
 	//
@@ -635,6 +851,16 @@ type ClientInterface interface {
 	// 返回指定凭据版本的明文，仅项目所有者可以调用。.
 	GetProjectSecretValue(ctx context.Context, projectID string, name string, version int, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListStaticSites performs a GET /api/v1/projects/{projectID}/sites (the `ListStaticSites` operationId) request.
+	//
+	// 按站点名称升序分页列出项目成员可见的静态站点。.
+	ListStaticSites(ctx context.Context, projectID SiteProjectID, params *ListStaticSitesParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListStaticSiteVersions performs a GET /api/v1/projects/{projectID}/sites/{siteName}/versions (the `ListStaticSiteVersions` operationId) request.
+	//
+	// 按创建时间和版本标识降序分页列出站点版本摘要。.
+	ListStaticSiteVersions(ctx context.Context, projectID SiteProjectID, siteName SiteName, params *ListStaticSiteVersionsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// UploadStaticSiteVersionWithBody performs a POST /api/v1/projects/{projectID}/sites/{siteName}/versions (the `UploadStaticSiteVersion` operationId) request,
 	// with any type of body and a specified content type.
 	//
@@ -645,6 +871,11 @@ type ClientInterface interface {
 	//
 	// 项目成员按标识读取一个静态站点版本。.
 	GetStaticSiteVersion(ctx context.Context, projectID SiteProjectID, siteName SiteName, versionID string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DownloadStaticSiteArtifact performs a GET /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/artifact (the `DownloadStaticSiteArtifact` operationId) request.
+	//
+	// 项目成员下载指定站点版本的原始 ZIP。.
+	DownloadStaticSiteArtifact(ctx context.Context, projectID SiteProjectID, siteName SiteName, versionID string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// PublishStaticSiteVersionWithBody performs a POST /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/publish (the `PublishStaticSiteVersion` operationId) request,
 	// with any type of body and a specified content type.
@@ -873,9 +1104,78 @@ func (c *Client) GetBrowserSession(ctx context.Context, projectID BrowserProject
 	return c.Client.Do(req)
 }
 
+// ClickBrowserPageWithBody performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/click (the `ClickBrowserPage` operationId) request,
+// with any type of body and a specified content type.
+func (c *Client) ClickBrowserPageWithBody(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewClickBrowserPageRequestWithBody(c.Server, projectID, sessionID, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ClickBrowserPage performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/click (the `ClickBrowserPage` operationId) request.
+// Takes a body of the `application/json` content type.
+func (c *Client) ClickBrowserPage(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, body ClickBrowserPageJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewClickBrowserPageRequest(c.Server, projectID, sessionID, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // GetBrowserConsole performs a GET /api/v1/projects/{projectID}/browser-sessions/{sessionID}/console (the `GetBrowserConsole` operationId) request.
 func (c *Client) GetBrowserConsole(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetBrowserConsoleRequest(c.Server, projectID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CaptureBrowserDownloadWithBody performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/downloads (the `CaptureBrowserDownload` operationId) request,
+// with any type of body and a specified content type.
+func (c *Client) CaptureBrowserDownloadWithBody(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCaptureBrowserDownloadRequestWithBody(c.Server, projectID, sessionID, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CaptureBrowserDownload performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/downloads (the `CaptureBrowserDownload` operationId) request.
+// Takes a body of the `application/json` content type.
+func (c *Client) CaptureBrowserDownload(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, body CaptureBrowserDownloadJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCaptureBrowserDownloadRequest(c.Server, projectID, sessionID, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetBrowserDownload performs a GET /api/v1/projects/{projectID}/browser-sessions/{sessionID}/downloads/{downloadID} (the `GetBrowserDownload` operationId) request.
+func (c *Client) GetBrowserDownload(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, downloadID openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetBrowserDownloadRequest(c.Server, projectID, sessionID, downloadID)
 	if err != nil {
 		return nil, err
 	}
@@ -945,6 +1245,85 @@ func (c *Client) DownloadBrowserScreenshot(ctx context.Context, projectID Browse
 // 返回项目成员可见的项目额度、活动预留占用和剩余量；三个值来自同一数据库快照。.
 func (c *Client) GetProjectCapacity(ctx context.Context, projectID string, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetProjectCapacityRequest(c.Server, projectID)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// UpdateProjectCapacityWithBody performs a PATCH /api/v1/projects/{projectID}/capacity (the `UpdateProjectCapacity` operationId) request,
+// with any type of body and a specified content type.
+//
+// 项目所有者调整项目额度。三个额度字段都必须提供且为正整数；新额度低于活动预留占用时返回 409，原额度与预留保持不变。.
+func (c *Client) UpdateProjectCapacityWithBody(ctx context.Context, projectID string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateProjectCapacityRequestWithBody(c.Server, projectID, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// UpdateProjectCapacity performs a PATCH /api/v1/projects/{projectID}/capacity (the `UpdateProjectCapacity` operationId) request.
+// Takes a body of the `application/json` content type.
+//
+// 项目所有者调整项目额度。三个额度字段都必须提供且为正整数；新额度低于活动预留占用时返回 409，原额度与预留保持不变。.
+func (c *Client) UpdateProjectCapacity(ctx context.Context, projectID string, body UpdateProjectCapacityJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateProjectCapacityRequest(c.Server, projectID, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateContainerWithBody performs a POST /api/v1/projects/{projectID}/containers (the `CreateContainer` operationId) request,
+// with any type of body and a specified content type.
+//
+// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用。同一幂等键复用操作。.
+func (c *Client) CreateContainerWithBody(ctx context.Context, projectID string, params *CreateContainerParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateContainerRequestWithBody(c.Server, projectID, params, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateContainer performs a POST /api/v1/projects/{projectID}/containers (the `CreateContainer` operationId) request.
+// Takes a body of the `application/json` content type.
+//
+// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用。同一幂等键复用操作。.
+func (c *Client) CreateContainer(ctx context.Context, projectID string, params *CreateContainerParams, body CreateContainerJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateContainerRequest(c.Server, projectID, params, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetContainer performs a GET /api/v1/projects/{projectID}/containers/{containerID} (the `GetContainer` operationId) request.
+//
+// 项目成员查询容器配置、执行与操作结果。.
+func (c *Client) GetContainer(ctx context.Context, projectID string, containerID string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetContainerRequest(c.Server, projectID, containerID)
 	if err != nil {
 		return nil, err
 	}
@@ -1154,6 +1533,36 @@ func (c *Client) GetProjectSecretValue(ctx context.Context, projectID string, na
 	return c.Client.Do(req)
 }
 
+// ListStaticSites performs a GET /api/v1/projects/{projectID}/sites (the `ListStaticSites` operationId) request.
+//
+// 按站点名称升序分页列出项目成员可见的静态站点。.
+func (c *Client) ListStaticSites(ctx context.Context, projectID SiteProjectID, params *ListStaticSitesParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListStaticSitesRequest(c.Server, projectID, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListStaticSiteVersions performs a GET /api/v1/projects/{projectID}/sites/{siteName}/versions (the `ListStaticSiteVersions` operationId) request.
+//
+// 按创建时间和版本标识降序分页列出站点版本摘要。.
+func (c *Client) ListStaticSiteVersions(ctx context.Context, projectID SiteProjectID, siteName SiteName, params *ListStaticSiteVersionsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListStaticSiteVersionsRequest(c.Server, projectID, siteName, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // UploadStaticSiteVersionWithBody performs a POST /api/v1/projects/{projectID}/sites/{siteName}/versions (the `UploadStaticSiteVersion` operationId) request,
 // with any type of body and a specified content type.
 //
@@ -1175,6 +1584,21 @@ func (c *Client) UploadStaticSiteVersionWithBody(ctx context.Context, projectID 
 // 项目成员按标识读取一个静态站点版本。.
 func (c *Client) GetStaticSiteVersion(ctx context.Context, projectID SiteProjectID, siteName SiteName, versionID string, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetStaticSiteVersionRequest(c.Server, projectID, siteName, versionID)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// DownloadStaticSiteArtifact performs a GET /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/artifact (the `DownloadStaticSiteArtifact` operationId) request.
+//
+// 项目成员下载指定站点版本的原始 ZIP。.
+func (c *Client) DownloadStaticSiteArtifact(ctx context.Context, projectID SiteProjectID, siteName SiteName, versionID string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDownloadStaticSiteArtifactRequest(c.Server, projectID, siteName, versionID)
 	if err != nil {
 		return nil, err
 	}
@@ -1662,6 +2086,60 @@ func NewGetBrowserSessionRequest(server string, projectID BrowserProjectID, sess
 	return req, nil
 }
 
+// NewClickBrowserPageRequest calls the generic ClickBrowserPage builder with application/json body
+func NewClickBrowserPageRequest(server string, projectID BrowserProjectID, sessionID BrowserSessionID, body ClickBrowserPageJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewClickBrowserPageRequestWithBody(server, projectID, sessionID, "application/json", bodyReader)
+}
+
+// NewClickBrowserPageRequestWithBody constructs an http.Request for the ClickBrowserPage method, with any body, and a specified content type
+func NewClickBrowserPageRequestWithBody(server string, projectID BrowserProjectID, sessionID BrowserSessionID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "sessionID", sessionID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/browser-sessions/%s/click", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewGetBrowserConsoleRequest constructs an http.Request for the GetBrowserConsole method
 func NewGetBrowserConsoleRequest(server string, projectID BrowserProjectID, sessionID BrowserSessionID) (*http.Request, error) {
 	var err error
@@ -1686,6 +2164,108 @@ func NewGetBrowserConsoleRequest(server string, projectID BrowserProjectID, sess
 	}
 
 	operationPath := fmt.Sprintf("/api/v1/projects/%s/browser-sessions/%s/console", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCaptureBrowserDownloadRequest calls the generic CaptureBrowserDownload builder with application/json body
+func NewCaptureBrowserDownloadRequest(server string, projectID BrowserProjectID, sessionID BrowserSessionID, body CaptureBrowserDownloadJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCaptureBrowserDownloadRequestWithBody(server, projectID, sessionID, "application/json", bodyReader)
+}
+
+// NewCaptureBrowserDownloadRequestWithBody constructs an http.Request for the CaptureBrowserDownload method, with any body, and a specified content type
+func NewCaptureBrowserDownloadRequestWithBody(server string, projectID BrowserProjectID, sessionID BrowserSessionID, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "sessionID", sessionID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/browser-sessions/%s/downloads", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewGetBrowserDownloadRequest constructs an http.Request for the GetBrowserDownload method
+func NewGetBrowserDownloadRequest(server string, projectID BrowserProjectID, sessionID BrowserSessionID, downloadID openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "sessionID", sessionID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "downloadID", downloadID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/browser-sessions/%s/downloads/%s", pathParam0, pathParam1, pathParam2)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -1863,6 +2443,154 @@ func NewGetProjectCapacityRequest(server string, projectID string) (*http.Reques
 	}
 
 	operationPath := fmt.Sprintf("/api/v1/projects/%s/capacity", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewUpdateProjectCapacityRequest calls the generic UpdateProjectCapacity builder with application/json body
+func NewUpdateProjectCapacityRequest(server string, projectID string, body UpdateProjectCapacityJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewUpdateProjectCapacityRequestWithBody(server, projectID, "application/json", bodyReader)
+}
+
+// NewUpdateProjectCapacityRequestWithBody constructs an http.Request for the UpdateProjectCapacity method, with any body, and a specified content type
+func NewUpdateProjectCapacityRequestWithBody(server string, projectID string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/capacity", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPatch, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewCreateContainerRequest calls the generic CreateContainer builder with application/json body
+func NewCreateContainerRequest(server string, projectID string, params *CreateContainerParams, body CreateContainerJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateContainerRequestWithBody(server, projectID, params, "application/json", bodyReader)
+}
+
+// NewCreateContainerRequestWithBody constructs an http.Request for the CreateContainer method, with any body, and a specified content type
+func NewCreateContainerRequestWithBody(server string, projectID string, params *CreateContainerParams, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/containers", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	if params != nil {
+
+		var headerParam0 string
+
+		headerParam0, err = runtime.StyleParamWithOptions("simple", false, "Idempotency-Key", params.IdempotencyKey, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+		if err != nil {
+			return nil, err
+		}
+
+		req.Header.Set("Idempotency-Key", headerParam0)
+
+	}
+
+	return req, nil
+}
+
+// NewGetContainerRequest constructs an http.Request for the GetContainer method
+func NewGetContainerRequest(server string, projectID string, containerID string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "containerID", containerID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/containers/%s", pathParam0, pathParam1)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -2294,6 +3022,159 @@ func NewGetProjectSecretValueRequest(server string, projectID string, name strin
 	return req, nil
 }
 
+// NewListStaticSitesRequest constructs an http.Request for the ListStaticSites method
+func NewListStaticSitesRequest(server string, projectID SiteProjectID, params *ListStaticSitesParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/sites", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Cursor != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "cursor", *params.Cursor, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewListStaticSiteVersionsRequest constructs an http.Request for the ListStaticSiteVersions method
+func NewListStaticSiteVersionsRequest(server string, projectID SiteProjectID, siteName SiteName, params *ListStaticSiteVersionsParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "siteName", siteName, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/sites/%s/versions", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Cursor != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "cursor", *params.Cursor, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewUploadStaticSiteVersionRequestWithBody constructs an http.Request for the UploadStaticSiteVersion method, with any body, and a specified content type
 func NewUploadStaticSiteVersionRequestWithBody(server string, projectID SiteProjectID, siteName SiteName, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
@@ -2368,6 +3249,54 @@ func NewGetStaticSiteVersionRequest(server string, projectID SiteProjectID, site
 	}
 
 	operationPath := fmt.Sprintf("/api/v1/projects/%s/sites/%s/versions/%s", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewDownloadStaticSiteArtifactRequest constructs an http.Request for the DownloadStaticSiteArtifact method
+func NewDownloadStaticSiteArtifactRequest(server string, projectID SiteProjectID, siteName SiteName, versionID string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "siteName", siteName, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "versionID", versionID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/sites/%s/versions/%s/artifact", pathParam0, pathParam1, pathParam2)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -2701,10 +3630,35 @@ type ClientWithResponsesInterface interface {
 	// Returns a wrapper object for the known response body format(s).
 	GetBrowserSessionWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, reqEditors ...RequestEditorFn) (*GetBrowserSessionResponse, error)
 
+	// ClickBrowserPageWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/click (the `ClickBrowserPage` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	ClickBrowserPageWithBodyWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ClickBrowserPageResponse, error)
+
+	// ClickBrowserPageWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/click (the `ClickBrowserPage` operationId) request.
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	ClickBrowserPageWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, body ClickBrowserPageJSONRequestBody, reqEditors ...RequestEditorFn) (*ClickBrowserPageResponse, error)
+
 	// GetBrowserConsoleWithResponse performs a GET /api/v1/projects/{projectID}/browser-sessions/{sessionID}/console (the `GetBrowserConsole` operationId) request.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	GetBrowserConsoleWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, reqEditors ...RequestEditorFn) (*GetBrowserConsoleResponse, error)
+
+	// CaptureBrowserDownloadWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/downloads (the `CaptureBrowserDownload` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	CaptureBrowserDownloadWithBodyWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CaptureBrowserDownloadResponse, error)
+
+	// CaptureBrowserDownloadWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/downloads (the `CaptureBrowserDownload` operationId) request.
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	CaptureBrowserDownloadWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, body CaptureBrowserDownloadJSONRequestBody, reqEditors ...RequestEditorFn) (*CaptureBrowserDownloadResponse, error)
+
+	// GetBrowserDownloadWithResponse performs a GET /api/v1/projects/{projectID}/browser-sessions/{sessionID}/downloads/{downloadID} (the `GetBrowserDownload` operationId) request.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	GetBrowserDownloadWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, downloadID openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetBrowserDownloadResponse, error)
 
 	// NavigateBrowserSessionWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/navigate (the `NavigateBrowserSession` operationId) request,
 	// with any type of body and a specified content type.
@@ -2732,6 +3686,41 @@ type ClientWithResponsesInterface interface {
 	//
 	// Returns a wrapper object for the known response body format(s).
 	GetProjectCapacityWithResponse(ctx context.Context, projectID string, reqEditors ...RequestEditorFn) (*GetProjectCapacityResponse, error)
+
+	// UpdateProjectCapacityWithBodyWithResponse performs a PATCH /api/v1/projects/{projectID}/capacity (the `UpdateProjectCapacity` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// 项目所有者调整项目额度。三个额度字段都必须提供且为正整数；新额度低于活动预留占用时返回 409，原额度与预留保持不变。.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	UpdateProjectCapacityWithBodyWithResponse(ctx context.Context, projectID string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateProjectCapacityResponse, error)
+
+	// UpdateProjectCapacityWithResponse performs a PATCH /api/v1/projects/{projectID}/capacity (the `UpdateProjectCapacity` operationId) request.
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// 项目所有者调整项目额度。三个额度字段都必须提供且为正整数；新额度低于活动预留占用时返回 409，原额度与预留保持不变。.
+	UpdateProjectCapacityWithResponse(ctx context.Context, projectID string, body UpdateProjectCapacityJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateProjectCapacityResponse, error)
+
+	// CreateContainerWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/containers (the `CreateContainer` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用。同一幂等键复用操作。.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	CreateContainerWithBodyWithResponse(ctx context.Context, projectID string, params *CreateContainerParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateContainerResponse, error)
+
+	// CreateContainerWithResponse performs a POST /api/v1/projects/{projectID}/containers (the `CreateContainer` operationId) request.
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用。同一幂等键复用操作。.
+	CreateContainerWithResponse(ctx context.Context, projectID string, params *CreateContainerParams, body CreateContainerJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateContainerResponse, error)
+
+	// GetContainerWithResponse performs a GET /api/v1/projects/{projectID}/containers/{containerID} (the `GetContainer` operationId) request.
+	//
+	// 项目成员查询容器配置、执行与操作结果。.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	GetContainerWithResponse(ctx context.Context, projectID string, containerID string, reqEditors ...RequestEditorFn) (*GetContainerResponse, error)
 
 	// ListProjectMembersWithResponse performs a GET /api/v1/projects/{projectID}/members (the `ListProjectMembers` operationId) request.
 	//
@@ -2822,6 +3811,20 @@ type ClientWithResponsesInterface interface {
 	// Returns a wrapper object for the known response body format(s).
 	GetProjectSecretValueWithResponse(ctx context.Context, projectID string, name string, version int, reqEditors ...RequestEditorFn) (*GetProjectSecretValueResponse, error)
 
+	// ListStaticSitesWithResponse performs a GET /api/v1/projects/{projectID}/sites (the `ListStaticSites` operationId) request.
+	//
+	// 按站点名称升序分页列出项目成员可见的静态站点。.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	ListStaticSitesWithResponse(ctx context.Context, projectID SiteProjectID, params *ListStaticSitesParams, reqEditors ...RequestEditorFn) (*ListStaticSitesResponse, error)
+
+	// ListStaticSiteVersionsWithResponse performs a GET /api/v1/projects/{projectID}/sites/{siteName}/versions (the `ListStaticSiteVersions` operationId) request.
+	//
+	// 按创建时间和版本标识降序分页列出站点版本摘要。.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	ListStaticSiteVersionsWithResponse(ctx context.Context, projectID SiteProjectID, siteName SiteName, params *ListStaticSiteVersionsParams, reqEditors ...RequestEditorFn) (*ListStaticSiteVersionsResponse, error)
+
 	// UploadStaticSiteVersionWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/sites/{siteName}/versions (the `UploadStaticSiteVersion` operationId) request,
 	// with any type of body and a specified content type.
 	//
@@ -2836,6 +3839,13 @@ type ClientWithResponsesInterface interface {
 	//
 	// Returns a wrapper object for the known response body format(s).
 	GetStaticSiteVersionWithResponse(ctx context.Context, projectID SiteProjectID, siteName SiteName, versionID string, reqEditors ...RequestEditorFn) (*GetStaticSiteVersionResponse, error)
+
+	// DownloadStaticSiteArtifactWithResponse performs a GET /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/artifact (the `DownloadStaticSiteArtifact` operationId) request.
+	//
+	// 项目成员下载指定站点版本的原始 ZIP。.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	DownloadStaticSiteArtifactWithResponse(ctx context.Context, projectID SiteProjectID, siteName SiteName, versionID string, reqEditors ...RequestEditorFn) (*DownloadStaticSiteArtifactResponse, error)
 
 	// PublishStaticSiteVersionWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/publish (the `PublishStaticSiteVersion` operationId) request,
 	// with any type of body and a specified content type.
@@ -3511,6 +4521,47 @@ func (r GetBrowserSessionResponse) ContentType() string {
 	return ""
 }
 
+type ClickBrowserPageResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r ClickBrowserPageResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r ClickBrowserPageResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ClickBrowserPageResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ClickBrowserPageResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ClickBrowserPageResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type GetBrowserConsoleResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -3553,6 +4604,102 @@ func (r GetBrowserConsoleResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetBrowserConsoleResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type CaptureBrowserDownloadResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *BrowserDownload
+	// JSON422 the response for an HTTP 422 `application/json` response
+	JSON422 *Error
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r CaptureBrowserDownloadResponse) GetJSON201() *BrowserDownload {
+	return r.JSON201
+}
+
+// GetJSON422 returns the response for an HTTP 422 `application/json` response
+func (r CaptureBrowserDownloadResponse) GetJSON422() *Error {
+	return r.JSON422
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r CaptureBrowserDownloadResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r CaptureBrowserDownloadResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CaptureBrowserDownloadResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CaptureBrowserDownloadResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CaptureBrowserDownloadResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetBrowserDownloadResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r GetBrowserDownloadResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r GetBrowserDownloadResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetBrowserDownloadResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetBrowserDownloadResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetBrowserDownloadResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -3759,6 +4906,311 @@ func (r GetProjectCapacityResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetProjectCapacityResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type UpdateProjectCapacityResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *ProjectCapacity
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *Error
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Error
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Error
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *Error
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r UpdateProjectCapacityResponse) GetJSON200() *ProjectCapacity {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r UpdateProjectCapacityResponse) GetJSON400() *Error {
+	return r.JSON400
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r UpdateProjectCapacityResponse) GetJSON401() *Error {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r UpdateProjectCapacityResponse) GetJSON403() *Error {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r UpdateProjectCapacityResponse) GetJSON404() *Error {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r UpdateProjectCapacityResponse) GetJSON409() *Error {
+	return r.JSON409
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r UpdateProjectCapacityResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r UpdateProjectCapacityResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r UpdateProjectCapacityResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r UpdateProjectCapacityResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r UpdateProjectCapacityResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// CreateContainerResponse200Headers the declared response headers of an HTTP 200 response for CreateContainer
+type CreateContainerResponse200Headers struct {
+	Location *string
+}
+
+// CreateContainerResponse201Headers the declared response headers of an HTTP 201 response for CreateContainer
+type CreateContainerResponse201Headers struct {
+	Location *string
+}
+
+// CreateContainerResponse409Headers the declared response headers of an HTTP 409 response for CreateContainer
+type CreateContainerResponse409Headers struct {
+	Location *string
+}
+
+// CreateContainerResponse422Headers the declared response headers of an HTTP 422 response for CreateContainer
+type CreateContainerResponse422Headers struct {
+	Location *string
+}
+
+// CreateContainerResponse429Headers the declared response headers of an HTTP 429 response for CreateContainer
+type CreateContainerResponse429Headers struct {
+	Location *string
+}
+
+type CreateContainerResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *Container
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *Container
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *Error
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Error
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Error
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *Error
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
+	// JSON422 the response for an HTTP 422 `application/json` response
+	JSON422 *Container
+	// JSON429 the response for an HTTP 429 `application/json` response
+	JSON429 *Container
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *Error
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *Error
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+	// Headers200 the parsed response headers for an HTTP 200 response
+	Headers200 *CreateContainerResponse200Headers
+	// Headers201 the parsed response headers for an HTTP 201 response
+	Headers201 *CreateContainerResponse201Headers
+	// Headers409 the parsed response headers for an HTTP 409 response
+	Headers409 *CreateContainerResponse409Headers
+	// Headers422 the parsed response headers for an HTTP 422 response
+	Headers422 *CreateContainerResponse422Headers
+	// Headers429 the parsed response headers for an HTTP 429 response
+	Headers429 *CreateContainerResponse429Headers
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r CreateContainerResponse) GetJSON200() *Container {
+	return r.JSON200
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r CreateContainerResponse) GetJSON201() *Container {
+	return r.JSON201
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r CreateContainerResponse) GetJSON400() *Error {
+	return r.JSON400
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r CreateContainerResponse) GetJSON401() *Error {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r CreateContainerResponse) GetJSON403() *Error {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r CreateContainerResponse) GetJSON404() *Error {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r CreateContainerResponse) GetJSON409() *Error {
+	return r.JSON409
+}
+
+// GetJSON422 returns the response for an HTTP 422 `application/json` response
+func (r CreateContainerResponse) GetJSON422() *Container {
+	return r.JSON422
+}
+
+// GetJSON429 returns the response for an HTTP 429 `application/json` response
+func (r CreateContainerResponse) GetJSON429() *Container {
+	return r.JSON429
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r CreateContainerResponse) GetJSON500() *Error {
+	return r.JSON500
+}
+
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r CreateContainerResponse) GetJSON503() *Error {
+	return r.JSON503
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r CreateContainerResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r CreateContainerResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateContainerResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateContainerResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CreateContainerResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetContainerResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *Container
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Error
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *Error
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *Error
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetContainerResponse) GetJSON200() *Container {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r GetContainerResponse) GetJSON401() *Error {
+	return r.JSON401
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetContainerResponse) GetJSON404() *Error {
+	return r.JSON404
+}
+
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r GetContainerResponse) GetJSON503() *Error {
+	return r.JSON503
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r GetContainerResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r GetContainerResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetContainerResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetContainerResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetContainerResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -4469,6 +5921,158 @@ func (r GetProjectSecretValueResponse) ContentType() string {
 	return ""
 }
 
+type ListStaticSitesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *StaticSitePage
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *Error
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Error
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *Error
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *Error
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListStaticSitesResponse) GetJSON200() *StaticSitePage {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r ListStaticSitesResponse) GetJSON400() *Error {
+	return r.JSON400
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r ListStaticSitesResponse) GetJSON401() *Error {
+	return r.JSON401
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r ListStaticSitesResponse) GetJSON404() *Error {
+	return r.JSON404
+}
+
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r ListStaticSitesResponse) GetJSON503() *Error {
+	return r.JSON503
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r ListStaticSitesResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r ListStaticSitesResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListStaticSitesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListStaticSitesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListStaticSitesResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListStaticSiteVersionsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *StaticSiteVersionPage
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *Error
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Error
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *Error
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *Error
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListStaticSiteVersionsResponse) GetJSON200() *StaticSiteVersionPage {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r ListStaticSiteVersionsResponse) GetJSON400() *Error {
+	return r.JSON400
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r ListStaticSiteVersionsResponse) GetJSON401() *Error {
+	return r.JSON401
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r ListStaticSiteVersionsResponse) GetJSON404() *Error {
+	return r.JSON404
+}
+
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r ListStaticSiteVersionsResponse) GetJSON503() *Error {
+	return r.JSON503
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r ListStaticSiteVersionsResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r ListStaticSiteVersionsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListStaticSiteVersionsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListStaticSiteVersionsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListStaticSiteVersionsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 // UploadStaticSiteVersionResponse201Headers the declared response headers of an HTTP 201 response for UploadStaticSiteVersion
 type UploadStaticSiteVersionResponse201Headers struct {
 	Location *string
@@ -4622,6 +6226,77 @@ func (r GetStaticSiteVersionResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetStaticSiteVersionResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// DownloadStaticSiteArtifactResponse200Headers the declared response headers of an HTTP 200 response for DownloadStaticSiteArtifact
+type DownloadStaticSiteArtifactResponse200Headers struct {
+	ContentDigest      *string
+	ContentDisposition *string
+	ContentLength      *int64
+}
+
+type DownloadStaticSiteArtifactResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Error
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *Error
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *Error
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+	// Headers200 the parsed response headers for an HTTP 200 response
+	Headers200 *DownloadStaticSiteArtifactResponse200Headers
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r DownloadStaticSiteArtifactResponse) GetJSON401() *Error {
+	return r.JSON401
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r DownloadStaticSiteArtifactResponse) GetJSON404() *Error {
+	return r.JSON404
+}
+
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r DownloadStaticSiteArtifactResponse) GetJSON503() *Error {
+	return r.JSON503
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r DownloadStaticSiteArtifactResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r DownloadStaticSiteArtifactResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r DownloadStaticSiteArtifactResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DownloadStaticSiteArtifactResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r DownloadStaticSiteArtifactResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -5162,6 +6837,28 @@ func (c *ClientWithResponses) GetBrowserSessionWithResponse(ctx context.Context,
 	return ParseGetBrowserSessionResponse(rsp)
 }
 
+// ClickBrowserPageWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/click (the `ClickBrowserPage` operationId) request,
+// with any type of body and a specified content type.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) ClickBrowserPageWithBodyWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ClickBrowserPageResponse, error) {
+	rsp, err := c.ClickBrowserPageWithBody(ctx, projectID, sessionID, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseClickBrowserPageResponse(rsp)
+}
+
+// ClickBrowserPageWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/click (the `ClickBrowserPage` operationId) request.
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) ClickBrowserPageWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, body ClickBrowserPageJSONRequestBody, reqEditors ...RequestEditorFn) (*ClickBrowserPageResponse, error) {
+	rsp, err := c.ClickBrowserPage(ctx, projectID, sessionID, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseClickBrowserPageResponse(rsp)
+}
+
 // GetBrowserConsoleWithResponse performs a GET /api/v1/projects/{projectID}/browser-sessions/{sessionID}/console (the `GetBrowserConsole` operationId) request.
 //
 // Returns a wrapper object for the known response body format(s).
@@ -5171,6 +6868,39 @@ func (c *ClientWithResponses) GetBrowserConsoleWithResponse(ctx context.Context,
 		return nil, err
 	}
 	return ParseGetBrowserConsoleResponse(rsp)
+}
+
+// CaptureBrowserDownloadWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/downloads (the `CaptureBrowserDownload` operationId) request,
+// with any type of body and a specified content type.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) CaptureBrowserDownloadWithBodyWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CaptureBrowserDownloadResponse, error) {
+	rsp, err := c.CaptureBrowserDownloadWithBody(ctx, projectID, sessionID, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCaptureBrowserDownloadResponse(rsp)
+}
+
+// CaptureBrowserDownloadWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/downloads (the `CaptureBrowserDownload` operationId) request.
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) CaptureBrowserDownloadWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, body CaptureBrowserDownloadJSONRequestBody, reqEditors ...RequestEditorFn) (*CaptureBrowserDownloadResponse, error) {
+	rsp, err := c.CaptureBrowserDownload(ctx, projectID, sessionID, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCaptureBrowserDownloadResponse(rsp)
+}
+
+// GetBrowserDownloadWithResponse performs a GET /api/v1/projects/{projectID}/browser-sessions/{sessionID}/downloads/{downloadID} (the `GetBrowserDownload` operationId) request.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) GetBrowserDownloadWithResponse(ctx context.Context, projectID BrowserProjectID, sessionID BrowserSessionID, downloadID openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetBrowserDownloadResponse, error) {
+	rsp, err := c.GetBrowserDownload(ctx, projectID, sessionID, downloadID, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetBrowserDownloadResponse(rsp)
 }
 
 // NavigateBrowserSessionWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/navigate (the `NavigateBrowserSession` operationId) request,
@@ -5228,6 +6958,71 @@ func (c *ClientWithResponses) GetProjectCapacityWithResponse(ctx context.Context
 		return nil, err
 	}
 	return ParseGetProjectCapacityResponse(rsp)
+}
+
+// UpdateProjectCapacityWithBodyWithResponse performs a PATCH /api/v1/projects/{projectID}/capacity (the `UpdateProjectCapacity` operationId) request,
+// with any type of body and a specified content type.
+//
+// 项目所有者调整项目额度。三个额度字段都必须提供且为正整数；新额度低于活动预留占用时返回 409，原额度与预留保持不变。.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) UpdateProjectCapacityWithBodyWithResponse(ctx context.Context, projectID string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateProjectCapacityResponse, error) {
+	rsp, err := c.UpdateProjectCapacityWithBody(ctx, projectID, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateProjectCapacityResponse(rsp)
+}
+
+// UpdateProjectCapacityWithResponse performs a PATCH /api/v1/projects/{projectID}/capacity (the `UpdateProjectCapacity` operationId) request.
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// 项目所有者调整项目额度。三个额度字段都必须提供且为正整数；新额度低于活动预留占用时返回 409，原额度与预留保持不变。.
+func (c *ClientWithResponses) UpdateProjectCapacityWithResponse(ctx context.Context, projectID string, body UpdateProjectCapacityJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateProjectCapacityResponse, error) {
+	rsp, err := c.UpdateProjectCapacity(ctx, projectID, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateProjectCapacityResponse(rsp)
+}
+
+// CreateContainerWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/containers (the `CreateContainer` operationId) request,
+// with any type of body and a specified content type.
+//
+// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用。同一幂等键复用操作。.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) CreateContainerWithBodyWithResponse(ctx context.Context, projectID string, params *CreateContainerParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateContainerResponse, error) {
+	rsp, err := c.CreateContainerWithBody(ctx, projectID, params, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateContainerResponse(rsp)
+}
+
+// CreateContainerWithResponse performs a POST /api/v1/projects/{projectID}/containers (the `CreateContainer` operationId) request.
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用。同一幂等键复用操作。.
+func (c *ClientWithResponses) CreateContainerWithResponse(ctx context.Context, projectID string, params *CreateContainerParams, body CreateContainerJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateContainerResponse, error) {
+	rsp, err := c.CreateContainer(ctx, projectID, params, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateContainerResponse(rsp)
+}
+
+// GetContainerWithResponse performs a GET /api/v1/projects/{projectID}/containers/{containerID} (the `GetContainer` operationId) request.
+//
+// 项目成员查询容器配置、执行与操作结果。.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) GetContainerWithResponse(ctx context.Context, projectID string, containerID string, reqEditors ...RequestEditorFn) (*GetContainerResponse, error) {
+	rsp, err := c.GetContainer(ctx, projectID, containerID, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetContainerResponse(rsp)
 }
 
 // ListProjectMembersWithResponse performs a GET /api/v1/projects/{projectID}/members (the `ListProjectMembers` operationId) request.
@@ -5397,6 +7192,32 @@ func (c *ClientWithResponses) GetProjectSecretValueWithResponse(ctx context.Cont
 	return ParseGetProjectSecretValueResponse(rsp)
 }
 
+// ListStaticSitesWithResponse performs a GET /api/v1/projects/{projectID}/sites (the `ListStaticSites` operationId) request.
+//
+// 按站点名称升序分页列出项目成员可见的静态站点。.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) ListStaticSitesWithResponse(ctx context.Context, projectID SiteProjectID, params *ListStaticSitesParams, reqEditors ...RequestEditorFn) (*ListStaticSitesResponse, error) {
+	rsp, err := c.ListStaticSites(ctx, projectID, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListStaticSitesResponse(rsp)
+}
+
+// ListStaticSiteVersionsWithResponse performs a GET /api/v1/projects/{projectID}/sites/{siteName}/versions (the `ListStaticSiteVersions` operationId) request.
+//
+// 按创建时间和版本标识降序分页列出站点版本摘要。.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) ListStaticSiteVersionsWithResponse(ctx context.Context, projectID SiteProjectID, siteName SiteName, params *ListStaticSiteVersionsParams, reqEditors ...RequestEditorFn) (*ListStaticSiteVersionsResponse, error) {
+	rsp, err := c.ListStaticSiteVersions(ctx, projectID, siteName, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListStaticSiteVersionsResponse(rsp)
+}
+
 // UploadStaticSiteVersionWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/sites/{siteName}/versions (the `UploadStaticSiteVersion` operationId) request,
 // with any type of body and a specified content type.
 //
@@ -5422,6 +7243,19 @@ func (c *ClientWithResponses) GetStaticSiteVersionWithResponse(ctx context.Conte
 		return nil, err
 	}
 	return ParseGetStaticSiteVersionResponse(rsp)
+}
+
+// DownloadStaticSiteArtifactWithResponse performs a GET /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/artifact (the `DownloadStaticSiteArtifact` operationId) request.
+//
+// 项目成员下载指定站点版本的原始 ZIP。.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) DownloadStaticSiteArtifactWithResponse(ctx context.Context, projectID SiteProjectID, siteName SiteName, versionID string, reqEditors ...RequestEditorFn) (*DownloadStaticSiteArtifactResponse, error) {
+	rsp, err := c.DownloadStaticSiteArtifact(ctx, projectID, siteName, versionID, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDownloadStaticSiteArtifactResponse(rsp)
 }
 
 // PublishStaticSiteVersionWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/publish (the `PublishStaticSiteVersion` operationId) request,
@@ -5977,6 +7811,35 @@ func ParseGetBrowserSessionResponse(rsp *http.Response) (*GetBrowserSessionRespo
 	return response, nil
 }
 
+// ParseClickBrowserPageResponse parses an HTTP response from a ClickBrowserPageWithResponse call
+func ParseClickBrowserPageResponse(rsp *http.Response) (*ClickBrowserPageResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ClickBrowserPageResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case rsp.StatusCode == 204:
+		break // No content-type
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseGetBrowserConsoleResponse parses an HTTP response from a GetBrowserConsoleWithResponse call
 func ParseGetBrowserConsoleResponse(rsp *http.Response) (*GetBrowserConsoleResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -5998,6 +7861,72 @@ func ParseGetBrowserConsoleResponse(rsp *http.Response) (*GetBrowserConsoleRespo
 		}
 		response.JSON200 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCaptureBrowserDownloadResponse parses an HTTP response from a CaptureBrowserDownloadWithResponse call
+func ParseCaptureBrowserDownloadResponse(rsp *http.Response) (*CaptureBrowserDownloadResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CaptureBrowserDownloadResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest BrowserDownload
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetBrowserDownloadResponse parses an HTTP response from a GetBrowserDownloadWithResponse call
+func ParseGetBrowserDownloadResponse(rsp *http.Response) (*GetBrowserDownloadResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetBrowserDownloadResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
@@ -6149,6 +8078,284 @@ func ParseGetProjectCapacityResponse(rsp *http.Response) (*GetProjectCapacityRes
 			return nil, err
 		}
 		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseUpdateProjectCapacityResponse parses an HTTP response from a UpdateProjectCapacityWithResponse call
+func ParseUpdateProjectCapacityResponse(rsp *http.Response) (*UpdateProjectCapacityResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &UpdateProjectCapacityResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ProjectCapacity
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateContainerResponse parses an HTTP response from a CreateContainerWithResponse call
+func ParseCreateContainerResponse(rsp *http.Response) (*CreateContainerResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateContainerResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest Container
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest Container
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest Container
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest Container
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON429 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 200:
+		var headers CreateContainerResponse200Headers
+		if values := rsp.Header.Values("Location"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Location", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.Location = &value
+		}
+		response.Headers200 = &headers
+	case rsp.StatusCode == 201:
+		var headers CreateContainerResponse201Headers
+		if values := rsp.Header.Values("Location"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Location", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.Location = &value
+		}
+		response.Headers201 = &headers
+	case rsp.StatusCode == 409:
+		var headers CreateContainerResponse409Headers
+		if values := rsp.Header.Values("Location"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Location", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.Location = &value
+		}
+		response.Headers409 = &headers
+	case rsp.StatusCode == 422:
+		var headers CreateContainerResponse422Headers
+		if values := rsp.Header.Values("Location"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Location", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.Location = &value
+		}
+		response.Headers422 = &headers
+	case rsp.StatusCode == 429:
+		var headers CreateContainerResponse429Headers
+		if values := rsp.Header.Values("Location"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Location", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.Location = &value
+		}
+		response.Headers429 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseGetContainerResponse parses an HTTP response from a GetContainerWithResponse call
+func ParseGetContainerResponse(rsp *http.Response) (*GetContainerResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetContainerResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest Container
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error
@@ -6719,6 +8926,128 @@ func ParseGetProjectSecretValueResponse(rsp *http.Response) (*GetProjectSecretVa
 	return response, nil
 }
 
+// ParseListStaticSitesResponse parses an HTTP response from a ListStaticSitesWithResponse call
+func ParseListStaticSitesResponse(rsp *http.Response) (*ListStaticSitesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListStaticSitesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest StaticSitePage
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListStaticSiteVersionsResponse parses an HTTP response from a ListStaticSiteVersionsWithResponse call
+func ParseListStaticSiteVersionsResponse(rsp *http.Response) (*ListStaticSiteVersionsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListStaticSiteVersionsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest StaticSiteVersionPage
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseUploadStaticSiteVersionResponse parses an HTTP response from a UploadStaticSiteVersionWithResponse call
 func ParseUploadStaticSiteVersionResponse(rsp *http.Response) (*UploadStaticSiteVersionResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -6849,6 +9178,80 @@ func ParseGetStaticSiteVersionResponse(rsp *http.Response) (*GetStaticSiteVersio
 		}
 		response.JSONDefault = &dest
 
+	}
+
+	return response, nil
+}
+
+// ParseDownloadStaticSiteArtifactResponse parses an HTTP response from a DownloadStaticSiteArtifactWithResponse call
+func ParseDownloadStaticSiteArtifactResponse(rsp *http.Response) (*DownloadStaticSiteArtifactResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DownloadStaticSiteArtifactResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 200:
+		var headers DownloadStaticSiteArtifactResponse200Headers
+		if values := rsp.Header.Values("Content-Digest"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Content-Digest", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.ContentDigest = &value
+		}
+		if values := rsp.Header.Values("Content-Disposition"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Content-Disposition", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.ContentDisposition = &value
+		}
+		if values := rsp.Header.Values("Content-Length"); len(values) > 0 {
+			var value int64
+			if err := runtime.BindStyledParameterWithOptions("simple", "Content-Length", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: "int64"}); err != nil {
+				return nil, err
+			}
+			headers.ContentLength = &value
+		}
+		response.Headers200 = &headers
 	}
 
 	return response, nil
@@ -7228,8 +9631,17 @@ type ServerInterface interface {
 	// (GET /api/v1/projects/{projectID}/browser-sessions/{sessionID})
 	GetBrowserSession(c *gin.Context, projectID BrowserProjectID, sessionID BrowserSessionID)
 
+	// (POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/click)
+	ClickBrowserPage(c *gin.Context, projectID BrowserProjectID, sessionID BrowserSessionID)
+
 	// (GET /api/v1/projects/{projectID}/browser-sessions/{sessionID}/console)
 	GetBrowserConsole(c *gin.Context, projectID BrowserProjectID, sessionID BrowserSessionID)
+
+	// (POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/downloads)
+	CaptureBrowserDownload(c *gin.Context, projectID BrowserProjectID, sessionID BrowserSessionID)
+
+	// (GET /api/v1/projects/{projectID}/browser-sessions/{sessionID}/downloads/{downloadID})
+	GetBrowserDownload(c *gin.Context, projectID BrowserProjectID, sessionID BrowserSessionID, downloadID openapi_types.UUID)
 
 	// (POST /api/v1/projects/{projectID}/browser-sessions/{sessionID}/navigate)
 	NavigateBrowserSession(c *gin.Context, projectID BrowserProjectID, sessionID BrowserSessionID)
@@ -7242,6 +9654,15 @@ type ServerInterface interface {
 
 	// (GET /api/v1/projects/{projectID}/capacity)
 	GetProjectCapacity(c *gin.Context, projectID string)
+
+	// (PATCH /api/v1/projects/{projectID}/capacity)
+	UpdateProjectCapacity(c *gin.Context, projectID string)
+
+	// (POST /api/v1/projects/{projectID}/containers)
+	CreateContainer(c *gin.Context, projectID string, params CreateContainerParams)
+
+	// (GET /api/v1/projects/{projectID}/containers/{containerID})
+	GetContainer(c *gin.Context, projectID string, containerID string)
 
 	// (GET /api/v1/projects/{projectID}/members)
 	ListProjectMembers(c *gin.Context, projectID string)
@@ -7273,11 +9694,20 @@ type ServerInterface interface {
 	// (GET /api/v1/projects/{projectID}/secrets/{name}/versions/{version}/value)
 	GetProjectSecretValue(c *gin.Context, projectID string, name string, version int)
 
+	// (GET /api/v1/projects/{projectID}/sites)
+	ListStaticSites(c *gin.Context, projectID SiteProjectID, params ListStaticSitesParams)
+
+	// (GET /api/v1/projects/{projectID}/sites/{siteName}/versions)
+	ListStaticSiteVersions(c *gin.Context, projectID SiteProjectID, siteName SiteName, params ListStaticSiteVersionsParams)
+
 	// (POST /api/v1/projects/{projectID}/sites/{siteName}/versions)
 	UploadStaticSiteVersion(c *gin.Context, projectID SiteProjectID, siteName SiteName)
 
 	// (GET /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID})
 	GetStaticSiteVersion(c *gin.Context, projectID SiteProjectID, siteName SiteName, versionID string)
+
+	// (GET /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/artifact)
+	DownloadStaticSiteArtifact(c *gin.Context, projectID SiteProjectID, siteName SiteName, versionID string)
 
 	// (POST /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/publish)
 	PublishStaticSiteVersion(c *gin.Context, projectID SiteProjectID, siteName SiteName, versionID string)
@@ -7522,6 +9952,40 @@ func (siw *ServerInterfaceWrapper) GetBrowserSession(c *gin.Context) {
 	siw.Handler.GetBrowserSession(c, projectID, sessionID)
 }
 
+// ClickBrowserPage operation middleware
+func (siw *ServerInterfaceWrapper) ClickBrowserPage(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID BrowserProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "sessionID" -------------
+	var sessionID BrowserSessionID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "sessionID", c.Param("sessionID"), &sessionID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter sessionID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ClickBrowserPage(c, projectID, sessionID)
+}
+
 // GetBrowserConsole operation middleware
 func (siw *ServerInterfaceWrapper) GetBrowserConsole(c *gin.Context) {
 
@@ -7554,6 +10018,83 @@ func (siw *ServerInterfaceWrapper) GetBrowserConsole(c *gin.Context) {
 	}
 
 	siw.Handler.GetBrowserConsole(c, projectID, sessionID)
+}
+
+// CaptureBrowserDownload operation middleware
+func (siw *ServerInterfaceWrapper) CaptureBrowserDownload(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID BrowserProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "sessionID" -------------
+	var sessionID BrowserSessionID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "sessionID", c.Param("sessionID"), &sessionID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter sessionID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.CaptureBrowserDownload(c, projectID, sessionID)
+}
+
+// GetBrowserDownload operation middleware
+func (siw *ServerInterfaceWrapper) GetBrowserDownload(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID BrowserProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "sessionID" -------------
+	var sessionID BrowserSessionID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "sessionID", c.Param("sessionID"), &sessionID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter sessionID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "downloadID" -------------
+	var downloadID openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "downloadID", c.Param("downloadID"), &downloadID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter downloadID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetBrowserDownload(c, projectID, sessionID, downloadID)
 }
 
 // NavigateBrowserSession operation middleware
@@ -7690,6 +10231,117 @@ func (siw *ServerInterfaceWrapper) GetProjectCapacity(c *gin.Context) {
 	}
 
 	siw.Handler.GetProjectCapacity(c, projectID)
+}
+
+// UpdateProjectCapacity operation middleware
+func (siw *ServerInterfaceWrapper) UpdateProjectCapacity(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.UpdateProjectCapacity(c, projectID)
+}
+
+// CreateContainer operation middleware
+func (siw *ServerInterfaceWrapper) CreateContainer(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CreateContainerParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey string
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.CreateContainer(c, projectID, params)
+}
+
+// GetContainer operation middleware
+func (siw *ServerInterfaceWrapper) GetContainer(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "containerID" -------------
+	var containerID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "containerID", c.Param("containerID"), &containerID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter containerID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetContainer(c, projectID, containerID)
 }
 
 // ListProjectMembers operation middleware
@@ -7987,6 +10639,103 @@ func (siw *ServerInterfaceWrapper) GetProjectSecretValue(c *gin.Context) {
 	siw.Handler.GetProjectSecretValue(c, projectID, name, version)
 }
 
+// ListStaticSites operation middleware
+func (siw *ServerInterfaceWrapper) ListStaticSites(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID SiteProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListStaticSitesParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", c.Request.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter cursor: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ListStaticSites(c, projectID, params)
+}
+
+// ListStaticSiteVersions operation middleware
+func (siw *ServerInterfaceWrapper) ListStaticSiteVersions(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID SiteProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "siteName" -------------
+	var siteName SiteName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "siteName", c.Param("siteName"), &siteName, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter siteName: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListStaticSiteVersionsParams
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", c.Request.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter limit: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Optional query parameter "cursor" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cursor", c.Request.URL.Query(), &params.Cursor, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter cursor: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.ListStaticSiteVersions(c, projectID, siteName, params)
+}
+
 // UploadStaticSiteVersion operation middleware
 func (siw *ServerInterfaceWrapper) UploadStaticSiteVersion(c *gin.Context) {
 
@@ -8062,6 +10811,49 @@ func (siw *ServerInterfaceWrapper) GetStaticSiteVersion(c *gin.Context) {
 	}
 
 	siw.Handler.GetStaticSiteVersion(c, projectID, siteName, versionID)
+}
+
+// DownloadStaticSiteArtifact operation middleware
+func (siw *ServerInterfaceWrapper) DownloadStaticSiteArtifact(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID SiteProjectID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "siteName" -------------
+	var siteName SiteName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "siteName", c.Param("siteName"), &siteName, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter siteName: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "versionID" -------------
+	var versionID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "versionID", c.Param("versionID"), &versionID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter versionID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.DownloadStaticSiteArtifact(c, projectID, siteName, versionID)
 }
 
 // PublishStaticSiteVersion operation middleware
@@ -8253,18 +11045,25 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID", wrapper.GetProject)
 	router.PATCH(options.BaseURL+"/api/v1/projects/:projectID", wrapper.RenameProject)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/capacity", wrapper.GetProjectCapacity)
+	router.PATCH(options.BaseURL+"/api/v1/projects/:projectID/capacity", wrapper.UpdateProjectCapacity)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/members", wrapper.ListProjectMembers)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/members", wrapper.UpsertProjectMember)
 	router.DELETE(options.BaseURL+"/api/v1/projects/:projectID/members/:userID", wrapper.RemoveProjectMember)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions", wrapper.CreateBrowserSession)
 	router.DELETE(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID", wrapper.CloseBrowserSession)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID", wrapper.GetBrowserSession)
+	router.POST(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID/click", wrapper.ClickBrowserPage)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID/navigate", wrapper.NavigateBrowserSession)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID/console", wrapper.GetBrowserConsole)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID/screenshots", wrapper.CaptureBrowserScreenshot)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID/screenshots/:screenshotID", wrapper.DownloadBrowserScreenshot)
+	router.GET(options.BaseURL+"/api/v1/projects/:projectID/sites", wrapper.ListStaticSites)
+	router.POST(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID/downloads", wrapper.CaptureBrowserDownload)
+	router.GET(options.BaseURL+"/api/v1/projects/:projectID/browser-sessions/:sessionID/downloads/:downloadID", wrapper.GetBrowserDownload)
+	router.GET(options.BaseURL+"/api/v1/projects/:projectID/sites/:siteName/versions", wrapper.ListStaticSiteVersions)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/sites/:siteName/versions", wrapper.UploadStaticSiteVersion)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/sites/:siteName/versions/:versionID", wrapper.GetStaticSiteVersion)
+	router.GET(options.BaseURL+"/api/v1/projects/:projectID/sites/:siteName/versions/:versionID/artifact", wrapper.DownloadStaticSiteArtifact)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/sites/:siteName/versions/:versionID/publish", wrapper.PublishStaticSiteVersion)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/secrets", wrapper.ListProjectSecrets)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/secrets", wrapper.CreateProjectSecretVersion)
@@ -8272,6 +11071,8 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/secrets/:name/versions/:version/value", wrapper.GetProjectSecretValue)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/workers/:name/deployments", wrapper.DeployWorker)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/worker-deployments/:deploymentID", wrapper.GetWorkerDeployment)
+	router.POST(options.BaseURL+"/api/v1/projects/:projectID/containers", wrapper.CreateContainer)
+	router.GET(options.BaseURL+"/api/v1/projects/:projectID/containers/:containerID", wrapper.GetContainer)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/s3-bindings", wrapper.CreateS3Binding)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/s3-bindings/:name", wrapper.GetS3Binding)
 }

@@ -32,7 +32,7 @@ Cloudlet 在一台 Linux 服务器上管理计算资源。本地开发在成员�
 | internal/controlplane | 管理 HTTP 接口 |
 | internal/database | PostgreSQL 连接、迁移版本、账号与项目数据 |
 | internal/operations | 操作记录的幂等登记、按项目查询与阶段推进 |
-| internal/capacity | 主机与项目容量的事务预留、容器绑定、确认释放与占用查询 |
+| internal/capacity | 主机与项目容量的事务预留、容器绑定、确认释放、占用查询与项目额度调整 |
 | internal/executions | 容量准入后的容器启动、绑定校验、失败清理与确认释放 |
 | internal/staticdeploy | 静态站点 ZIP 的保存、解包、不可变版本登记与首次发布 |
 | internal/apigen | OpenAPI 生成的类型、Gin 接口和客户端 |
@@ -45,12 +45,13 @@ Cloudlet 在一台 Linux 服务器上管理计算资源。本地开发在成员�
 | internal/workerpublish | 首个无状态 Worker 的产物、预检、容量准入、执行与路由激活 |
 | internal/durableobjects | SQLite 命名空间、类绑定和存储挂载路径 |
 | runtimes/workers | TypeScript Worker 构建命令与示例入口 |
-| internal/containers | Docker Engine 镜像摘要准备、容器生命周期、回环端口或内部网络端点观测、HTTP 就绪探测与宿主配额支持报告 |
+| internal/containers | Docker Engine 镜像摘要准备、容器生命周期、项目隔离 bridge 网络管理、回环端口或内部网络端点观测、HTTP 就绪探测与宿主配额支持报告 |
+| internal/containerpublish | 首个容器的镜像准备、容量准入、真实启动、HTTP 就绪与项目域名路由激活 |
 | internal/browser | 复用容器管理的 Playwright 会话 |
 | pkg/client | CLI 与其他客户端共享的 API 客户端 |
-| internal/mcpserver | 只读 MCP 项目与操作查询，复用管理 API 会话权限 |
+| internal/mcpserver | MCP 项目查询、Worker 发布与操作查询，复用管理 API 会话权限 |
 
-PostgreSQL 当前保存账号、登录会话、项目、操作记录、项目凭据、项目路由、容量预留、静态站点版本、浏览器会话以及 Worker 部署与执行记录。首个无状态 Worker 可以通过管理 API 发布并访问。Durable Objects 的运行配置与存储能力通过独立 workerd 集成验证。
+PostgreSQL 当前保存账号、登录会话、项目、操作记录、项目凭据、项目路由、容量预留、静态站点版本、浏览器会话、容器与执行记录以及 Worker 部署与执行记录。首个无状态 Worker 可以通过管理 API 发布并访问。Durable Objects 的运行配置与存储能力通过独立 workerd 集成验证。
 
 项目拥有稳定的 project_id。创建项目在事务内写入项目和创建者的 owner 成员记录。项目列表和单项目读取同时校验当前会话账号的项目成员关系。项目成员列表对所有成员开放；所有者可以按邮箱把已有账号添加为 developer 或 viewer，或更新已有成员的角色，创建者的 owner 身份保持不变。非成员访问返回 404，成员越权修改返回 403。
 
@@ -69,11 +70,16 @@ PostgreSQL 当前保存账号、登录会话、项目、操作记录、项目凭
 | /api/v1/environment | GET | 返回当前实例与数据库版本，需要登录 |
 | /api/v1/projects | GET、POST | 列出当前用户可见项目，创建项目并授予创建者 owner 角色 |
 | /api/v1/projects/{projectID} | GET | 读取当前用户可访问的项目 |
-| /api/v1/projects/{projectID}/capacity | GET | 项目成员读取项目额度、活动预留占用与剩余量 |
+| /api/v1/projects/{projectID}/capacity | GET、PATCH | 项目成员读取项目额度、活动预留占用与剩余量；所有者调整项目额度 |
+| /api/v1/projects/{projectID}/containers | POST | 所有者或开发者从不可变镜像摘要创建容器，就绪后激活项目域名 |
+| /api/v1/projects/{projectID}/containers/{containerID} | GET | 项目成员查询容器配置、执行与操作结果 |
 | /api/v1/projects/{projectID}/operations | GET | 按时间升序读取项目内操作 |
 | /api/v1/projects/{projectID}/members | GET、POST | 列出项目成员；所有者添加已有账号或更新 developer/viewer 角色 |
+| /api/v1/projects/{projectID}/sites | GET | 项目成员按名称分页查询站点 |
+| /api/v1/projects/{projectID}/sites/{siteName}/versions | GET | 项目成员分页查询指定站点的版本摘要 |
 | /api/v1/projects/{projectID}/sites/{siteName}/versions | POST | 所有者上传 ZIP 并登记待激活版本 |
 | /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID} | GET | 项目成员查询指定版本及其产物摘要 |
+| /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/artifact | GET | 项目成员下载原始 ZIP 并读取内容摘要 |
 | /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/publish | POST | 所有者绑定域名、激活首个就绪版本并获取 Gateway 地址 |
 | /api/v1/projects/{projectID}/s3-bindings | POST | 所有者验证并登记 S3 绑定 |
 | /api/v1/projects/{projectID}/s3-bindings/{name} | GET | 项目成员查询 S3 绑定元数据和验证时间 |
@@ -82,7 +88,7 @@ PostgreSQL 当前保存账号、登录会话、项目、操作记录、项目凭
 | /api/v1/projects/{projectID}/secrets/{name}/versions/{version}/value | GET | 所有者读取指定版本的值 |
 | /api/v1/projects/{projectID}/workers/{name}/deployments | POST | 所有者或开发者发布首个无状态 Worker，按 Idempotency-Key 复用操作 |
 | /api/v1/projects/{projectID}/worker-deployments/{deploymentID} | GET | 项目成员查询版本、产物摘要、执行与 Operation 结果 |
-| /mcp | MCP Streamable HTTP | 使用当前会话查询可访问项目与项目操作 |
+| /mcp | MCP Streamable HTTP | 使用当前会话查询项目、发布 Worker 并查询项目操作 |
 
 S3 绑定按项目和名称存储。登记时引用本项目不可变的 Secret 版本。只有实际验证成功才保存元数据和验证时间。凭据值使用含有 `access_key_id`、`secret_access_key` 和可选 `session_token` 的 JSON 对象。登记时使用 AWS SDK 对指定桶执行 `HeadBucket`，成功表示所提供的凭据可以访问桶元数据。端点默认需要 HTTPS，开发环境允许回环 HTTP。
 
@@ -98,9 +104,13 @@ Gateway 使用配置中的 `host` 匹配请求域名，匹配时忽略大小写�
 
 创建单个站点处理器时可通过 `Options.SPAFallback` 启用导航回退，默认关闭。启用后，接受 `text/html` 的页面导航访问不存在且末段无扩展名的路径时，返回站点根目录的 `index.html`。静态文件请求和已有但缺少首页的目录仍返回 404。回退候选路径通过 `Vary` 声明导航相关请求头。
 
+站点列表按名称升序排列，版本列表按创建时间及版本标识降序排列。每页默认 50 条，最多 100 条。继续查询时将上一页返回的 `next_cursor` 传给同一接口。有新版本排在已读取位置之前时，它会出现在重新从首页发起的查询中。
+
 静态站点以项目和名称确定身份。所有者使用 `Content-Type: application/zip` 上传，服务保存原始 ZIP，再展开并登记版本。上传体上限为 64 MiB，展开上限为 256 MiB，ZIP 中央目录在完整解析前检查 10,000 个成员的上限。解包前拒绝超过 255 字节的路径分量。成功响应返回版本标识、SHA-256 摘要、`ready` 状态和用于查询的 `Location`。`ready` 表示文件已准备就绪。
 
 首次发布时，所有者提交一个不带端口的域名。服务先核对版本归属和入口文件，再在同一 PostgreSQL 事务中绑定域名根路由、记录激活版本并递增路由快照版本。快照生效后返回规范域名、版本标识和 Gateway 的 HTTP 地址。发布会保留该项目其他路由。启动配置保留的域名、其他项目已占用的域名和已有根路由均返回 409。相同版本和域名的请求可重试，首次发布接口拒绝切换已有发布的版本或域名。重启时从数据库恢复代理路由和静态站点路由。
+
+下载接口先验证项目成员权限和站点版本归属，再按版本摘要打开原始 ZIP 并流式返回。响应提供附件文件名、文件长度和 `Content-Digest`，并声明 `Cache-Control: private, no-store`。
 
 管理环境通过 PostgreSQL 保存账号与会话，使用 bcrypt 校验密码，使用 SCS 管理 HttpOnly 会话 Cookie。Cookie 名称包含实例名称，写入请求执行来源检查。开发账号经显式初始化流程创建，重复初始化保留已有密码。
 
@@ -122,7 +132,19 @@ API 与 Gateway 使用 HTTP 头读取超时和空闲连接超时。收到 SIGTER
 
 项目成员可通过 `GET /api/v1/projects/{projectID}/capacity` 查询项目额度、活动预留占用和剩余量。该接口在 REPEATABLE READ 只读事务中同时读取配额与占用，非成员请求返回 404。剩余量表示项目额度内的余量，实际启动同时受主机预算约束。
 
+项目所有者通过 `PATCH /api/v1/projects/{projectID}/capacity` 调整 CPU 毫核、内存字节与实例额度。请求必须提供三个正整数；非所有者、非成员与非法单位分别返回 403、404 与 400。写事务锁定项目配额行后读取活动预留，新额度低于任一活动预留占用时返回 409，事务回滚，原额度与运行中的执行保持不变。成功响应在同一事务内返回新额度、活动占用和剩余量。未配置配额的项目在所有者首次调整时创建配额。
+
 `internal/executions` 把容量预留接入 Docker 启动流程。`Start` 先按容器 CPU、内存与单个实例申请主机和项目容量，并在同一预留中持久化容器归属，预留成功后才创建并启动容器；容量不足时不会执行任何 Docker 操作。同一执行标识重试只能恢复原归属；更换归属、镜像或资源上限返回冲突，不会为同一预留创建第二个容器。创建失败时按确定性名称核对容器，没有容器才释放预留；存在本执行的容器时核对镜像与资源上限后恢复或复用。启动失败时先停止并删除已创建的容器，确认删除后才释放。清理或释放失败时保留预留并返回具体错误，避免平台超额分配。`Stop` 校验预留记录的主机、项目、容器归属和容器标识；记录标识存在而调用方标识不匹配时不会操作 Docker，也不会释放容量。尚未记录容器标识的预留按绑定归属查找，确认没有容器后释放。记录标识的容器已经不存在时同样按归属确认；找到其他标识时按归属清理但保留原绑定标识，使同一个 Stop 请求可以在释放失败后重试。重复停止保持幂等；已释放预留的重复停止直接返回，不按归属清理可能属于新执行的容器。确定性名称被归属标签不匹配的容器占用时，`Start` 和 `Stop` 返回归属错误并保留预留；运维需要先确认并移除该容器，再重试 `Stop` 释放容量。同一执行标识的并发启动和停止在进程内串行，执行结果不明时由调用方重试停止完成清理。主机预算由部署配置或上层管理接口扣除操作系统与固定服务后提供，容器按声明的上限申请剩余容量。
+
+## 容器创建
+
+`internal/containerpublish` 通过管理 API 创建首个 HTTP 容器。请求声明项目内名称、不可变镜像摘要、容器端口、公开域名、CPU 与内存，可选非 root 用户、命令、环境变量与就绪路径。镜像引用必须包含 `sha256` 摘要；标签引用、无效端口、无效域名、root 身份和越界就绪配置在写入状态前返回 400。
+
+服务在登记幂等 Operation 后保存不可变执行配置，按摘要准备镜像，登记项目初始配额并预留主机与项目容量。容量不足时不创建容器。预留成功后创建并启动真实容器，按 Docker 实际发布的回环端点和声明截止时间执行 HTTP 就绪探测。200 至 399 的最终状态视为就绪；超时、容器退出或端口未发布时不注册路由。就绪后在同一事务中登记活动执行、Docker 容器标识与项目根路由，递增路由快照版本，再由共享 Gateway 发布器应用快照。快照生效后 Operation 才进入成功终态。
+
+项目成员可以查询容器配置、最近执行与 Operation。确定失败时先停止并删除已创建容器，确认清理后释放容量，再记录失败原因与终态；清理或释放失败时保留容量和待处理执行。重复的幂等请求复用原 Operation，预登记阶段发生的名称或域名冲突也保留失败结果，已提交活动执行后的快照同步失败可以通过重复原请求完成。容器名称、域名和路由冲突返回 409。
+
+当前只支持首个容器的创建与公开访问。停止、再次启动与删除由后续任务接入；创建请求不接受数据卷声明，修改镜像或配置产生新执行、活动版本切换和旧执行排空也尚未接入。
 
 ## 执行环境
 
@@ -130,6 +152,8 @@ API 与 Gateway 使用 HTTP 头读取超时和空闲连接超时。收到 SIGTER
 
 平台通过 `workers` 配置显式设置产物目录、主机预算与项目初始配额，已有配额保持原值。配置或 Docker 依赖不可用时终止启动。PostgreSQL 会话锁约束同一主机的 Worker 控制器，连接失效后取消正在执行的发布、拒绝新发布并报告就绪失败，已有执行继续运行。模块预检或就绪失败时先确认容器删除，再释放容量并记录失败原因。激活提交结果不明时保留执行与容量。活动版本和路由提交后发生快照同步错误时，重复原请求可以完成同步和操作收尾。
 
-Workers 集成 workerd，支持原生 Durable Object SQLite 绑定。真实运行时测试验证对象隔离和重启后的持久化。workers.Preflight 使用固定 workerd 在发布前验证模块载入和初始化阶段。容器管理使用 Docker Engine API。internal/containers 按不可变摘要准备镜像，核对本地镜像报告的摘要后才用于创建容器，已缓存且摘要一致的镜像直接复用。适配器提供创建、启动、观测、停止和删除受管理容器的操作，按环境、项目、资源和执行序号写入归属标签与确定性名称，在启动、观测、停止和删除前核对名称和标签，并可按确定性名称查找已有容器。published 模式在启动后读取实际发布的回环端口，并可按实际发布的回环端点、接受状态码与截止时间等待 HTTP 就绪。network 模式加入已有的用户定义 bridge 网络，为执行注册稳定的网络别名，并读取容器在该网络中的实际地址与端口。超时、容器退出或端点未发布时返回失败观测。`containers.ProbeHostLimits` 读取 Docker Engine 报告的主机信息，按 CPU CFS 配额与周期、内存、PIDs 和 nofile 报告宿主支持范围；真实 Docker 验收在受限容器中运行有限负载，核对各项触发结果与清理。internal/executions 在该适配器之上完成容量准入、失败清理与确认释放。管理 API 与 Gateway 注册由上层任务接入。Browser Run 复用容器生命周期，并通过 Playwright 实现浏览器操作。
+Workers 集成 workerd，支持原生 Durable Object SQLite 绑定。真实运行时测试验证对象隔离和重启后的持久化。workers.Preflight 使用固定 workerd 在发布前验证模块载入和初始化阶段。容器管理使用 Docker Engine API。internal/containers 按不可变摘要准备镜像，核对本地镜像报告的摘要后才用于创建容器，已缓存且摘要一致的镜像直接复用。适配器提供创建、启动、观测、停止和删除受管理容器的操作，按环境、项目、资源和执行序号写入归属标签与确定性名称，在启动、观测、停止和删除前核对名称和标签，并可按确定性名称查找已有容器。published 模式在启动后读取实际发布的回环端口，并可按实际发布的回环端点、接受状态码与截止时间等待 HTTP 就绪。network 模式加入该项目的平台管理 bridge 网络，为执行注册稳定的网络别名，并读取容器在该网络中的实际地址与端口。超时、容器退出或端点未发布时返回失败观测。`containers.ProbeHostLimits` 读取 Docker Engine 报告的主机信息，按 CPU CFS 配额与周期、内存、PIDs 和 nofile 报告宿主支持范围；真实 Docker 验收在受限容器中运行有限负载，核对各项触发结果与清理。internal/executions 在该适配器之上完成容量准入、失败清理与确认释放。容器管理 API 与 Gateway 注册由 internal/containerpublish 接入，Worker 由 internal/workerpublish 接入。Browser Run 复用容器生命周期，并通过 Playwright 实现浏览器操作。
+
+项目网络由 `internal/containers` 按环境和项目生成确定性名称，写入环境、项目、component=runtime 和 resource=network 归属标签。`EnsureNetwork` 返回已有网络或在不存在时创建，同一项目已存在其他名称的管理网络时返回冲突而不是创建第二个网络。`FindNetwork` 和 `RemoveNetwork` 只接受规范名称与全部归属标签均匹配的网络，未管理网络或其他项目的网络返回 `ErrNetworkNotOwned`。容器 `Create` 在创建前后、`Start` 在启动前核对网络存在、bridge 形状、规范名称与项目标签；网络缺失返回 `ErrNetworkNotFound`，归属不符返回 `ErrNetworkNotOwned`。`RemoveNetwork` 在删除前列出包括已停止容器在内的全部引用，仍有容器时返回 `ErrNetworkInUse`，删除后再次核对网络已不存在。
 
 执行单元、配额、隔离、状态恢复与独占交接遵循执行环境设计。对应模块完成时，同步提供 [真实业务验收](testing.md)。
