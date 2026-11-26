@@ -8,7 +8,7 @@
 | npm run lint:config | JSON、YAML、Issue 表单与 Actions 约定 |
 | npm run lint:tooling | 脚本语法、ShellCheck、配置文件与真实端口检查 |
 | make test | Go race 测试、真实 HTTP、Gateway 转发与服务停止 |
-| make test-integration | Docker 中的 PostgreSQL 迁移、账号、会话、项目与成员角色、操作记录、项目凭据、路由快照、容量预留、容器容量准入、项目容量查询、就绪检查、workerd 执行和容器创建、启动、观测、HTTP 就绪探测、配额触发、停止与删除 |
+| make test-integration | Docker 中的 PostgreSQL 迁移、账号、会话、项目与成员角色、操作记录、项目凭据、路由快照、容量预留、容器容量准入、项目容量查询与额度调整、就绪检查、workerd 执行、管理 API 容器创建与 Gateway 访问，以及容器启动、观测、HTTP 就绪探测、配额触发、停止与删除 |
 | make web-check | TypeScript、ESLint、Prettier、Vite 构建与接口生成一致性 |
 | make dev-check | 真实本机进程、数据库、热重载、完整停止、多实例与失败清理 |
 | make test-e2e | 真实 Chromium 在桌面和手机尺寸下完成登录、刷新和退出 |
@@ -68,6 +68,20 @@ go test -race -count=1 -tags=integration ./internal/executions
 
 用例在四核四 GiB 主机预算下预占三核三 GiB 与三个实例，再并发提交八个一核一 GiB、单实例的容器启动请求。只有一个请求成功，其余返回容量不足且没有创建容器；成功启动的固定镜像通过实际发布的回环端口返回预期页面。仅停止容器时预留保持活动；停止并删除容器后容量恢复，后续申请可以再次成功。无效镜像导致创建失败时释放预留且不留下容器；无效用户使 Docker 启动失败时清理容器并释放预留。同一执行标识的并发启动只创建一个容器，并只扣减一次容量。同一执行更换归属或镜像、不同执行复用同一归属都会被拒绝；错误容器标识不会释放容量，绑定容器被外部删除后按归属确认清理。尚未记录容器标识的预留可以在确认没有容器后释放；替换容器清理后释放失败时，原 Stop 请求仍可使用原容器标识重试。256 至 512 字节的摘要固定镜像可以通过准入；Docker 创建失败时正常释放预留。生命周期用例使用真实 PostgreSQL 与 Docker，纯逻辑单元测试只覆盖构造与请求校验、绑定映射和复用配置比较。
 
+## 容器创建验收
+
+使用真实 PostgreSQL、Docker、管理 HTTP API 与 Gateway 验证首个容器创建、就绪和公开访问。
+
+```sh
+export DOCKER_HOST="$(docker context inspect --format '{{.Endpoints.docker.Host}}')"
+export TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock
+go test -race -count=1 -tags=integration -run TestContainerPublicationHTTP -v ./internal/containerpublish
+```
+
+用例创建真实项目与成员，验证查看者 403、非成员 404、未登录 401、缺少幂等键与无效请求 400。使用 configs/images.json 中固定镜像和摘要创建容器，核对 201 响应、Operation 成功、Docker 容器运行、归属标签、非 root 用户、CPU、内存、进程与文件句柄限制和回环端口。通过 Gateway 使用大小写与末尾句点变化的域名访问容器，核对实际 HTTP 响应。重复幂等请求返回 200 且不创建第二个容器；更换请求内容、容器名称或域名冲突返回 409，同名冲突和域名冲突使用同一幂等键重试时返回原失败结果。使用会立即退出的命令验证 422、失败原因、容器删除与容量释放；超额 CPU 返回 429 且不创建容器。查询接口验证项目成员可读、非成员返回 404。
+
+测试结束后清理所属容器。镜像缓存继续复用。
+
 ## 项目容量查询验收
 
 项目容量查询使用真实 PostgreSQL 和 HTTP 管理 API，验证项目成员读取项目额度、活动预留占用与剩余量。
@@ -77,6 +91,16 @@ go test -race -count=1 -tags=integration ./internal/controlplane
 ```
 
 用例创建两个实际预留，确认查询结果等于两项之和；释放其中一项后再次查询，确认占用减少且剩余量增加；查看者可以读取，非成员、未知项目和未配置配额返回 404，未登录返回 401。接口在 REPEATABLE READ 只读事务中读取配额和占用，两个值来自同一快照。剩余量只表示项目配额内的余量，不表示主机当前余量。
+
+## 项目额度调整验收
+
+项目额度调整使用真实 PostgreSQL、HTTP 管理 API 和实际 Docker 容器，验证所有者提高或降低额度、拒绝低于活动占用的设置，以及拒绝非法单位。
+
+```sh
+go test -race -count=1 -tags=integration -run 'TestProjectCapacityAdjustment' -v ./internal/controlplane
+```
+
+数据库用例先创建实际预留，确认所有者可以调高额度并取得同一事务内的额度、占用与剩余量；把 CPU、内存或实例额度分别降到占用以下时返回 409，额度与活动预留保持不变；额度等于占用时允许设置且剩余量为零；释放预留后可以继续降低。未配置配额的项目可以由所有者首次设置；查看者、开发者、非成员和未登录请求分别返回 403、403、404 和 401；零值、负值、缺失字段、小数、字符串、未知字段和多余 JSON 内容返回 400。并发降低额度与申请容量的用例确认两者恰好一个成功，最终占用不会超过额度。真实容器用例通过 `internal/executions` 启动固定 nginx 镜像，把额度调高后调低到容器占用以下，确认接口返回 409 且容器继续运行；停止并删除容器后才允许继续降低额度。
 
 ## 项目凭据验收
 
@@ -158,7 +182,9 @@ npm --prefix runtimes/browser run test:integration
 
 ## 容器执行适配器验收
 
-使用真实 Docker 启动 configs/images.json 中的固定镜像，读取适配器观测到的回环端口并请求预期响应。network 模式创建独立的用户定义 bridge 网络，核对容器没有发布主机端口，读取容器在该网络中的实际地址与稳定别名，并从同一网络的客户端容器通过 IP 与 DNS 名称分别发起真实 HTTP 请求。Docker Desktop 与 WSL2 中宿主机不能直接访问用户定义网络的容器地址，因此内部端点由同网络客户端验证。网络在创建与启动之间被删除时，启动返回 `ErrNetworkNotFound` 且容器保持 `created`；Docker 把网络 ID 前缀解析为其他网络时同样归类为 `ErrNetworkNotFound`。名称或归属标签不匹配的容器不会被启动、观测、停止或删除。停止和删除后容器、网络端点与端口释放。
+使用真实 Docker 启动 configs/images.json 中的固定镜像，读取适配器观测到的回环端口并请求预期响应。network 模式通过 `EnsureNetwork` 创建项目网络，核对容器没有发布主机端口，读取容器在该网络中的实际地址与稳定别名，并从同一网络的客户端容器通过 IP 与 DNS 名称分别发起真实 HTTP 请求。Docker Desktop 与 WSL2 中宿主机不能直接访问用户定义网络的容器地址，因此内部端点由同网络客户端验证。网络在创建与启动之间被删除时，启动返回 `ErrNetworkNotFound` 且容器保持 `created`；Docker 把网络 ID 前缀解析为其他网络时同样归类为 `ErrNetworkNotFound`。名称或归属标签不匹配的容器不会被启动、观测、停止或删除。停止和删除后容器、网络端点与端口释放。
+
+项目网络验收为两个项目分别创建网络，核对确定性名称、bridge/local 形状和全部归属标签，并从同一项目的客户端通过 IP 与稳定别名访问服务。另一个项目的客户端访问相同端点失败。容器加入另一项目的网络、未管理网络或标签不匹配的网络时返回 `ErrNetworkNotOwned`，不会创建容器。同一项目已存在其他名称的管理网络时 `EnsureNetwork` 返回冲突。网络仍有运行或已停止容器时删除返回 `ErrNetworkInUse`，删除容器后删除成功并确认网络不存在，重复删除返回 `ErrNetworkNotFound`。
 
 镜像准备使用真实 Docker Engine 和本地 registry。测试从空缓存按摘要拉取导入的测试镜像，核对返回的镜像标识与摘要；停止 registry 后再次准备，确认直接复用已核对摘要的本地镜像；再以不存在的摘要请求拉取，确认返回包含具体镜像引用的拉取失败。registry 镜像按 digest 固定，缺失时由 Docker Engine 拉取。
 
@@ -168,6 +194,8 @@ HTTP 就绪探测使用真实 Docker 启动延迟就绪、持续返回 503 和�
 make test-integration
 # 只运行容器适配器
 go test -race -count=1 -tags=integration ./internal/containers
+# 只运行项目网络生命周期、隔离与归属限制
+go test -race -count=1 -tags=integration -run TestAdapterProjectNetwork ./internal/containers
 # 只运行内部网络端点
 go test -race -count=1 -tags=integration -run TestAdapterNetworkAccess ./internal/containers
 # 只运行启动时的网络缺失与网络 ID 前缀回归

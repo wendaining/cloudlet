@@ -59,7 +59,7 @@ func (a *Adapter) Create(ctx context.Context, spec Spec) (Container, error) {
 		return Container{}, err
 	}
 	if spec.Access == AccessNetwork {
-		if err := a.checkNetwork(ctx, spec.Network); err != nil {
+		if err := a.checkNetwork(ctx, spec.Network, networkSpec(spec.Ownership)); err != nil {
 			return Container{}, fmt.Errorf("create container %s: %w", options.Name, err)
 		}
 	}
@@ -68,12 +68,30 @@ func (a *Adapter) Create(ctx context.Context, spec Spec) (Container, error) {
 		if cerrdefs.IsConflict(err) {
 			return Container{}, fmt.Errorf("create container %s: %w: %w", options.Name, ErrConflict, err)
 		}
+		// A network can disappear or be replaced between the pre-create check
+		// and the create call. Recheck it so callers get the network error
+		// instead of a generic Docker failure.
+		if spec.Access == AccessNetwork {
+			if networkErr := a.checkNetwork(ctx, spec.Network, networkSpec(spec.Ownership)); errors.Is(networkErr, ErrNetworkNotFound) || errors.Is(networkErr, ErrNetworkNotOwned) {
+				return Container{}, fmt.Errorf("create container %s: %w: %w", options.Name, networkErr, err)
+			}
+		}
 		return Container{}, fmt.Errorf("create container %s: %w", options.Name, err)
 	}
 	if err := validateContainerID(result.ID); err != nil {
 		return Container{}, fmt.Errorf("create container %s: %w", options.Name, err)
 	}
 	created := Container{ID: result.ID, Name: options.Name}
+	if spec.Access == AccessNetwork {
+		// The network can be replaced between the pre-create check and the
+		// create call. Recheck it after the container exists and remove the
+		// container when the project ownership no longer matches.
+		if err := a.checkNetwork(ctx, spec.Network, networkSpec(spec.Ownership)); err != nil {
+			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+			defer cancel()
+			return created, errors.Join(err, a.Remove(cleanupCtx, spec.Ownership, created.ID))
+		}
+	}
 	if len(spec.Files) > 0 {
 		if err := a.installFiles(ctx, created, spec); err != nil {
 			cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
@@ -117,10 +135,11 @@ func (a *Adapter) Find(ctx context.Context, ownership Ownership) (Observation, b
 }
 
 // Start starts a container that belongs to the requested ownership. Starting a
-// running container is a no-op. In network mode the requested network is
-// checked again before starting, and a missing network returns
-// ErrNetworkNotFound instead of ErrNotFound while the container remains in its
-// previous state.
+// running container is a no-op. In network mode the project network is checked
+// again before starting, and a missing network returns ErrNetworkNotFound
+// instead of ErrNotFound while the container remains in its previous state. A
+// network that no longer carries the project ownership labels returns
+// ErrNetworkNotOwned.
 func (a *Adapter) Start(ctx context.Context, ownership Ownership, id string) (Observation, error) {
 	info, err := a.inspectOwned(ctx, ownership, id)
 	if err != nil {
@@ -132,7 +151,7 @@ func (a *Adapter) Start(ctx context.Context, ownership Ownership, id string) (Ob
 	if !info.State.Running {
 		networkName := managedNetworkMode(info)
 		if networkName != "" {
-			if err := a.checkNetwork(ctx, networkName); err != nil {
+			if err := a.checkNetwork(ctx, networkName, networkSpec(ownership)); err != nil {
 				return Observation{}, fmt.Errorf("start container %s: %w", id, err)
 			}
 		}
@@ -153,7 +172,7 @@ func (a *Adapter) networkStartError(ctx context.Context, ownership Ownership, id
 	_, inspectErr := a.inspectOwned(ctx, ownership, id)
 	switch {
 	case inspectErr == nil:
-		if err := a.checkNetwork(ctx, networkName); err != nil {
+		if err := a.checkNetwork(ctx, networkName, networkSpec(ownership)); err != nil {
 			if errors.Is(err, ErrNetworkNotFound) {
 				return fmt.Errorf("start container %s: %w: %w", id, ErrNetworkNotFound, startErr)
 			}
@@ -304,13 +323,21 @@ func dockerOperationError(operation, id string, err error) error {
 }
 
 func validateContainerID(id string) error {
+	return validateHexID("container", id)
+}
+
+func validateNetworkID(id string) error {
+	return validateHexID("network", id)
+}
+
+func validateHexID(kind, id string) error {
 	if len(id) < 12 || len(id) > 64 {
-		return fmt.Errorf("validate container ID %q: must contain 12 to 64 hexadecimal characters: %w", id, fs.ErrInvalid)
+		return fmt.Errorf("validate %s ID %q: must contain 12 to 64 hexadecimal characters: %w", kind, id, fs.ErrInvalid)
 	}
 	for index := 0; index < len(id); index++ {
 		char := id[index]
 		if !(char >= '0' && char <= '9' || char >= 'a' && char <= 'f' || char >= 'A' && char <= 'F') {
-			return fmt.Errorf("validate container ID %q: must contain only hexadecimal characters: %w", id, fs.ErrInvalid)
+			return fmt.Errorf("validate %s ID %q: must contain only hexadecimal characters: %w", kind, id, fs.ErrInvalid)
 		}
 	}
 	return nil
@@ -392,13 +419,14 @@ func (s Spec) createOptions() (client.ContainerCreateOptions, error) {
 	return options, nil
 }
 
-// checkNetwork verifies that the requested network exists and can host a
-// managed container. The network must be a local bridge network that is not a
-// config-only placeholder, because managed network endpoints rely on Docker's
-// embedded DNS for the stable alias. Network ownership and labels are not
-// verified here; callers must not pass project-controlled names before #154
-// provides network ownership.
-func (a *Adapter) checkNetwork(ctx context.Context, name string) error {
+// checkNetwork verifies that the requested network exists, can host a managed
+// container and carries the ownership labels of the container's project. The
+// network must be a local bridge network that is not a config-only
+// placeholder, because managed network endpoints rely on Docker's embedded DNS
+// for the stable alias. The canonical project name and the ownership labels
+// prevent a container from joining another project's network or an unmanaged
+// network.
+func (a *Adapter) checkNetwork(ctx context.Context, name string, spec NetworkSpec) error {
 	result, err := a.docker.NetworkInspect(ctx, name, client.NetworkInspectOptions{})
 	if err != nil {
 		if cerrdefs.IsNotFound(err) {
@@ -406,21 +434,24 @@ func (a *Adapter) checkNetwork(ctx context.Context, name string) error {
 		}
 		return fmt.Errorf("inspect network %q: %w", name, err)
 	}
-	return verifyNetwork(name, result.Network)
+	if err := verifyProjectNetwork(name, result.Network.Network, spec); err != nil {
+		return fmt.Errorf("inspect network %q: %w", name, err)
+	}
+	return nil
 }
 
-func verifyNetwork(name string, info network.Inspect) error {
+func verifyNetwork(name string, info network.Network) error {
 	if info.Name != name {
-		return fmt.Errorf("inspect network %q: Docker resolved network name %q: %w", name, info.Name, ErrNetworkNotFound)
+		return fmt.Errorf("Docker resolved network name %q: %w", info.Name, ErrNetworkNotFound)
 	}
 	if info.Scope != "local" {
-		return fmt.Errorf("inspect network %q: scope is %q, want local: %w", name, info.Scope, fs.ErrInvalid)
+		return fmt.Errorf("scope is %q, want local: %w", info.Scope, fs.ErrInvalid)
 	}
 	if info.Driver != "bridge" {
-		return fmt.Errorf("inspect network %q: driver is %q, want bridge: %w", name, info.Driver, fs.ErrInvalid)
+		return fmt.Errorf("driver is %q, want bridge: %w", info.Driver, fs.ErrInvalid)
 	}
 	if info.ConfigOnly {
-		return fmt.Errorf("inspect network %q: config-only networks cannot host containers: %w", name, fs.ErrInvalid)
+		return fmt.Errorf("config-only networks cannot host containers: %w", fs.ErrInvalid)
 	}
 	return nil
 }

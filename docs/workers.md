@@ -57,7 +57,11 @@ Worker 名称由小写字母、数字和单个连字符分隔的名称段组成�
 GET /api/v1/projects/{projectID}/worker-deployments/{deploymentID}
 ```
 
-查询返回不可变版本、最近执行与操作结果。Go 客户端使用 `pkg/client.PublishWorker` 和 `GetWorkerDeployment` 调用相同接口。MCP 的发布工具由 #47 接入。
+查询返回不可变版本、最近执行与操作结果。Go 客户端使用 `pkg/client.PublishWorker` 和 `GetWorkerDeployment` 调用相同接口。
+
+### MCP 发布
+
+客户端使用当前管理会话 Cookie 连接 `/mcp`。先调用 `get_project` 确认项目可访问，再用 `publish_worker` 提交 `project_id`、`name`、`idempotency_key`、`module`、`compatibility_date` 和 `hostname`。管理 API 核查项目所有者或开发者权限。可用结果包含 `worker_id`、`deployment_id`、`operation_id` 与 `operation_outcome`，随后可用 `get_operation` 和同一项目标识查询终态。已记录版本的发布失败也会返回操作标识。重试同一发布时复用原幂等键和参数。
 
 ### Durable Object 存储
 

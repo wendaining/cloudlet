@@ -389,54 +389,93 @@ func (s *Store) SetProjectQuota(ctx context.Context, projectID uuid.UUID, capaci
 	}
 	var result ProjectQuota
 	err := s.writeTransaction(ctx, func(tx *gorm.DB) error {
-		var projectCount int64
-		if err := tx.Raw("SELECT COUNT(*) FROM projects WHERE id = ?", projectID).Scan(&projectCount).Error; err != nil {
-			return fmt.Errorf("检查项目 %s: %w", projectID, err)
-		}
-		if projectCount == 0 {
-			return fmt.Errorf("%w: %s", ErrProjectNotFound, projectID)
-		}
-		now := currentTime()
-		row := projectQuotaRow{
-			ProjectID:   projectID,
-			CPUMillis:   capacity.CPUMillis,
-			MemoryBytes: capacity.MemoryBytes,
-			Instances:   capacity.Instances,
-			UpdatedAt:   now,
-		}
-		if err := tx.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "project_id"}},
-			DoNothing: true,
-		}).Create(&row).Error; err != nil {
-			return fmt.Errorf("登记项目 %s 的配额: %w", projectID, err)
-		}
-		var stored projectQuotaRow
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("project_id = ?", projectID).Take(&stored).Error; err != nil {
-			return fmt.Errorf("锁定项目 %s 的配额: %w", projectID, err)
-		}
-		used, err := projectUsage(tx, projectID, uuid.Nil)
-		if err != nil {
-			return err
-		}
-		if err := ensureCapacityAtLeast("项目", projectID.String(), capacity, used); err != nil {
-			return err
-		}
-		if err := tx.Model(&projectQuotaRow{}).Where("project_id = ?", projectID).Updates(map[string]any{
-			"cpu_millis":   capacity.CPUMillis,
-			"memory_bytes": capacity.MemoryBytes,
-			"instances":    capacity.Instances,
-			"updated_at":   now,
-		}).Error; err != nil {
-			return fmt.Errorf("更新项目 %s 的配额: %w", projectID, err)
-		}
-		result = ProjectQuota{ProjectID: projectID, Capacity: capacity, UpdatedAt: now}
-		return nil
+		quota, _, err := writeProjectQuota(tx, projectID, capacity)
+		result = quota
+		return err
 	})
 	if err != nil {
 		return ProjectQuota{}, err
 	}
 	return result, nil
+}
+
+// UpdateProjectQuota creates or updates a project quota and returns the new
+// limit with active usage and remaining capacity from the same transaction. A
+// limit below current active usage returns ErrQuotaInUse and leaves both the
+// stored quota and every reservation unchanged.
+func (s *Store) UpdateProjectQuota(ctx context.Context, projectID uuid.UUID, capacity Resources) (ProjectUsage, error) {
+	if projectID == uuid.Nil {
+		return ProjectUsage{}, fmt.Errorf("更新项目配额需要项目标识: %w", fs.ErrInvalid)
+	}
+	if err := capacity.validate(); err != nil {
+		return ProjectUsage{}, err
+	}
+	var result ProjectUsage
+	err := s.writeTransaction(ctx, func(tx *gorm.DB) error {
+		quota, used, err := writeProjectQuota(tx, projectID, capacity)
+		if err != nil {
+			return err
+		}
+		limit := quota.Capacity
+		result = ProjectUsage{
+			ProjectID: projectID,
+			Limit:     limit,
+			Used:      used,
+			Remaining: remainingResources(limit, used),
+		}
+		return nil
+	})
+	if err != nil {
+		return ProjectUsage{}, err
+	}
+	return result, nil
+}
+
+// writeProjectQuota updates the quota under the same row lock used by
+// reservations and returns the active usage read while the lock is held.
+func writeProjectQuota(tx *gorm.DB, projectID uuid.UUID, capacity Resources) (ProjectQuota, Resources, error) {
+	var projectCount int64
+	if err := tx.Raw("SELECT COUNT(*) FROM projects WHERE id = ?", projectID).Scan(&projectCount).Error; err != nil {
+		return ProjectQuota{}, Resources{}, fmt.Errorf("检查项目 %s: %w", projectID, err)
+	}
+	if projectCount == 0 {
+		return ProjectQuota{}, Resources{}, fmt.Errorf("%w: %s", ErrProjectNotFound, projectID)
+	}
+	now := currentTime()
+	row := projectQuotaRow{
+		ProjectID:   projectID,
+		CPUMillis:   capacity.CPUMillis,
+		MemoryBytes: capacity.MemoryBytes,
+		Instances:   capacity.Instances,
+		UpdatedAt:   now,
+	}
+	if err := tx.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "project_id"}},
+		DoNothing: true,
+	}).Create(&row).Error; err != nil {
+		return ProjectQuota{}, Resources{}, fmt.Errorf("登记项目 %s 的配额: %w", projectID, err)
+	}
+	var stored projectQuotaRow
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("project_id = ?", projectID).Take(&stored).Error; err != nil {
+		return ProjectQuota{}, Resources{}, fmt.Errorf("锁定项目 %s 的配额: %w", projectID, err)
+	}
+	used, err := projectUsage(tx, projectID, uuid.Nil)
+	if err != nil {
+		return ProjectQuota{}, Resources{}, err
+	}
+	if err := ensureCapacityAtLeast("项目", projectID.String(), capacity, used); err != nil {
+		return ProjectQuota{}, Resources{}, err
+	}
+	if err := tx.Model(&projectQuotaRow{}).Where("project_id = ?", projectID).Updates(map[string]any{
+		"cpu_millis":   capacity.CPUMillis,
+		"memory_bytes": capacity.MemoryBytes,
+		"instances":    capacity.Instances,
+		"updated_at":   now,
+	}).Error; err != nil {
+		return ProjectQuota{}, Resources{}, fmt.Errorf("更新项目 %s 的配额: %w", projectID, err)
+	}
+	return ProjectQuota{ProjectID: projectID, Capacity: capacity, UpdatedAt: now}, used, nil
 }
 
 // Reserve records capacity for an execution. The returned bool is true only

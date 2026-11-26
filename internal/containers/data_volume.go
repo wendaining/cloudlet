@@ -21,7 +21,7 @@ type DataVolume struct {
 }
 
 func (v DataVolume) validate(user string) error {
-	if err := validateIdentifier("volume name", v.Name); err != nil {
+	if err := validateIdentifier("data volume", "name", v.Name); err != nil {
 		return err
 	}
 	if !path.IsAbs(v.MountPath) || v.MountPath == "/" || path.Clean(v.MountPath) != v.MountPath ||

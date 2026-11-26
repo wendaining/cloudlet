@@ -20,6 +20,7 @@ import (
 	"github.com/wendaining/cloudlet/internal/browser"
 	"github.com/wendaining/cloudlet/internal/capacity"
 	"github.com/wendaining/cloudlet/internal/config"
+	"github.com/wendaining/cloudlet/internal/containerpublish"
 	"github.com/wendaining/cloudlet/internal/database"
 	"github.com/wendaining/cloudlet/internal/mcpserver"
 	"github.com/wendaining/cloudlet/internal/routes"
@@ -39,35 +40,48 @@ type handler struct {
 	config     config.Config
 	logger     *slog.Logger
 	workers    *workerpublish.Service
+	containers *containerpublish.Service
 }
 
 func NewHandler(store *database.Store, cfg config.Config, logger *slog.Logger) (http.Handler, func()) {
-	return newHandler(store, nil, nil, cfg, logger, nil, nil, nil)
+	return newHandler(store, nil, nil, cfg, logger, nil, nil, nil, nil)
 }
 
-// NewHandlerWithMCP mounts the read-only MCP endpoint on the management API.
+// NewHandlerWithMCP mounts the MCP endpoint on the management API.
 func NewHandlerWithMCP(store *database.Store, sites *staticdeploy.Service, browserService *browser.Service, cfg config.Config, logger *slog.Logger, apiEndpoint string) (http.Handler, func(), error) {
 	return NewHandlerWithMCPAndWorkers(store, sites, browserService, cfg, logger, apiEndpoint, nil, nil)
 }
 
 // NewHandlerWithMCPAndWorkers mounts the management API with Worker and site publication.
 func NewHandlerWithMCPAndWorkers(store *database.Store, sites *staticdeploy.Service, browserService *browser.Service, cfg config.Config, logger *slog.Logger, apiEndpoint string, publication *workerpublish.Service, siteRoutes *routes.Publisher) (http.Handler, func(), error) {
+	return NewHandlerWithMCPWorkersAndContainers(store, sites, browserService, cfg, logger, apiEndpoint, publication, siteRoutes, nil)
+}
+
+// NewHandlerWithMCPWorkersAndContainers mounts the management API with Worker
+// publication, static site publication and container creation.
+func NewHandlerWithMCPWorkersAndContainers(store *database.Store, sites *staticdeploy.Service, browserService *browser.Service, cfg config.Config, logger *slog.Logger, apiEndpoint string, publication *workerpublish.Service, siteRoutes *routes.Publisher, containers *containerpublish.Service) (http.Handler, func(), error) {
 	mcpHandler, err := mcpserver.NewHandler(apiEndpoint)
 	if err != nil {
 		return nil, nil, err
 	}
-	handler, cleanup := newHandler(store, sites, browserService, cfg, logger, mcpHandler, publication, siteRoutes)
+	handler, cleanup := newHandler(store, sites, browserService, cfg, logger, mcpHandler, publication, siteRoutes, containers)
 	return handler, cleanup, nil
 }
 
 // NewHandlerWithWorkers mounts the shared Worker publication API. The caller
 // owns publication and must close it after the HTTP handler stops.
 func NewHandlerWithWorkers(store *database.Store, cfg config.Config, logger *slog.Logger, publication *workerpublish.Service) (http.Handler, func()) {
-	return newHandler(store, nil, nil, cfg, logger, nil, publication, nil)
+	return newHandler(store, nil, nil, cfg, logger, nil, publication, nil, nil)
 }
 
-func newHandler(store *database.Store, sites *staticdeploy.Service, browserService *browser.Service, cfg config.Config, logger *slog.Logger, mcpHandler http.Handler, publication *workerpublish.Service, siteRoutes *routes.Publisher) (http.Handler, func()) {
-	h := &handler{store: store, sites: sites, siteRoutes: siteRoutes, browser: browserService, config: cfg, logger: logger, workers: publication}
+// NewHandlerWithContainers mounts the container creation API. The caller owns
+// containers and must close it after the HTTP handler stops.
+func NewHandlerWithContainers(store *database.Store, cfg config.Config, logger *slog.Logger, containers *containerpublish.Service) (http.Handler, func()) {
+	return newHandler(store, nil, nil, cfg, logger, nil, nil, nil, containers)
+}
+
+func newHandler(store *database.Store, sites *staticdeploy.Service, browserService *browser.Service, cfg config.Config, logger *slog.Logger, mcpHandler http.Handler, publication *workerpublish.Service, siteRoutes *routes.Publisher, containers *containerpublish.Service) (http.Handler, func()) {
+	h := &handler{store: store, sites: sites, siteRoutes: siteRoutes, browser: browserService, config: cfg, logger: logger, workers: publication, containers: containers}
 	router := gin.New()
 	router.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 	router.GET("/readyz", func(c *gin.Context) {
@@ -77,6 +91,15 @@ func newHandler(store *database.Store, sites *staticdeploy.Service, browserServi
 			if err := h.workers.Ready(ctx); err != nil {
 				h.logger.Error("Worker controller readiness failed", "error", err)
 				c.JSON(http.StatusServiceUnavailable, apigen.Error{Message: "Worker 控制器尚未就绪"})
+				return
+			}
+		}
+		if h.containers != nil {
+			ctx, cancel := context.WithTimeout(c.Request.Context(), time.Second)
+			defer cancel()
+			if err := h.containers.Ready(ctx); err != nil {
+				h.logger.Error("container controller readiness failed", "error", err)
+				c.JSON(http.StatusServiceUnavailable, apigen.Error{Message: "容器控制器尚未就绪"})
 				return
 			}
 		}
@@ -314,12 +337,66 @@ func (h *handler) GetProjectCapacity(c *gin.Context, projectID string) {
 		h.failure(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, apigen.ProjectCapacity{
-		ProjectId: usage.ProjectID,
-		Limit:     resourceAmounts(usage.Limit),
-		Used:      resourceAmounts(usage.Used),
-		Remaining: resourceAmounts(usage.Remaining),
-	})
+	c.JSON(http.StatusOK, projectCapacityResponse(usage))
+}
+
+// UpdateProjectCapacity adjusts the project quota for an owner. The capacity
+// store holds the quota row lock while checking active reservations, so a
+// limit below current usage is rejected without changing the quota or any
+// running execution.
+func (h *handler) UpdateProjectCapacity(c *gin.Context, projectID string) {
+	_, normalizedID, membership, ok := h.projectAccess(c, projectID)
+	if !ok {
+		return
+	}
+	if membership.Role != "owner" {
+		c.JSON(http.StatusForbidden, apigen.Error{Message: "只有项目所有者可以调整项目额度"})
+		return
+	}
+	var body apigen.UpdateProjectCapacityRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(c.Writer, c.Request.Body, 4096))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil {
+		c.JSON(http.StatusBadRequest, apigen.Error{Message: "项目额度请求格式无效"})
+		return
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		c.JSON(http.StatusBadRequest, apigen.Error{Message: "项目额度请求格式无效"})
+		return
+	}
+	resources := capacity.Resources{
+		CPUMillis:   body.CpuMillis,
+		MemoryBytes: body.MemoryBytes,
+		Instances:   body.Instances,
+	}
+	if resources.CPUMillis <= 0 || resources.MemoryBytes <= 0 || resources.Instances <= 0 {
+		c.JSON(http.StatusBadRequest, apigen.Error{Message: "项目额度需要正的 CPU 毫核、内存字节与实例数"})
+		return
+	}
+	capacityStore, err := capacity.NewStore(h.store.DB)
+	if err != nil {
+		h.failure(c, err)
+		return
+	}
+	usage, err := capacityStore.UpdateProjectQuota(c.Request.Context(), uuid.MustParse(normalizedID), resources)
+	if errors.Is(err, capacity.ErrQuotaInUse) {
+		c.JSON(http.StatusConflict, apigen.Error{Message: err.Error()})
+		return
+	}
+	if errors.Is(err, capacity.ErrProjectNotFound) || errors.Is(err, capacity.ErrProjectQuotaNotFound) {
+		c.JSON(http.StatusNotFound, apigen.Error{Message: "项目不存在或没有访问权限"})
+		return
+	}
+	if errors.Is(err, fs.ErrInvalid) {
+		c.JSON(http.StatusBadRequest, apigen.Error{Message: err.Error()})
+		return
+	}
+	if err != nil {
+		h.failure(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, projectCapacityResponse(usage))
 }
 
 func (h *handler) ListProjectMembers(c *gin.Context, projectID string) {
@@ -619,6 +696,15 @@ func resourceAmounts(resources capacity.Resources) apigen.ResourceAmounts {
 		CpuMillis:   resources.CPUMillis,
 		MemoryBytes: resources.MemoryBytes,
 		Instances:   resources.Instances,
+	}
+}
+
+func projectCapacityResponse(usage capacity.ProjectUsage) apigen.ProjectCapacity {
+	return apigen.ProjectCapacity{
+		ProjectId: usage.ProjectID,
+		Limit:     resourceAmounts(usage.Limit),
+		Used:      resourceAmounts(usage.Used),
+		Remaining: resourceAmounts(usage.Remaining),
 	}
 }
 

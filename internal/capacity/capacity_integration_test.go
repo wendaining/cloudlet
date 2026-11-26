@@ -247,6 +247,9 @@ func TestCapacityReservation(t *testing.T) {
 	t.Run("project quota across hosts", func(t *testing.T) {
 		testProjectQuotaAcrossHosts(t, ctx, store, databaseStore, owner.ID)
 	})
+	t.Run("project quota adjustment", func(t *testing.T) {
+		testProjectQuotaAdjustment(t, ctx, store, databaseStore, owner.ID)
+	})
 	t.Run("concurrent last capacity", func(t *testing.T) {
 		testConcurrentLastCapacity(t, ctx, store, databaseStore, owner.ID)
 	})
@@ -512,6 +515,148 @@ func testProjectQuotaAcrossHosts(t *testing.T, ctx context.Context, store *capac
 	if _, err := store.SetProjectQuota(ctx, projectID, capacity.Resources{CPUMillis: 3000, MemoryBytes: 3 << 30, Instances: 3}); !errors.Is(err, capacity.ErrQuotaInUse) {
 		t.Fatalf("跨主机降低项目配额返回 %v，要求 ErrQuotaInUse", err)
 	}
+}
+
+func testProjectQuotaAdjustment(t *testing.T, ctx context.Context, store *capacity.Store, databaseStore *database.Store, ownerID string) {
+	t.Helper()
+	projectID := createProject(t, ctx, databaseStore, ownerID, "额度调整项目")
+	hostID := "adjustment-" + uuid.NewString()
+	hostLimits := capacity.Resources{CPUMillis: 8000, MemoryBytes: 8 << 30, Instances: 8}
+	setHost(t, ctx, store, hostID, hostLimits)
+	setProjectQuota(t, ctx, store, projectID, capacity.Resources{CPUMillis: 4000, MemoryBytes: 4 << 30, Instances: 4})
+
+	first, created, err := store.Reserve(ctx, capacity.Request{
+		ExecutionID: uuid.New(), HostID: hostID, ProjectID: projectID,
+		Resources: capacity.Resources{CPUMillis: 3000, MemoryBytes: 3 << 30, Instances: 2},
+	})
+	if err != nil || !created {
+		t.Fatalf("额度调整前预留返回 %t, %v", created, err)
+	}
+
+	usage, err := store.UpdateProjectQuota(ctx, projectID, capacity.Resources{CPUMillis: 6000, MemoryBytes: 6 << 30, Instances: 6})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := capacity.ProjectUsage{
+		ProjectID: projectID,
+		Limit:     capacity.Resources{CPUMillis: 6000, MemoryBytes: 6 << 30, Instances: 6},
+		Used:      first.Resources,
+		Remaining: capacity.Resources{CPUMillis: 3000, MemoryBytes: 3 << 30, Instances: 4},
+	}
+	if !reflect.DeepEqual(usage, expected) {
+		t.Fatalf("调高额度返回 %+v，预期 %+v", usage, expected)
+	}
+
+	for name, limit := range map[string]capacity.Resources{
+		"CPU":       {CPUMillis: 2999, MemoryBytes: 6 << 30, Instances: 6},
+		"memory":    {CPUMillis: 6000, MemoryBytes: (3 << 30) - 1, Instances: 6},
+		"instances": {CPUMillis: 6000, MemoryBytes: 6 << 30, Instances: 1},
+	} {
+		t.Run("below usage "+name, func(t *testing.T) {
+			if _, err := store.UpdateProjectQuota(ctx, projectID, limit); !errors.Is(err, capacity.ErrQuotaInUse) {
+				t.Fatalf("额度低于当前占用返回 %v，要求 ErrQuotaInUse", err)
+			}
+		})
+	}
+	current, err := store.ProjectUsage(ctx, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(current, expected) {
+		t.Fatalf("拒绝降低后额度变为 %+v，预期保持 %+v", current, expected)
+	}
+	active, err := store.GetReservation(ctx, projectID, first.ExecutionID)
+	if err != nil || active.State != capacity.Active {
+		t.Fatalf("拒绝降低后预留状态为 %+v, %v", active, err)
+	}
+
+	exact := capacity.Resources{CPUMillis: 3000, MemoryBytes: 3 << 30, Instances: 2}
+	usage, err = store.UpdateProjectQuota(ctx, projectID, exact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected = capacity.ProjectUsage{ProjectID: projectID, Limit: exact, Used: first.Resources, Remaining: capacity.Resources{}}
+	if !reflect.DeepEqual(usage, expected) {
+		t.Fatalf("额度等于占用返回 %+v，预期 %+v", usage, expected)
+	}
+	if _, _, err := store.Reserve(ctx, capacity.Request{
+		ExecutionID: uuid.New(), HostID: hostID, ProjectID: projectID,
+		Resources: capacity.Resources{CPUMillis: 1, MemoryBytes: 1, Instances: 1},
+	}); !errors.Is(err, capacity.ErrInsufficientCapacity) {
+		t.Fatalf("额度用尽后继续申请返回 %v，要求 ErrInsufficientCapacity", err)
+	}
+
+	if _, err := store.Release(ctx, projectID, first.ExecutionID); err != nil {
+		t.Fatal(err)
+	}
+	usage, err = store.UpdateProjectQuota(ctx, projectID, capacity.Resources{CPUMillis: 1, MemoryBytes: 1, Instances: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected = capacity.ProjectUsage{
+		ProjectID: projectID,
+		Limit:     capacity.Resources{CPUMillis: 1, MemoryBytes: 1, Instances: 1},
+		Used:      capacity.Resources{},
+		Remaining: capacity.Resources{CPUMillis: 1, MemoryBytes: 1, Instances: 1},
+	}
+	if !reflect.DeepEqual(usage, expected) {
+		t.Fatalf("释放后降低额度返回 %+v，预期 %+v", usage, expected)
+	}
+	if _, err := store.UpdateProjectQuota(ctx, projectID, capacity.Resources{}); !errors.Is(err, fs.ErrInvalid) {
+		t.Fatalf("非法额度返回 %v，要求 fs.ErrInvalid", err)
+	}
+	if _, err := store.UpdateProjectQuota(ctx, uuid.New(), capacity.Resources{CPUMillis: 1, MemoryBytes: 1, Instances: 1}); !errors.Is(err, capacity.ErrProjectNotFound) {
+		t.Fatalf("未知项目调整额度返回 %v，要求 ErrProjectNotFound", err)
+	}
+
+	t.Run("concurrent lower and reserve", func(t *testing.T) {
+		concurrentProject := createProject(t, ctx, databaseStore, ownerID, "并发额度调整项目")
+		concurrentHost := "adjustment-concurrent-" + uuid.NewString()
+		setHost(t, ctx, store, concurrentHost, hostLimits)
+		setProjectQuota(t, ctx, store, concurrentProject, capacity.Resources{CPUMillis: 4000, MemoryBytes: 4 << 30, Instances: 4})
+		if _, created, err := store.Reserve(ctx, capacity.Request{
+			ExecutionID: uuid.New(), HostID: concurrentHost, ProjectID: concurrentProject,
+			Resources: capacity.Resources{CPUMillis: 2000, MemoryBytes: 2 << 30, Instances: 2},
+		}); err != nil || !created {
+			t.Fatalf("并发调整前预留返回 %t, %v", created, err)
+		}
+
+		var lowerErr, reserveErr error
+		start := make(chan struct{})
+		var pending sync.WaitGroup
+		pending.Go(func() {
+			<-start
+			_, lowerErr = store.UpdateProjectQuota(ctx, concurrentProject, capacity.Resources{CPUMillis: 3000, MemoryBytes: 3 << 30, Instances: 3})
+		})
+		pending.Go(func() {
+			<-start
+			_, _, reserveErr = store.Reserve(ctx, capacity.Request{
+				ExecutionID: uuid.New(), HostID: concurrentHost, ProjectID: concurrentProject,
+				Resources: capacity.Resources{CPUMillis: 2000, MemoryBytes: 2 << 30, Instances: 2},
+			})
+		})
+		close(start)
+		pending.Wait()
+
+		if (lowerErr == nil) == (reserveErr == nil) {
+			t.Fatalf("并发降低额度与预留同时返回 lower=%v reserve=%v，要求恰好一个成功", lowerErr, reserveErr)
+		}
+		if lowerErr != nil && !errors.Is(lowerErr, capacity.ErrQuotaInUse) {
+			t.Fatalf("并发降低额度返回 %v", lowerErr)
+		}
+		if reserveErr != nil && !errors.Is(reserveErr, capacity.ErrInsufficientCapacity) {
+			t.Fatalf("并发预留返回 %v", reserveErr)
+		}
+		concurrentUsage, err := store.ProjectUsage(ctx, concurrentProject)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if concurrentUsage.Used.CPUMillis > concurrentUsage.Limit.CPUMillis ||
+			concurrentUsage.Used.MemoryBytes > concurrentUsage.Limit.MemoryBytes ||
+			concurrentUsage.Used.Instances > concurrentUsage.Limit.Instances {
+			t.Fatalf("并发调整后占用超过额度: %+v", concurrentUsage)
+		}
+	})
 }
 
 func testConcurrentLastCapacity(t *testing.T, ctx context.Context, store *capacity.Store, databaseStore *database.Store, ownerID string) {
