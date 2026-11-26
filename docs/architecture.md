@@ -45,7 +45,7 @@ Cloudlet 在一台 Linux 服务器上管理计算资源。本地开发在成员�
 | internal/workerpublish | 首个无状态 Worker 的产物、预检、容量准入、执行与路由激活 |
 | internal/durableobjects | SQLite 命名空间、类绑定和存储挂载路径 |
 | runtimes/workers | TypeScript Worker 构建命令与示例入口 |
-| internal/containers | Docker Engine 镜像摘要准备、容器生命周期、回环端口或内部网络端点观测、HTTP 就绪探测与宿主配额支持报告 |
+| internal/containers | Docker Engine 镜像摘要准备、容器生命周期、项目隔离 bridge 网络管理、回环端口或内部网络端点观测、HTTP 就绪探测与宿主配额支持报告 |
 | internal/containerpublish | 首个容器的镜像准备、容量准入、真实启动、HTTP 就绪与项目域名路由激活 |
 | internal/browser | 复用容器管理的 Playwright 会话 |
 | pkg/client | CLI 与其他客户端共享的 API 客户端 |
@@ -146,6 +146,8 @@ API 与 Gateway 使用 HTTP 头读取超时和空闲连接超时。收到 SIGTER
 
 平台通过 `workers` 配置显式设置产物目录、主机预算与项目初始配额，已有配额保持原值。配置或 Docker 依赖不可用时终止启动。PostgreSQL 会话锁约束同一主机的 Worker 控制器，连接失效后取消正在执行的发布、拒绝新发布并报告就绪失败，已有执行继续运行。模块预检或就绪失败时先确认容器删除，再释放容量并记录失败原因。激活提交结果不明时保留执行与容量。活动版本和路由提交后发生快照同步错误时，重复原请求可以完成同步和操作收尾。
 
-Workers 集成 workerd，支持原生 Durable Object SQLite 绑定。真实运行时测试验证对象隔离和重启后的持久化。workers.Preflight 使用固定 workerd 在发布前验证模块载入和初始化阶段。容器管理使用 Docker Engine API。internal/containers 按不可变摘要准备镜像，核对本地镜像报告的摘要后才用于创建容器，已缓存且摘要一致的镜像直接复用。适配器提供创建、启动、观测、停止和删除受管理容器的操作，按环境、项目、资源和执行序号写入归属标签与确定性名称，在启动、观测、停止和删除前核对名称和标签，并可按确定性名称查找已有容器。published 模式在启动后读取实际发布的回环端口，并可按实际发布的回环端点、接受状态码与截止时间等待 HTTP 就绪。network 模式加入已有的用户定义 bridge 网络，为执行注册稳定的网络别名，并读取容器在该网络中的实际地址与端口。超时、容器退出或端点未发布时返回失败观测。`containers.ProbeHostLimits` 读取 Docker Engine 报告的主机信息，按 CPU CFS 配额与周期、内存、PIDs 和 nofile 报告宿主支持范围；真实 Docker 验收在受限容器中运行有限负载，核对各项触发结果与清理。internal/executions 在该适配器之上完成容量准入、失败清理与确认释放。容器管理 API 与 Gateway 注册由 internal/containerpublish 接入，Worker 由 internal/workerpublish 接入。Browser Run 复用容器生命周期，并通过 Playwright 实现浏览器操作。
+Workers 集成 workerd，支持原生 Durable Object SQLite 绑定。真实运行时测试验证对象隔离和重启后的持久化。workers.Preflight 使用固定 workerd 在发布前验证模块载入和初始化阶段。容器管理使用 Docker Engine API。internal/containers 按不可变摘要准备镜像，核对本地镜像报告的摘要后才用于创建容器，已缓存且摘要一致的镜像直接复用。适配器提供创建、启动、观测、停止和删除受管理容器的操作，按环境、项目、资源和执行序号写入归属标签与确定性名称，在启动、观测、停止和删除前核对名称和标签，并可按确定性名称查找已有容器。published 模式在启动后读取实际发布的回环端口，并可按实际发布的回环端点、接受状态码与截止时间等待 HTTP 就绪。network 模式加入该项目的平台管理 bridge 网络，为执行注册稳定的网络别名，并读取容器在该网络中的实际地址与端口。超时、容器退出或端点未发布时返回失败观测。`containers.ProbeHostLimits` 读取 Docker Engine 报告的主机信息，按 CPU CFS 配额与周期、内存、PIDs 和 nofile 报告宿主支持范围；真实 Docker 验收在受限容器中运行有限负载，核对各项触发结果与清理。internal/executions 在该适配器之上完成容量准入、失败清理与确认释放。容器管理 API 与 Gateway 注册由 internal/containerpublish 接入，Worker 由 internal/workerpublish 接入。Browser Run 复用容器生命周期，并通过 Playwright 实现浏览器操作。
+
+项目网络由 `internal/containers` 按环境和项目生成确定性名称，写入环境、项目、component=runtime 和 resource=network 归属标签。`EnsureNetwork` 返回已有网络或在不存在时创建，同一项目已存在其他名称的管理网络时返回冲突而不是创建第二个网络。`FindNetwork` 和 `RemoveNetwork` 只接受规范名称与全部归属标签均匹配的网络，未管理网络或其他项目的网络返回 `ErrNetworkNotOwned`。容器 `Create` 在创建前后、`Start` 在启动前核对网络存在、bridge 形状、规范名称与项目标签；网络缺失返回 `ErrNetworkNotFound`，归属不符返回 `ErrNetworkNotOwned`。`RemoveNetwork` 在删除前列出包括已停止容器在内的全部引用，仍有容器时返回 `ErrNetworkInUse`，删除后再次核对网络已不存在。
 
 执行单元、配额、隔离、状态恢复与独占交接遵循执行环境设计。对应模块完成时，同步提供 [真实业务验收](testing.md)。
