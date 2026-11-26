@@ -266,3 +266,15 @@ CI 的 Containers 任务在标准 Linux Docker 中执行同一用例；其他平
 | 数据与产物清理 | 活动数据与历史版本按保留规则存在，删除确认后清理所属资源，其他项目的数据保持可用 |
 
 隔离与资源限制按能力声明逐项验证，记录实际版本、平台、命令和结果。Docker 总配额与 Worker 级限制分别验收。跨 macOS、Linux、WSL2 的结果分别记录，已有的开发流程测试作为业务验收的基础。
+
+## Browser Run 会话隔离验收
+
+在启用 Docker 的 Linux 开发环境中运行：
+
+```sh
+go test -race -count=1 -tags=integration -run '^TestBrowserCookieAndDownloadIsolation$' -v ./internal/database
+```
+
+测试同时运行同项目的两个 Chromium 会话及另一个项目的一个会话。第一个会话登录本机测试站并下载文件，
+其余两个会话仍显示访客页面，下载命令返回 422，且没有创建新的产物。尝试用其他会话标识或其他项目凭据读取已保存产物时均返回 404。
+关闭第一个会话后，另外两个会话仍可导航。三个容器和预留全部释放后，原项目仍可通过正确的会话和产物标识下载已保存文件。
