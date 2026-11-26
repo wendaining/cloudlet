@@ -197,7 +197,7 @@ type Container struct {
 	Port                 int                `json:"port"`
 	ProjectId            openapi_types.UUID `json:"project_id"`
 
-	// State 容器目标状态，取值为 pending、active 或 failed。
+	// State 容器目标状态，取值为 pending、active、stopped 或 failed。
 	State  string `json:"state"`
 	Target string `json:"target"`
 	User   string `json:"user"`
@@ -543,6 +543,21 @@ type CreateContainerParams struct {
 	IdempotencyKey string `json:"Idempotency-Key"`
 }
 
+// DeleteContainerParams defines parameters for DeleteContainer.
+type DeleteContainerParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// RestartContainerParams defines parameters for RestartContainer.
+type RestartContainerParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
+// StopContainerParams defines parameters for StopContainer.
+type StopContainerParams struct {
+	IdempotencyKey string `json:"Idempotency-Key"`
+}
+
 // ListStaticSitesParams defines parameters for ListStaticSites.
 type ListStaticSitesParams struct {
 	Limit *StaticSitePageLimit `form:"limit,omitempty" json:"limit,omitempty"`
@@ -799,10 +814,25 @@ type ClientInterface interface {
 	// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用。同一幂等键复用操作。.
 	CreateContainer(ctx context.Context, projectID string, params *CreateContainerParams, body CreateContainerJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// DeleteContainer performs a DELETE /api/v1/projects/{projectID}/containers/{containerID} (the `DeleteContainer` operationId) request.
+	//
+	// 所有者或开发者删除容器，撤销公开路由并释放实际资源。删除确认后容器不再存在。同一幂等键重试返回相同结果。.
+	DeleteContainer(ctx context.Context, projectID string, containerID string, params *DeleteContainerParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetContainer performs a GET /api/v1/projects/{projectID}/containers/{containerID} (the `GetContainer` operationId) request.
 	//
 	// 项目成员查询容器配置、执行与操作结果。.
 	GetContainer(ctx context.Context, projectID string, containerID string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RestartContainer performs a POST /api/v1/projects/{projectID}/containers/{containerID}/restart (the `RestartContainer` operationId) request.
+	//
+	// 所有者或开发者使用最近保存的配置再次启动容器，就绪后重新注册公开路由。同一幂等键重试返回当前状态。.
+	RestartContainer(ctx context.Context, projectID string, containerID string, params *RestartContainerParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// StopContainer performs a POST /api/v1/projects/{projectID}/containers/{containerID}/stop (the `StopContainer` operationId) request.
+	//
+	// 所有者或开发者停止容器，先撤销公开路由，再停止并删除 Docker 容器，确认清理后释放容量。同一幂等键重试返回停止状态。.
+	StopContainer(ctx context.Context, projectID string, containerID string, params *StopContainerParams, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListProjectMembers performs a GET /api/v1/projects/{projectID}/members (the `ListProjectMembers` operationId) request.
 	//
@@ -1358,11 +1388,56 @@ func (c *Client) CreateContainer(ctx context.Context, projectID string, params *
 	return c.Client.Do(req)
 }
 
+// DeleteContainer performs a DELETE /api/v1/projects/{projectID}/containers/{containerID} (the `DeleteContainer` operationId) request.
+//
+// 所有者或开发者删除容器，撤销公开路由并释放实际资源。删除确认后容器不再存在。同一幂等键重试返回相同结果。.
+func (c *Client) DeleteContainer(ctx context.Context, projectID string, containerID string, params *DeleteContainerParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteContainerRequest(c.Server, projectID, containerID, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // GetContainer performs a GET /api/v1/projects/{projectID}/containers/{containerID} (the `GetContainer` operationId) request.
 //
 // 项目成员查询容器配置、执行与操作结果。.
 func (c *Client) GetContainer(ctx context.Context, projectID string, containerID string, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetContainerRequest(c.Server, projectID, containerID)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RestartContainer performs a POST /api/v1/projects/{projectID}/containers/{containerID}/restart (the `RestartContainer` operationId) request.
+//
+// 所有者或开发者使用最近保存的配置再次启动容器，就绪后重新注册公开路由。同一幂等键重试返回当前状态。.
+func (c *Client) RestartContainer(ctx context.Context, projectID string, containerID string, params *RestartContainerParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRestartContainerRequest(c.Server, projectID, containerID, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// StopContainer performs a POST /api/v1/projects/{projectID}/containers/{containerID}/stop (the `StopContainer` operationId) request.
+//
+// 所有者或开发者停止容器，先撤销公开路由，再停止并删除 Docker 容器，确认清理后释放容量。同一幂等键重试返回停止状态。.
+func (c *Client) StopContainer(ctx context.Context, projectID string, containerID string, params *StopContainerParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewStopContainerRequest(c.Server, projectID, containerID, params)
 	if err != nil {
 		return nil, err
 	}
@@ -2653,6 +2728,60 @@ func NewCreateContainerRequestWithBody(server string, projectID string, params *
 	return req, nil
 }
 
+// NewDeleteContainerRequest constructs an http.Request for the DeleteContainer method
+func NewDeleteContainerRequest(server string, projectID string, containerID string, params *DeleteContainerParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "containerID", containerID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/containers/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		var headerParam0 string
+
+		headerParam0, err = runtime.StyleParamWithOptions("simple", false, "Idempotency-Key", params.IdempotencyKey, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+		if err != nil {
+			return nil, err
+		}
+
+		req.Header.Set("Idempotency-Key", headerParam0)
+
+	}
+
+	return req, nil
+}
+
 // NewGetContainerRequest constructs an http.Request for the GetContainer method
 func NewGetContainerRequest(server string, projectID string, containerID string) (*http.Request, error) {
 	var err error
@@ -2689,6 +2818,114 @@ func NewGetContainerRequest(server string, projectID string, containerID string)
 	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
 	if err != nil {
 		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewRestartContainerRequest constructs an http.Request for the RestartContainer method
+func NewRestartContainerRequest(server string, projectID string, containerID string, params *RestartContainerParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "containerID", containerID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/containers/%s/restart", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		var headerParam0 string
+
+		headerParam0, err = runtime.StyleParamWithOptions("simple", false, "Idempotency-Key", params.IdempotencyKey, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+		if err != nil {
+			return nil, err
+		}
+
+		req.Header.Set("Idempotency-Key", headerParam0)
+
+	}
+
+	return req, nil
+}
+
+// NewStopContainerRequest constructs an http.Request for the StopContainer method
+func NewStopContainerRequest(server string, projectID string, containerID string, params *StopContainerParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "containerID", containerID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/containers/%s/stop", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+
+		var headerParam0 string
+
+		headerParam0, err = runtime.StyleParamWithOptions("simple", false, "Idempotency-Key", params.IdempotencyKey, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationHeader, Type: "string", Format: ""})
+		if err != nil {
+			return nil, err
+		}
+
+		req.Header.Set("Idempotency-Key", headerParam0)
+
 	}
 
 	return req, nil
@@ -3889,12 +4126,33 @@ type ClientWithResponsesInterface interface {
 	// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用。同一幂等键复用操作。.
 	CreateContainerWithResponse(ctx context.Context, projectID string, params *CreateContainerParams, body CreateContainerJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateContainerResponse, error)
 
+	// DeleteContainerWithResponse performs a DELETE /api/v1/projects/{projectID}/containers/{containerID} (the `DeleteContainer` operationId) request.
+	//
+	// 所有者或开发者删除容器，撤销公开路由并释放实际资源。删除确认后容器不再存在。同一幂等键重试返回相同结果。.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	DeleteContainerWithResponse(ctx context.Context, projectID string, containerID string, params *DeleteContainerParams, reqEditors ...RequestEditorFn) (*DeleteContainerResponse, error)
+
 	// GetContainerWithResponse performs a GET /api/v1/projects/{projectID}/containers/{containerID} (the `GetContainer` operationId) request.
 	//
 	// 项目成员查询容器配置、执行与操作结果。.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	GetContainerWithResponse(ctx context.Context, projectID string, containerID string, reqEditors ...RequestEditorFn) (*GetContainerResponse, error)
+
+	// RestartContainerWithResponse performs a POST /api/v1/projects/{projectID}/containers/{containerID}/restart (the `RestartContainer` operationId) request.
+	//
+	// 所有者或开发者使用最近保存的配置再次启动容器，就绪后重新注册公开路由。同一幂等键重试返回当前状态。.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	RestartContainerWithResponse(ctx context.Context, projectID string, containerID string, params *RestartContainerParams, reqEditors ...RequestEditorFn) (*RestartContainerResponse, error)
+
+	// StopContainerWithResponse performs a POST /api/v1/projects/{projectID}/containers/{containerID}/stop (the `StopContainer` operationId) request.
+	//
+	// 所有者或开发者停止容器，先撤销公开路由，再停止并删除 Docker 容器，确认清理后释放容量。同一幂等键重试返回停止状态。.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	StopContainerWithResponse(ctx context.Context, projectID string, containerID string, params *StopContainerParams, reqEditors ...RequestEditorFn) (*StopContainerResponse, error)
 
 	// ListProjectMembersWithResponse performs a GET /api/v1/projects/{projectID}/members (the `ListProjectMembers` operationId) request.
 	//
@@ -5343,6 +5601,96 @@ func (r CreateContainerResponse) ContentType() string {
 	return ""
 }
 
+type DeleteContainerResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *Error
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Error
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Error
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *Error
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *Error
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *Error
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r DeleteContainerResponse) GetJSON400() *Error {
+	return r.JSON400
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r DeleteContainerResponse) GetJSON401() *Error {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r DeleteContainerResponse) GetJSON403() *Error {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r DeleteContainerResponse) GetJSON404() *Error {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r DeleteContainerResponse) GetJSON409() *Error {
+	return r.JSON409
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r DeleteContainerResponse) GetJSON500() *Error {
+	return r.JSON500
+}
+
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r DeleteContainerResponse) GetJSON503() *Error {
+	return r.JSON503
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r DeleteContainerResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r DeleteContainerResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteContainerResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteContainerResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r DeleteContainerResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type GetContainerResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -5406,6 +5754,221 @@ func (r GetContainerResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetContainerResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type RestartContainerResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *Container
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *Error
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Error
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Error
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *Error
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
+	// JSON422 the response for an HTTP 422 `application/json` response
+	JSON422 *Container
+	// JSON429 the response for an HTTP 429 `application/json` response
+	JSON429 *Container
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *Error
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *Error
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r RestartContainerResponse) GetJSON200() *Container {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r RestartContainerResponse) GetJSON400() *Error {
+	return r.JSON400
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r RestartContainerResponse) GetJSON401() *Error {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r RestartContainerResponse) GetJSON403() *Error {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r RestartContainerResponse) GetJSON404() *Error {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r RestartContainerResponse) GetJSON409() *Error {
+	return r.JSON409
+}
+
+// GetJSON422 returns the response for an HTTP 422 `application/json` response
+func (r RestartContainerResponse) GetJSON422() *Container {
+	return r.JSON422
+}
+
+// GetJSON429 returns the response for an HTTP 429 `application/json` response
+func (r RestartContainerResponse) GetJSON429() *Container {
+	return r.JSON429
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r RestartContainerResponse) GetJSON500() *Error {
+	return r.JSON500
+}
+
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r RestartContainerResponse) GetJSON503() *Error {
+	return r.JSON503
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r RestartContainerResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r RestartContainerResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r RestartContainerResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RestartContainerResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r RestartContainerResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type StopContainerResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *Container
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *Error
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Error
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Error
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *Error
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
+	// JSON422 the response for an HTTP 422 `application/json` response
+	JSON422 *Container
+	// JSON500 the response for an HTTP 500 `application/json` response
+	JSON500 *Error
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *Error
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r StopContainerResponse) GetJSON200() *Container {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r StopContainerResponse) GetJSON400() *Error {
+	return r.JSON400
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r StopContainerResponse) GetJSON401() *Error {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r StopContainerResponse) GetJSON403() *Error {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r StopContainerResponse) GetJSON404() *Error {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r StopContainerResponse) GetJSON409() *Error {
+	return r.JSON409
+}
+
+// GetJSON422 returns the response for an HTTP 422 `application/json` response
+func (r StopContainerResponse) GetJSON422() *Container {
+	return r.JSON422
+}
+
+// GetJSON500 returns the response for an HTTP 500 `application/json` response
+func (r StopContainerResponse) GetJSON500() *Error {
+	return r.JSON500
+}
+
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r StopContainerResponse) GetJSON503() *Error {
+	return r.JSON503
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r StopContainerResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r StopContainerResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r StopContainerResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r StopContainerResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r StopContainerResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -7366,6 +7929,19 @@ func (c *ClientWithResponses) CreateContainerWithResponse(ctx context.Context, p
 	return ParseCreateContainerResponse(rsp)
 }
 
+// DeleteContainerWithResponse performs a DELETE /api/v1/projects/{projectID}/containers/{containerID} (the `DeleteContainer` operationId) request.
+//
+// 所有者或开发者删除容器，撤销公开路由并释放实际资源。删除确认后容器不再存在。同一幂等键重试返回相同结果。.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) DeleteContainerWithResponse(ctx context.Context, projectID string, containerID string, params *DeleteContainerParams, reqEditors ...RequestEditorFn) (*DeleteContainerResponse, error) {
+	rsp, err := c.DeleteContainer(ctx, projectID, containerID, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteContainerResponse(rsp)
+}
+
 // GetContainerWithResponse performs a GET /api/v1/projects/{projectID}/containers/{containerID} (the `GetContainer` operationId) request.
 //
 // 项目成员查询容器配置、执行与操作结果。.
@@ -7377,6 +7953,32 @@ func (c *ClientWithResponses) GetContainerWithResponse(ctx context.Context, proj
 		return nil, err
 	}
 	return ParseGetContainerResponse(rsp)
+}
+
+// RestartContainerWithResponse performs a POST /api/v1/projects/{projectID}/containers/{containerID}/restart (the `RestartContainer` operationId) request.
+//
+// 所有者或开发者使用最近保存的配置再次启动容器，就绪后重新注册公开路由。同一幂等键重试返回当前状态。.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) RestartContainerWithResponse(ctx context.Context, projectID string, containerID string, params *RestartContainerParams, reqEditors ...RequestEditorFn) (*RestartContainerResponse, error) {
+	rsp, err := c.RestartContainer(ctx, projectID, containerID, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRestartContainerResponse(rsp)
+}
+
+// StopContainerWithResponse performs a POST /api/v1/projects/{projectID}/containers/{containerID}/stop (the `StopContainer` operationId) request.
+//
+// 所有者或开发者停止容器，先撤销公开路由，再停止并删除 Docker 容器，确认清理后释放容量。同一幂等键重试返回停止状态。.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) StopContainerWithResponse(ctx context.Context, projectID string, containerID string, params *StopContainerParams, reqEditors ...RequestEditorFn) (*StopContainerResponse, error) {
+	rsp, err := c.StopContainer(ctx, projectID, containerID, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseStopContainerResponse(rsp)
 }
 
 // ListProjectMembersWithResponse performs a GET /api/v1/projects/{projectID}/members (the `ListProjectMembers` operationId) request.
@@ -8708,6 +9310,84 @@ func ParseCreateContainerResponse(rsp *http.Response) (*CreateContainerResponse,
 	return response, nil
 }
 
+// ParseDeleteContainerResponse parses an HTTP response from a DeleteContainerWithResponse call
+func ParseDeleteContainerResponse(rsp *http.Response) (*DeleteContainerResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteContainerResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case rsp.StatusCode == 204:
+		break // No content-type
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseGetContainerResponse parses an HTTP response from a GetContainerWithResponse call
 func ParseGetContainerResponse(rsp *http.Response) (*GetContainerResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -8742,6 +9422,191 @@ func ParseGetContainerResponse(rsp *http.Response) (*GetContainerResponse, error
 			return nil, err
 		}
 		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRestartContainerResponse parses an HTTP response from a RestartContainerWithResponse call
+func ParseRestartContainerResponse(rsp *http.Response) (*RestartContainerResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RestartContainerResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest Container
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest Container
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 429:
+		var dest Container
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON429 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseStopContainerResponse parses an HTTP response from a StopContainerWithResponse call
+func ParseStopContainerResponse(rsp *http.Response) (*StopContainerResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &StopContainerResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest Container
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest Container
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 500:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON500 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
 		var dest Error
@@ -10183,8 +11048,17 @@ type ServerInterface interface {
 	// (POST /api/v1/projects/{projectID}/containers)
 	CreateContainer(c *gin.Context, projectID string, params CreateContainerParams)
 
+	// (DELETE /api/v1/projects/{projectID}/containers/{containerID})
+	DeleteContainer(c *gin.Context, projectID string, containerID string, params DeleteContainerParams)
+
 	// (GET /api/v1/projects/{projectID}/containers/{containerID})
 	GetContainer(c *gin.Context, projectID string, containerID string)
+
+	// (POST /api/v1/projects/{projectID}/containers/{containerID}/restart)
+	RestartContainer(c *gin.Context, projectID string, containerID string, params RestartContainerParams)
+
+	// (POST /api/v1/projects/{projectID}/containers/{containerID}/stop)
+	StopContainer(c *gin.Context, projectID string, containerID string, params StopContainerParams)
 
 	// (GET /api/v1/projects/{projectID}/members)
 	ListProjectMembers(c *gin.Context, projectID string)
@@ -10838,6 +11712,67 @@ func (siw *ServerInterfaceWrapper) CreateContainer(c *gin.Context) {
 	siw.Handler.CreateContainer(c, projectID, params)
 }
 
+// DeleteContainer operation middleware
+func (siw *ServerInterfaceWrapper) DeleteContainer(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "containerID" -------------
+	var containerID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "containerID", c.Param("containerID"), &containerID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter containerID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteContainerParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey string
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.DeleteContainer(c, projectID, containerID, params)
+}
+
 // GetContainer operation middleware
 func (siw *ServerInterfaceWrapper) GetContainer(c *gin.Context) {
 
@@ -10870,6 +11805,128 @@ func (siw *ServerInterfaceWrapper) GetContainer(c *gin.Context) {
 	}
 
 	siw.Handler.GetContainer(c, projectID, containerID)
+}
+
+// RestartContainer operation middleware
+func (siw *ServerInterfaceWrapper) RestartContainer(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "containerID" -------------
+	var containerID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "containerID", c.Param("containerID"), &containerID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter containerID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params RestartContainerParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey string
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.RestartContainer(c, projectID, containerID, params)
+}
+
+// StopContainer operation middleware
+func (siw *ServerInterfaceWrapper) StopContainer(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "containerID" -------------
+	var containerID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "containerID", c.Param("containerID"), &containerID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter containerID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params StopContainerParams
+
+	headers := c.Request.Header
+
+	// ------------- Required header parameter "Idempotency-Key" -------------
+	if valueList, found := headers[http.CanonicalHeaderKey("Idempotency-Key")]; found {
+		var IdempotencyKey string
+		n := len(valueList)
+		if n != 1 {
+			siw.ErrorHandler(c, fmt.Errorf("Expected one value for Idempotency-Key, got %d", n), http.StatusBadRequest)
+			return
+		}
+
+		err = runtime.BindStyledParameterWithOptions("simple", "Idempotency-Key", valueList[0], &IdempotencyKey, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: true, Type: "string", Format: ""})
+		if err != nil {
+			siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter Idempotency-Key: %w", err), http.StatusBadRequest)
+			return
+		}
+
+		params.IdempotencyKey = IdempotencyKey
+
+	} else {
+		siw.ErrorHandler(c, fmt.Errorf("Header parameter Idempotency-Key is required, but not found"), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.StopContainer(c, projectID, containerID, params)
 }
 
 // ListProjectMembers operation middleware
@@ -11659,7 +12716,10 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/workers/:name/deployments", wrapper.DeployWorker)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/worker-deployments/:deploymentID", wrapper.GetWorkerDeployment)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/containers", wrapper.CreateContainer)
+	router.DELETE(options.BaseURL+"/api/v1/projects/:projectID/containers/:containerID", wrapper.DeleteContainer)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/containers/:containerID", wrapper.GetContainer)
+	router.POST(options.BaseURL+"/api/v1/projects/:projectID/containers/:containerID/stop", wrapper.StopContainer)
+	router.POST(options.BaseURL+"/api/v1/projects/:projectID/containers/:containerID/restart", wrapper.RestartContainer)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/postgres-bindings", wrapper.CreatePostgresBinding)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/postgres-bindings/:name", wrapper.GetPostgresBinding)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/s3-bindings", wrapper.CreateS3Binding)
