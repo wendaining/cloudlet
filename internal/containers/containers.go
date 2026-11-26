@@ -124,16 +124,17 @@ type Limits struct {
 // unmanaged network or a network owned by another project is rejected with
 // ErrNetworkNotOwned.
 type Spec struct {
-	Ownership Ownership
-	Image     string
-	User      string
-	Command   []string
-	Env       []string
-	Port      uint16
-	Access    AccessMode
-	Network   string
-	Limits    Limits
-	Files     []File
+	Ownership  Ownership
+	Image      string
+	User       string
+	Command    []string
+	Env        []string
+	Port       uint16
+	Access     AccessMode
+	Network    string
+	Limits     Limits
+	Files      []File
+	DataVolume *DataVolume
 
 	// ChromiumSeccompProfile enables the hardened Chromium container settings.
 	// It must come from platform configuration, not a management API request.
@@ -191,23 +192,24 @@ func (e NetworkEndpoint) IPAddress() string {
 // OpenFiles are the enforced limits reported by Docker. Endpoints contains
 // endpoints on user-defined bridge networks.
 type Observation struct {
-	ID          string
-	Name        string
-	Image       string
-	Status      string
-	Running     bool
-	ExitCode    int
-	Restarting  bool
-	OOMKilled   bool
-	StateError  string
-	FinishedAt  time.Time
-	CPUMillis   int64
-	MemoryBytes int64
-	PIDs        int64
-	OpenFiles   int64
-	Ports       []PublishedPort
-	FilesDigest string
-	Endpoints   []NetworkEndpoint
+	ID              string
+	Name            string
+	Image           string
+	Status          string
+	Running         bool
+	ExitCode        int
+	Restarting      bool
+	OOMKilled       bool
+	StateError      string
+	FinishedAt      time.Time
+	CPUMillis       int64
+	MemoryBytes     int64
+	PIDs            int64
+	OpenFiles       int64
+	Ports           []PublishedPort
+	FilesDigest     string
+	Endpoints       []NetworkEndpoint
+	WritableVolumes map[string]string
 }
 
 // Validate reports whether the ownership can identify a managed container.
@@ -336,6 +338,11 @@ func (s Spec) validate() error {
 	}
 	if err := validateUser(s.User); err != nil {
 		return err
+	}
+	if s.DataVolume != nil {
+		if err := s.DataVolume.validate(s.User); err != nil {
+			return err
+		}
 	}
 	if err := s.validateAccess(); err != nil {
 		return err
@@ -532,6 +539,14 @@ func observe(info container.InspectResponse) (Observation, error) {
 			if limit.Name == "nofile" {
 				observation.OpenFiles = limit.Soft
 			}
+		}
+	}
+	for _, mount := range info.Mounts {
+		if mount.Type == "volume" && mount.RW {
+			if observation.WritableVolumes == nil {
+				observation.WritableVolumes = make(map[string]string)
+			}
+			observation.WritableVolumes[mount.Destination] = mount.Name
 		}
 	}
 	ports, err := publishedPorts(info.NetworkSettings)

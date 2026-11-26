@@ -47,7 +47,19 @@ func (s *Service) Navigate(ctx context.Context, projectID, id uuid.UUID, value s
 	if err != nil {
 		return Navigation{}, err
 	}
-	return s.navigate(ctx, endpoint+"/navigate", id, value)
+	page, err := s.navigate(ctx, endpoint+"/navigate", id, value)
+	if errors.Is(err, ErrNavigationTimeout) || errors.Is(err, ErrNavigation) {
+		recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+		defer cancel()
+		message := ErrNavigation.Error()
+		if errors.Is(err, ErrNavigationTimeout) {
+			message = ErrNavigationTimeout.Error()
+		}
+		if recordErr := s.store.RecordBrowserSessionError(recordCtx, projectID, id, s.hostID, message); recordErr != nil {
+			return Navigation{}, errors.Join(err, fmt.Errorf("record browser navigation failure: %w", recordErr))
+		}
+	}
+	return page, err
 }
 
 func (s *Service) runtimeEndpoint(ctx context.Context, session database.BrowserSession) (string, error) {

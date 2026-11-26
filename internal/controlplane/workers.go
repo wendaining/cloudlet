@@ -39,7 +39,7 @@ func (h *handler) DeployWorker(c *gin.Context, projectID, name string, params ap
 		return
 	}
 	var request workerpublish.Request
-	decoder := json.NewDecoder(http.MaxBytesReader(c.Writer, c.Request.Body, 6*workerpublish.MaxModuleBytes+4096))
+	decoder := json.NewDecoder(http.MaxBytesReader(c.Writer, c.Request.Body, 6*workerpublish.MaxModuleBytes+(64<<10)))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&request); err != nil {
 		c.JSON(http.StatusBadRequest, apigen.Error{Message: "Worker 发布请求格式无效"})
@@ -58,7 +58,7 @@ func (h *handler) DeployWorker(c *gin.Context, projectID, name string, params ap
 		switch {
 		case errors.Is(err, fs.ErrInvalid):
 			c.JSON(http.StatusBadRequest, apigen.Error{Message: err.Error()})
-		case errors.Is(err, database.ErrWorkerAlreadyActive), errors.Is(err, database.ErrWorkerPublicationPending), errors.Is(err, database.ErrRouteConflict), errors.Is(err, operations.ErrIdempotencyConflict), errors.Is(err, workerpublish.ErrPublicationIncomplete):
+		case errors.Is(err, database.ErrWorkerAlreadyActive), errors.Is(err, database.ErrWorkerPublicationPending), errors.Is(err, database.ErrWorkerHostnameChanged), errors.Is(err, database.ErrWorkerDeploymentNotReady), errors.Is(err, database.ErrRouteConflict), errors.Is(err, operations.ErrIdempotencyConflict), errors.Is(err, workerpublish.ErrPublicationIncomplete):
 			c.JSON(http.StatusConflict, apigen.Error{Message: err.Error()})
 		default:
 			h.logger.Error("Worker publication failed", "project", normalizedID, "operation", result.Operation.ID, "error", err)
@@ -111,6 +111,43 @@ func (h *handler) GetWorkerDeployment(c *gin.Context, projectID, deploymentID st
 	c.JSON(http.StatusOK, workerDeploymentResponse(result))
 }
 
+func (h *handler) ActivateWorkerDeployment(c *gin.Context, projectID, deploymentID string) {
+	_, normalizedID, membership, ok := h.projectAccess(c, projectID)
+	if !ok {
+		return
+	}
+	if membership.Role != "owner" && membership.Role != "developer" {
+		c.JSON(http.StatusForbidden, apigen.Error{Message: "只有项目所有者和开发者可以激活 Worker 版本"})
+		return
+	}
+	if h.workers == nil {
+		c.JSON(http.StatusServiceUnavailable, apigen.Error{Message: "Worker 执行环境未配置"})
+		return
+	}
+	id, err := uuid.Parse(deploymentID)
+	if err != nil || id == uuid.Nil {
+		c.JSON(http.StatusNotFound, apigen.Error{Message: "Worker 版本不存在"})
+		return
+	}
+	op, err := h.workers.Activate(c.Request.Context(), uuid.MustParse(normalizedID), id)
+	switch {
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		c.JSON(http.StatusNotFound, apigen.Error{Message: "Worker 版本不存在"})
+	case errors.Is(err, database.ErrWorkerDeploymentNotReady), errors.Is(err, database.ErrRouteConflict):
+		c.JSON(http.StatusConflict, apigen.Error{Message: err.Error()})
+	case errors.Is(err, workerpublish.ErrRuntimeNotReady):
+		c.JSON(http.StatusUnprocessableEntity, apigen.Error{Message: err.Error()})
+	case err != nil:
+		h.failure(c, err)
+	default:
+		c.JSON(http.StatusOK, operationResponse(op))
+	}
+}
+
+func operationResponse(op operations.Operation) apigen.Operation {
+	return apigen.Operation{Id: op.ID, Action: op.Action, Phase: string(op.Phase), Outcome: string(op.Outcome), CreatedAt: op.CreatedAt, UpdatedAt: op.UpdatedAt}
+}
+
 func deploymentLocation(projectID string, id uuid.UUID) string {
 	return fmt.Sprintf("/api/v1/projects/%s/worker-deployments/%s", projectID, id)
 }
@@ -121,7 +158,7 @@ func workerDeploymentResponse(result workerpublish.Result) apigen.WorkerDeployme
 		Id: d.ID, ProjectId: d.ProjectID, WorkerId: d.WorkerID, ExecutionId: e.ID, OperationId: d.OperationID,
 		ArtifactDigest: d.ArtifactDigest, ConfigDigest: d.ConfigDigest, Entry: d.Entry,
 		CompatibilityDate: d.CompatibilityDate, RuntimeVersion: d.RuntimeVersion, RuntimeImage: d.RuntimeImage,
-		Hostname: d.Hostname, CpuMillis: d.CPUMillis, MemoryBytes: d.MemoryBytes, State: d.State, Failure: d.Failure,
+		CompatibilityFlags: d.CompatibilityFlags, Hostname: d.Hostname, CpuMillis: d.CPUMillis, MemoryBytes: d.MemoryBytes, State: d.State, Failure: d.Failure,
 		ContainerId: e.ContainerID, ExecutionState: e.State, Generation: int64(e.Generation),
 		OperationPhase: string(o.Phase), OperationOutcome: string(o.Outcome), CreatedAt: d.CreatedAt,
 	}
