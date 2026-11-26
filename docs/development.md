@@ -47,6 +47,8 @@ make dev 检查配置与端口，使用 compose.yaml 和 compose.dev.yaml 启动
 
 开发入口在实例配置中启用 Worker 首发，产物保存到 `.local/实例名称/workers`。主机预算与项目初始配额均配置为 4000 CPU 毫核、四 GiB 内存与四个实例。已有项目配额保持原值。每个 Worker 执行申请 1000 CPU 毫核、256 MiB 内存与一个实例。发布方法见 [Worker 发布](workers.md)。
 
+开发入口同时启用容器创建，与 Worker 共享同一主机预算和项目初始配额。创建请求使用不可变镜像摘要，容器就绪后通过 Gateway 访问所声明的域名。接口、限制和失败清理见 [容器创建与公开访问](containers.md)。
+
 开发账号使用 CLOUDLET_DEV_EMAIL 与 CLOUDLET_DEV_PASSWORD，走正常登录流程。后续启动保留数据库中已有的账号与密码。生产环境禁止执行开发账号初始化。
 
 | 命令 | 行为 |
@@ -98,7 +100,7 @@ Go 源码变化后由 Air 重新编译并启动后端。编译失败时停止旧
 
 Ctrl+C、SIGTERM 和 make dev-stop 停止本实例的应用进程、执行容器与数据库。停止保留数据库、数据卷与本地配置。reset 需要 CONFIRM 与实例名称完全一致，保留配置、日志和镜像缓存。
 
-执行模块创建容器、网络和数据卷时使用以下标签。管理数据库使用 component=database，执行资源使用 component=runtime。容器适配器按环境、项目、资源和执行序号写入归属标签与确定性名称，并在启动、观测、停止和删除前核对。
+执行模块创建容器、网络和数据卷时使用以下标签。管理数据库使用 component=database，执行资源使用 component=runtime。容器适配器按环境、项目、资源和执行序号写入归属标签与确定性名称，并在启动、观测、停止和删除前核对。项目网络使用环境、项目、component=runtime 和 resource=network 标签，不记录执行序号；网络名称由环境和项目确定，加入和删除网络前核对全部标签。
 
 | 标签 | 值 |
 | --- | --- |
@@ -140,3 +142,7 @@ make dev
 发起 `DELETE` 到会话 endpoint 可以主动关闭会话，响应状态为 `closed`，重复调用仍返回终态。要检查自动回收，可在启动 `make dev` 的终端执行 `export CLOUDLET_BROWSER_SESSION_SECONDS=15`。该值只影响随后创建的会话，有效范围为 5 到 300 秒，默认 300 秒。
 
 验收时分别创建一个主动关闭和一个等到期的会话。在会话运行时通过 `docker ps` 的 `io.cloudlet.resource=browser-<会话 ID>` 标签查到容器；关闭或到期后，对原容器执行 `docker inspect` 应查不到。在管理 API 查询会话应返回 `closed`，随后可在同一默认配额下创建新会话。
+
+验证管理进程重启接管时，先创建会话、导航并记录 Docker 容器标识。只重启 Go 管理进程，随后对原会话执行截图，核对仍为原页面并确认容器 ID 与启动时间一致。关闭的会话与管理进程停止期间已到期的会话重新连接时应返回 409；查询会话元数据应显示终态。
+
+验收浏览器下载时，在本地页面放置一个文件下载链接。导航后向会话地址的 `/downloads` 发送 POST，JSON 提供链接的 CSS selector。用项目登录会话访问返回的 download_url，比较文件原始字节和 SHA-256。超过 8 MiB 的下载应返回 422，原有产物可继续访问。

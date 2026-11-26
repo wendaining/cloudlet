@@ -15,6 +15,7 @@ import (
 	"github.com/moby/moby/client"
 	"github.com/wendaining/cloudlet/internal/browser"
 	"github.com/wendaining/cloudlet/internal/config"
+	"github.com/wendaining/cloudlet/internal/containerpublish"
 	"github.com/wendaining/cloudlet/internal/controlplane"
 	"github.com/wendaining/cloudlet/internal/database"
 	"github.com/wendaining/cloudlet/internal/gateway"
@@ -71,6 +72,12 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 				logger.Error("close browser screenshot storage", "error", err)
 			}
 		}()
+		recoveryCtx, stopRecovery := context.WithTimeout(ctx, time.Minute)
+		err = browserService.Restore(recoveryCtx)
+		stopRecovery()
+		if err != nil {
+			return fmt.Errorf("restore Browser Run sessions: %w", err)
+		}
 	}
 	proxy, err := gateway.NewHandler(cfg, logger)
 	if err != nil {
@@ -87,19 +94,31 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 		}
 	}
 	var publication *workerpublish.Service
-	if cfg.Workers != nil {
+	var containersService *containerpublish.Service
+	if cfg.Workers != nil || cfg.Containers != nil {
 		docker, err := client.New(client.FromEnv, client.WithAPIVersionNegotiation())
 		if err != nil {
-			return fmt.Errorf("configure Worker Docker client: %w", err)
+			return fmt.Errorf("configure runtime Docker client: %w", err)
 		}
 		defer func() { runErr = errors.Join(runErr, docker.Close()) }()
-		startupCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
-		publication, err = workerpublish.NewService(startupCtx, store, docker, publisher, *cfg.Workers, cfg.Instance)
-		cancel()
-		if err != nil {
-			return fmt.Errorf("configure Worker publication: %w", err)
+		if cfg.Workers != nil {
+			startupCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+			publication, err = workerpublish.NewService(startupCtx, store, docker, publisher, *cfg.Workers, cfg.Instance)
+			cancel()
+			if err != nil {
+				return fmt.Errorf("configure Worker publication: %w", err)
+			}
+			defer func() { runErr = errors.Join(runErr, publication.Close()) }()
 		}
-		defer func() { runErr = errors.Join(runErr, publication.Close()) }()
+		if cfg.Containers != nil {
+			startupCtx, cancel := context.WithTimeout(ctx, time.Minute)
+			containersService, err = containerpublish.NewService(startupCtx, store, docker, publisher, *cfg.Containers, cfg.Instance)
+			cancel()
+			if err != nil {
+				return fmt.Errorf("configure container creation: %w", err)
+			}
+			defer func() { runErr = errors.Join(runErr, containersService.Close()) }()
+		}
 	}
 	apiListener, err := net.Listen("tcp", cfg.APIAddress)
 	if err != nil {
@@ -116,7 +135,7 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 		return fmt.Errorf("resolve management API endpoint: %w", err)
 	}
 	cfg.GatewayAddress = gatewayListener.Addr().String()
-	management, closeSessions, err := controlplane.NewHandlerWithMCPAndWorkers(store, sites, browserService, cfg, logger, endpoint, publication, publisher)
+	management, closeSessions, err := controlplane.NewHandlerWithMCPWorkersAndContainers(store, sites, browserService, cfg, logger, endpoint, publication, publisher, containersService)
 	if err != nil {
 		return fmt.Errorf("configure management API: %w", err)
 	}

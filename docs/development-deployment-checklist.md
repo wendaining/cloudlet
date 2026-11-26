@@ -76,7 +76,7 @@ make demo 创建真实 Worker、持久化计数器、HTTP 容器和浏览器截�
 | CLOUDLET_SECRET_KEY | 64 个十六进制字符的平台密钥，用于加密项目凭据版本 |
 | DOCKER_HOST、DOCKER_CONTEXT | 确定实际 Docker 引擎，CLI、Go SDK 和测试工具保持一致 |
 | CLOUDLET_RUNTIME_ACCESS | 本机采用 published，部署采用 network，由容器模块生成连接地址 |
-| CLOUDLET_RUNTIME_NETWORK | 指定本实例执行容器加入的网络 |
+| CLOUDLET_RUNTIME_NETWORK | 预留给部署执行网络配置；项目网络由容器模块按项目创建和核对 |
 | CLOUDLET_API_UPSTREAM | Vite 或 Nginx 使用的后端代理地址 |
 | CLOUDLET_PUBLIC_ORIGIN | 管理页面公开地址 |
 | CLOUDLET_GATEWAY_PUBLIC_URL | 工作负载地址生成所依据的公开入口 |
@@ -116,7 +116,7 @@ Ctrl+C、开发入口异常退出和 make dev-stop 执行同一套停止流程�
 
 显式多实例通过 ENV_FILE 指定独立配置，例如 ENV_FILE=.env.feature.local make dev。每个实例拥有独立端口、Compose 项目名、数据库数据卷、运行时数据卷与 .local 子目录。
 
-动态创建的容器、网络和数据卷携带实例与资源归属标签。系统只允许同一实例存在一个活动控制器，重复启动时报告占用信息。
+动态创建的容器、网络和数据卷携带实例与资源归属标签。项目网络按实例和项目确定名称，加入与删除前核对规范名称及全部归属标签；仍有运行或已停止容器引用时拒绝删除。系统只允许同一实例存在一个活动控制器，重复启动时报告占用信息。
 
 切换分支后检查数据库迁移版本。数据库版本超出当前代码支持范围时，启动返回明确错误。需要独立数据时建立另一个实例，需要重新初始化时显式执行 dev-reset。
 
