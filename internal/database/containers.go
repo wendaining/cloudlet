@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io/fs"
 	"time"
 
 	"github.com/google/uuid"
@@ -261,4 +262,44 @@ func (s *Store) FailContainerExecution(ctx context.Context, projectID, container
 		}
 		return nil
 	}, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+}
+
+// RecordContainerOperationFailure preserves a failure that happened before any
+// container execution row was written. The first recorded cause is kept so an
+// idempotent retry returns the original result.
+func (s *Store) RecordContainerOperationFailure(ctx context.Context, projectID, operationID uuid.UUID, cause error) error {
+	if projectID == uuid.Nil || operationID == uuid.Nil {
+		return fmt.Errorf("record container operation failure: project and operation IDs are required: %w", fs.ErrInvalid)
+	}
+	if cause == nil {
+		return fmt.Errorf("record container operation failure: cause is required: %w", fs.ErrInvalid)
+	}
+	message := cause.Error()
+	if message == "" {
+		message = "container creation failed"
+	}
+	if err := s.DB.WithContext(ctx).Exec(
+		"INSERT INTO container_operation_failures (operation_id, project_id, failure) VALUES (?, ?, ?) ON CONFLICT (operation_id) DO NOTHING",
+		operationID, projectID, message,
+	).Error; err != nil {
+		return fmt.Errorf("record container operation %s failure: %w", operationID, err)
+	}
+	return nil
+}
+
+// ContainerOperationFailure returns a failure recorded before an execution row
+// existed. found is false when the operation has no such record.
+func (s *Store) ContainerOperationFailure(ctx context.Context, projectID, operationID uuid.UUID) (string, bool, error) {
+	var failure string
+	err := s.DB.WithContext(ctx).Raw(
+		"SELECT failure FROM container_operation_failures WHERE project_id = ? AND operation_id = ?",
+		projectID, operationID,
+	).Row().Scan(&failure)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("read container operation %s failure: %w", operationID, err)
+	}
+	return failure, true, nil
 }

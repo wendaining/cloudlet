@@ -28,6 +28,7 @@ import (
 	"github.com/wendaining/cloudlet/internal/gateway"
 	"github.com/wendaining/cloudlet/internal/operations"
 	"github.com/wendaining/cloudlet/internal/routes"
+	"gorm.io/gorm"
 )
 
 const (
@@ -53,7 +54,18 @@ var (
 	namePattern              = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 	ErrPublicationIncomplete = errors.New("容器创建尚未完成")
 	ErrRuntimeNotReady       = errors.New("容器执行尚未就绪")
+	ErrRecordedFailure       = errors.New("容器创建已失败")
 )
+
+// RecordedFailure returns a failure that happened before a container execution
+// row was written. Replaying the same idempotency key returns this cause.
+type RecordedFailure struct {
+	Failure string
+}
+
+func (e *RecordedFailure) Error() string { return e.Failure }
+
+func (e *RecordedFailure) Unwrap() error { return ErrRecordedFailure }
 
 // Request is one container creation request. Image must be an immutable
 // repository@digest reference. The service applies defaults for User,
@@ -165,7 +177,6 @@ type Service struct {
 	executions     *executions.Service
 	operations     *operations.Store
 	publisher      *routes.Publisher
-	gateway        *gateway.Handler
 	configuration  config.ContainerRuntime
 	instance       string
 	controller     *sql.Conn
@@ -178,9 +189,9 @@ type Service struct {
 // NewService verifies every configured dependency before enabling container
 // creation. A PostgreSQL session lock allows only one container controller for
 // the host.
-func NewService(ctx context.Context, store *database.Store, docker *client.Client, front *gateway.Handler, configuration config.ContainerRuntime, instance string) (service *Service, err error) {
-	if store == nil || docker == nil || front == nil {
-		return nil, fmt.Errorf("container creation requires database, Docker and Gateway: %w", fs.ErrInvalid)
+func NewService(ctx context.Context, store *database.Store, docker *client.Client, publisher *routes.Publisher, configuration config.ContainerRuntime, instance string) (service *Service, err error) {
+	if store == nil || docker == nil || publisher == nil {
+		return nil, fmt.Errorf("container creation requires database, Docker and route publisher: %w", fs.ErrInvalid)
 	}
 	if err := configuration.Validate(); err != nil {
 		return nil, err
@@ -195,7 +206,7 @@ func NewService(ctx context.Context, store *database.Store, docker *client.Clien
 	if err != nil {
 		return nil, err
 	}
-	s := &Service{store: store, containers: runtime, configuration: configuration, instance: instance, gateway: front}
+	s := &Service{store: store, containers: runtime, configuration: configuration, instance: instance, publisher: publisher}
 	defer func() {
 		if err != nil {
 			err = errors.Join(err, s.Close())
@@ -210,10 +221,6 @@ func NewService(ctx context.Context, store *database.Store, docker *client.Clien
 		return nil, err
 	}
 	s.executions, err = executions.NewService(s.reservations, runtime, configuration.HostID)
-	if err != nil {
-		return nil, err
-	}
-	s.publisher, err = routes.NewPublisher(store, front)
 	if err != nil {
 		return nil, err
 	}
@@ -315,7 +322,7 @@ func (s *Service) Create(ctx context.Context, projectID uuid.UUID, key string, r
 	if projectID == uuid.Nil || len(key) > 256 || strings.TrimSpace(key) == "" || strings.ContainsRune(key, 0) || !utf8.ValidString(key) {
 		return result, false, fmt.Errorf("container project and Idempotency-Key are invalid: %w", fs.ErrInvalid)
 	}
-	if s.gateway.ReservedHost(prepared.Hostname) {
+	if s.publisher.ReservedHost(prepared.Hostname) {
 		return result, false, fmt.Errorf("container hostname %q is reserved by startup configuration: %w", prepared.Hostname, fs.ErrInvalid)
 	}
 	s.mu.Lock()
@@ -368,6 +375,9 @@ func (s *Service) Create(ctx context.Context, projectID uuid.UUID, key string, r
 			result.Execution.State, result.Execution.Failure = "failed", cause.Error()
 		}
 		if cleaned {
+			if !recorded {
+				err = errors.Join(err, s.store.RecordContainerOperationFailure(cleanupCtx, projectID, result.Operation.ID, cause))
+			}
 			err = errors.Join(err, s.advance(cleanupCtx, &result, operations.Progress{Phase: result.Operation.Phase, Outcome: operations.Failed}))
 		}
 	}()
@@ -471,6 +481,15 @@ func (s *Service) Create(ctx context.Context, projectID uuid.UUID, key string, r
 func (s *Service) resume(ctx context.Context, projectID uuid.UUID, result *Result) (Result, bool, error) {
 	container, execution, err := s.store.ContainerByOperation(ctx, projectID, result.Operation.ID)
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			failure, found, lookupErr := s.store.ContainerOperationFailure(ctx, projectID, result.Operation.ID)
+			if lookupErr != nil {
+				return *result, false, errors.Join(ErrPublicationIncomplete, lookupErr)
+			}
+			if found {
+				return *result, false, &RecordedFailure{Failure: failure}
+			}
+		}
 		return *result, false, errors.Join(ErrPublicationIncomplete, err)
 	}
 	result.Container, result.Execution = container, execution

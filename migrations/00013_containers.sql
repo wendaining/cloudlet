@@ -49,7 +49,16 @@ ALTER TABLE containers ADD CONSTRAINT containers_active_execution_fk
 CREATE INDEX container_executions_container_idx
     ON container_executions (container_id, generation DESC);
 
+-- Failures before an execution row exists still need an idempotent result.
+CREATE TABLE container_operation_failures (
+    operation_id UUID PRIMARY KEY REFERENCES operations (id) ON DELETE CASCADE,
+    project_id UUID NOT NULL REFERENCES projects (id) ON DELETE CASCADE,
+    failure TEXT NOT NULL CHECK (octet_length(failure) > 0),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 -- +goose Down
+DROP TABLE container_operation_failures;
 ALTER TABLE containers DROP CONSTRAINT containers_active_execution_fk;
 DROP TABLE container_executions;
 DROP TABLE containers;

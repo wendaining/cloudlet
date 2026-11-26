@@ -34,7 +34,7 @@ Cloudlet 在一台 Linux 服务器上管理计算资源。本地开发在成员�
 | internal/operations | 操作记录的幂等登记、按项目查询与阶段推进 |
 | internal/capacity | 主机与项目容量的事务预留、容器绑定、确认释放与占用查询 |
 | internal/executions | 容量准入后的容器启动、绑定校验、失败清理与确认释放 |
-| internal/staticdeploy | 静态站点 ZIP 的保存、解包和不可变版本登记 |
+| internal/staticdeploy | 静态站点 ZIP 的保存、解包、不可变版本登记与首次发布 |
 | internal/apigen | OpenAPI 生成的类型、Gin 接口和客户端 |
 | migrations | 内嵌 SQL 迁移文件与当前版本 |
 | internal/gateway | 按域名选择上游并转发 HTTP 请求 |
@@ -75,8 +75,12 @@ PostgreSQL 当前保存账号、登录会话、项目、操作记录、项目凭
 | /api/v1/projects/{projectID}/containers/{containerID} | GET | 项目成员查询容器配置、执行与操作结果 |
 | /api/v1/projects/{projectID}/operations | GET | 按时间升序读取项目内操作 |
 | /api/v1/projects/{projectID}/members | GET、POST | 列出项目成员；所有者添加已有账号或更新 developer/viewer 角色 |
+| /api/v1/projects/{projectID}/sites | GET | 项目成员按名称分页查询站点 |
+| /api/v1/projects/{projectID}/sites/{siteName}/versions | GET | 项目成员分页查询指定站点的版本摘要 |
 | /api/v1/projects/{projectID}/sites/{siteName}/versions | POST | 所有者上传 ZIP 并登记待激活版本 |
 | /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID} | GET | 项目成员查询指定版本及其产物摘要 |
+| /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/artifact | GET | 项目成员下载原始 ZIP 并读取内容摘要 |
+| /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/publish | POST | 所有者绑定域名、激活首个就绪版本并获取 Gateway 地址 |
 | /api/v1/projects/{projectID}/secrets | GET、POST | 列出项目凭据元数据；所有者追加加密版本 |
 | /api/v1/projects/{projectID}/secrets/{name} | GET | 列出项目凭据的版本元数据 |
 | /api/v1/projects/{projectID}/secrets/{name}/versions/{version}/value | GET | 所有者读取指定版本的值 |
@@ -92,11 +96,17 @@ Gateway 使用配置中的 `host` 匹配请求域名，匹配时忽略大小写�
 
 `internal/routes.Publisher` 按项目整体替换路由集合。PostgreSQL 使用 `route_snapshot` 版本行和 `project_routes` 表保存项目、资源、域名、路径与上游。发布事务先锁定版本行并检查域名归属，同一域名仅允许一个项目使用。移除该域名的全部路由后，其他项目可以使用。事务按 READ COMMITTED 执行，删除项目旧路由、写入新路由并递增快照版本。提交后读取一致快照并整体替换 Gateway 动态路由。启动时从数据库恢复。提交成功但应用失败时返回 `SyncError`，调用方可以再次执行 `Sync`。启动配置声明的域名不能用于动态路由。
 
-`internal/sitehttp` 可通过 HTTP 提供已验证的只读站点文件系统，支持 GET、HEAD 和目录首页。缺少首页的目录返回 404。处理器可以独立使用，域名绑定和版本切换由发布流程接入。
+`internal/sitehttp` 可通过 HTTP 提供已验证的只读站点文件系统，支持 GET、HEAD 和目录首页。缺少首页的目录返回 404。已发布站点与 HTTP 上游使用同一份 Gateway 快照，站点文件在进程内由该处理器提供。
 
 创建单个站点处理器时可通过 `Options.SPAFallback` 启用导航回退，默认关闭。启用后，接受 `text/html` 的页面导航访问不存在且末段无扩展名的路径时，返回站点根目录的 `index.html`。静态文件请求和已有但缺少首页的目录仍返回 404。回退候选路径通过 `Vary` 声明导航相关请求头。
 
-静态站点以项目和名称确定身份。所有者使用 `Content-Type: application/zip` 上传，服务保存原始 ZIP，再展开并登记版本。上传体上限为 64 MiB，展开上限为 256 MiB，ZIP 中央目录在完整解析前检查 10,000 个成员的上限。解包前拒绝超过 255 字节的路径分量。成功响应返回版本标识、SHA-256 摘要、`ready` 状态和用于查询的 `Location`。`ready` 表示文件已准备就绪，等待后续激活。
+站点列表按名称升序排列，版本列表按创建时间及版本标识降序排列。每页默认 50 条，最多 100 条。继续查询时将上一页返回的 `next_cursor` 传给同一接口。有新版本排在已读取位置之前时，它会出现在重新从首页发起的查询中。
+
+静态站点以项目和名称确定身份。所有者使用 `Content-Type: application/zip` 上传，服务保存原始 ZIP，再展开并登记版本。上传体上限为 64 MiB，展开上限为 256 MiB，ZIP 中央目录在完整解析前检查 10,000 个成员的上限。解包前拒绝超过 255 字节的路径分量。成功响应返回版本标识、SHA-256 摘要、`ready` 状态和用于查询的 `Location`。`ready` 表示文件已准备就绪。
+
+首次发布时，所有者提交一个不带端口的域名。服务先核对版本归属和入口文件，再在同一 PostgreSQL 事务中绑定域名根路由、记录激活版本并递增路由快照版本。快照生效后返回规范域名、版本标识和 Gateway 的 HTTP 地址。发布会保留该项目其他路由。启动配置保留的域名、其他项目已占用的域名和已有根路由均返回 409。相同版本和域名的请求可重试，首次发布接口拒绝切换已有发布的版本或域名。重启时从数据库恢复代理路由和静态站点路由。
+
+下载接口先验证项目成员权限和站点版本归属，再按版本摘要打开原始 ZIP 并流式返回。响应提供附件文件名、文件长度和 `Content-Digest`，并声明 `Cache-Control: private, no-store`。
 
 管理环境通过 PostgreSQL 保存账号与会话，使用 bcrypt 校验密码，使用 SCS 管理 HttpOnly 会话 Cookie。Cookie 名称包含实例名称，写入请求执行来源检查。开发账号经显式初始化流程创建，重复初始化保留已有密码。
 
@@ -126,7 +136,7 @@ API 与 Gateway 使用 HTTP 头读取超时和空闲连接超时。收到 SIGTER
 
 服务在登记幂等 Operation 后保存不可变执行配置，按摘要准备镜像，登记项目初始配额并预留主机与项目容量。容量不足时不创建容器。预留成功后创建并启动真实容器，按 Docker 实际发布的回环端点和声明截止时间执行 HTTP 就绪探测。200 至 399 的最终状态视为就绪；超时、容器退出或端口未发布时不注册路由。就绪后在同一事务中登记活动执行、Docker 容器标识与项目根路由，递增路由快照版本，再由共享 Gateway 发布器应用快照。快照生效后 Operation 才进入成功终态。
 
-项目成员可以查询容器配置、最近执行与 Operation。确定失败时先停止并删除已创建容器，确认清理后释放容量，再记录失败原因与终态；清理或释放失败时保留容量和待处理执行。重复的幂等请求复用原 Operation，已提交活动执行后的快照同步失败可以通过重复原请求完成。容器名称、域名和路由冲突返回 409。
+项目成员可以查询容器配置、最近执行与 Operation。确定失败时先停止并删除已创建容器，确认清理后释放容量，再记录失败原因与终态；清理或释放失败时保留容量和待处理执行。重复的幂等请求复用原 Operation，预登记阶段发生的名称或域名冲突也保留失败结果，已提交活动执行后的快照同步失败可以通过重复原请求完成。容器名称、域名和路由冲突返回 409。
 
 当前只支持首个容器的创建与公开访问。停止、再次启动与删除由后续任务接入；创建请求不接受数据卷声明，修改镜像或配置产生新执行、活动版本切换和旧执行排空也尚未接入。
 

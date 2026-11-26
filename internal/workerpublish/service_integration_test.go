@@ -111,12 +111,21 @@ func TestWorkerPublicationHTTP(t *testing.T) {
 		}
 		return front
 	}
+	newPublisher := func(front *gateway.Handler) *routes.Publisher {
+		t.Helper()
+		publisher, err := routes.NewPublisher(store, front)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return publisher
+	}
 	front := newFront()
-	publication, err := workerpublish.NewService(ctx, store, docker, front, configuration, "publication")
+	publisher := newPublisher(front)
+	publication, err := workerpublish.NewService(ctx, store, docker, publisher, configuration, "publication")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if duplicate, err := workerpublish.NewService(ctx, store, docker, front, configuration, "publication"); err == nil {
+	if duplicate, err := workerpublish.NewService(ctx, store, docker, publisher, configuration, "publication"); err == nil {
 		duplicate.Close()
 		t.Fatal("second controller accepted")
 	}
@@ -561,7 +570,7 @@ AND d.state = 'pending' AND o.phase = 'preparing' AND e.container_id <> ''`, pro
 		t.Fatal(err)
 	}
 	front = newFront()
-	publication, err = workerpublish.NewService(ctx, store, docker, front, configuration, "publication")
+	publication, err = workerpublish.NewService(ctx, store, docker, newPublisher(front), configuration, "publication")
 	if err != nil {
 		t.Fatal(err)
 	}

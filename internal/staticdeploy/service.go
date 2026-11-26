@@ -105,6 +105,19 @@ func (s *Service) Version(ctx context.Context, projectID, name string, id uuid.U
 	return s.store.StaticSiteVersion(ctx, projectID, name, id)
 }
 
+// OpenArchive opens the original ZIP for a version scoped to this project and site.
+func (s *Service) OpenArchive(ctx context.Context, projectID, name string, id uuid.UUID) (*os.File, string, error) {
+	version, err := s.Version(ctx, projectID, name, id)
+	if err != nil {
+		return nil, "", err
+	}
+	file, err := s.archives.Open(version.ArtifactDigest)
+	if err != nil {
+		return nil, "", fmt.Errorf("open original ZIP for site version %s: %w", id, err)
+	}
+	return file, version.ArtifactDigest, nil
+}
+
 // Handler prepares the file handler for a version resolved by the caller.
 // Selecting an active version and publishing its route are separate operations.
 func (s *Service) Handler(version database.StaticSiteVersion) (http.Handler, error) {

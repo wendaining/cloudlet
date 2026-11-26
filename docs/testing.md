@@ -18,12 +18,24 @@
 
 make generate 从 api/openapi.yaml 同时生成 Go 类型、Gin 接口、客户端和前端类型，生成文件随实现提交。Go 和前端的检查分别比较临时生成结果。
 
+静态站点分页集成测试通过管理 API 上传真实 ZIP，验证站点和版本各读取两页、相同创建时间的版本排序、翻页期间新增版本，以及不同项目之间的隔离。
+
+```sh
+go test -race -count=1 -tags=integration -run '^TestStaticSiteListsHTTP$' ./internal/database
+```
+
 ## 开发流程验证
 
 Gateway 域名验收构建并启动实际管理服务，以真实站点文件作为 HTTP 上游。用例验证域名大小写、末尾句点与端口规范化，GET 与 HEAD 正常转发，未知域名返回 404。停止上游后，该域名返回 502 并记录失败域名，其他上游继续可用。
 
 ```sh
 go test -race -count=1 -run TestGatewayDomainRoutingAcceptance -v ./internal/server
+```
+
+静态站点首次发布使用真实 PostgreSQL、管理 API 和 Gateway 验证。测试先上传真实 ZIP，再通过管理 API 激活版本并经 Gateway 读取首页和资源，同时检查未激活版本的资源、域名冲突、跨项目权限、重复请求和路由恢复。
+
+```sh
+go test -race -count=1 -tags=integration -run '^TestFirstStaticSitePublicationHTTP$' -v ./internal/database
 ```
 
 开发流程测试创建独立配置与随机可用端口，通过与成员相同的开发入口运行 Go、Vite 和 PostgreSQL。测试验证同名控制器拒绝重复启动、错误的 reset 确认不会停止服务、真实 API 登录和 Gateway 转发。
@@ -66,7 +78,7 @@ export TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock
 go test -race -count=1 -tags=integration -run TestContainerPublicationHTTP -v ./internal/containerpublish
 ```
 
-用例创建真实项目与成员，验证查看者 403、非成员 404、未登录 401、缺少幂等键与无效请求 400。使用 configs/images.json 中固定镜像和摘要创建容器，核对 201 响应、Operation 成功、Docker 容器运行、归属标签、非 root 用户、CPU、内存、进程与文件句柄限制和回环端口。通过 Gateway 使用大小写与末尾句点变化的域名访问容器，核对实际 HTTP 响应。重复幂等请求返回 200 且不创建第二个容器；更换请求内容、容器名称或域名冲突返回 409。使用会立即退出的命令验证 422、失败原因、容器删除与容量释放；超额 CPU 返回 429 且不创建容器。查询接口验证项目成员可读、非成员返回 404。
+用例创建真实项目与成员，验证查看者 403、非成员 404、未登录 401、缺少幂等键与无效请求 400。使用 configs/images.json 中固定镜像和摘要创建容器，核对 201 响应、Operation 成功、Docker 容器运行、归属标签、非 root 用户、CPU、内存、进程与文件句柄限制和回环端口。通过 Gateway 使用大小写与末尾句点变化的域名访问容器，核对实际 HTTP 响应。重复幂等请求返回 200 且不创建第二个容器；更换请求内容、容器名称或域名冲突返回 409，同名冲突和域名冲突使用同一幂等键重试时返回原失败结果。使用会立即退出的命令验证 422、失败原因、容器删除与容量释放；超额 CPU 返回 429 且不创建容器。查询接口验证项目成员可读、非成员返回 404。
 
 测试结束后清理所属容器。镜像缓存继续复用。
 

@@ -234,6 +234,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{projectID}/browser-sessions/{sessionID}/click": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["clickBrowserPage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{projectID}/browser-sessions/{sessionID}/navigate": {
         parameters: {
             query?: never;
@@ -272,6 +291,64 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{projectID}/browser-sessions/{sessionID}/screenshots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["captureBrowserScreenshot"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/browser-sessions/{sessionID}/screenshots/{screenshotID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+                screenshotID: string;
+            };
+            cookie?: never;
+        };
+        get: operations["downloadBrowserScreenshot"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/sites": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["SiteProjectID"];
+            };
+            cookie?: never;
+        };
+        /** @description 按站点名称升序分页列出项目成员可见的静态站点。 */
+        get: operations["listStaticSites"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{projectID}/sites/{siteName}/versions": {
         parameters: {
             query?: never;
@@ -282,7 +359,8 @@ export interface paths {
             };
             cookie?: never;
         };
-        get?: never;
+        /** @description 按创建时间和版本标识降序分页列出站点版本摘要。 */
+        get: operations["listStaticSiteVersions"];
         put?: never;
         /** @description 项目所有者上传不超过 64 MiB 的 ZIP，站点首次上传时建立项目内的稳定标识。返回已验证的待激活版本。 */
         post: operations["uploadStaticSiteVersion"];
@@ -307,6 +385,48 @@ export interface paths {
         get: operations["getStaticSiteVersion"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/artifact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["SiteProjectID"];
+                siteName: components["parameters"]["SiteName"];
+                versionID: string;
+            };
+            cookie?: never;
+        };
+        /** @description 项目成员下载指定站点版本的原始 ZIP。 */
+        get: operations["downloadStaticSiteArtifact"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["SiteProjectID"];
+                siteName: components["parameters"]["SiteName"];
+                versionID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 项目所有者绑定域名并激活站点的首个就绪版本。重复相同请求返回同一发布结果。 */
+        post: operations["publishStaticSiteVersion"];
         delete?: never;
         options?: never;
         head?: never;
@@ -474,6 +594,12 @@ export interface components {
             /** Format: int64 */
             database_version: number;
         };
+        ClickBrowserPageRequest: {
+            /** @description 唯一定位当前页面元素的 CSS 选择器 */
+            selector: string;
+            /** @default 10000 */
+            timeout_ms: number;
+        };
         CreateProjectRequest: {
             /** @description 服务端去除首尾空白后必须包含 1 至 100 个 Unicode 字符；原始字符串可以包含首尾空白。 */
             name: string;
@@ -581,6 +707,18 @@ export interface components {
              */
             dropped: number;
         };
+        BrowserScreenshot: {
+            /** Format: uuid */
+            id: string;
+            /** @description 原始 PNG 的 SHA-256 摘要 */
+            artifact_digest: string;
+            /** Format: int64 */
+            size_bytes: number;
+            /** @description 需要项目会话凭据的相对下载地址 */
+            download_url: string;
+            /** Format: date-time */
+            created_at: string;
+        };
         /** @enum {string} */
         BrowserSessionStatus: "starting" | "ready" | "failed" | "closed";
         BrowserSession: {
@@ -598,6 +736,36 @@ export interface components {
         BrowserNavigation: {
             url: string;
             title: string;
+        };
+        StaticSitePublicationRequest: {
+            /** @description 不带端口的域名，国际化域名使用 ASCII 形式。 */
+            hostname: string;
+        };
+        StaticSitePublication: {
+            /** Format: uuid */
+            site_id: string;
+            /** Format: uuid */
+            version_id: string;
+            hostname: string;
+            /** Format: uri */
+            url: string;
+        };
+        StaticSiteSummary: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        StaticSitePage: {
+            sites: components["schemas"]["StaticSiteSummary"][];
+            /** @description 有更多结果时返回，用于请求下一页。 */
+            next_cursor?: string;
+        };
+        StaticSiteVersionPage: {
+            versions: components["schemas"]["StaticSiteVersion"][];
+            /** @description 有更多结果时返回，用于请求下一页。 */
+            next_cursor?: string;
         };
         StaticSiteVersion: {
             /** Format: uuid */
@@ -820,6 +988,9 @@ export interface components {
     parameters: {
         BrowserProjectID: string;
         BrowserSessionID: string;
+        StaticSitePageLimit: number;
+        /** @description 同一个列表接口上一页返回的 next_cursor。首次查询时省略。 */
+        StaticSitePageCursor: string;
         SiteProjectID: string;
         SiteName: string;
     };
@@ -1204,6 +1375,32 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    clickBrowserPage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClickBrowserPageRequest"];
+            };
+        };
+        responses: {
+            /** @description 已点击当前页面的指定元素 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
     navigateBrowserSession: {
         parameters: {
             query?: never;
@@ -1253,6 +1450,119 @@ export interface operations {
                     "application/json": components["schemas"]["BrowserConsole"];
                 };
             };
+            default: components["responses"]["Error"];
+        };
+    };
+    captureBrowserScreenshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 截图已保存 */
+            201: {
+                headers: {
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrowserScreenshot"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    downloadBrowserScreenshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+                screenshotID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 原始 PNG 截图 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/png": string;
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    listStaticSites: {
+        parameters: {
+            query?: {
+                limit?: components["parameters"]["StaticSitePageLimit"];
+                /** @description 同一个列表接口上一页返回的 next_cursor。首次查询时省略。 */
+                cursor?: components["parameters"]["StaticSitePageCursor"];
+            };
+            header?: never;
+            path: {
+                projectID: components["parameters"]["SiteProjectID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 项目站点列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaticSitePage"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    listStaticSiteVersions: {
+        parameters: {
+            query?: {
+                limit?: components["parameters"]["StaticSitePageLimit"];
+                /** @description 同一个列表接口上一页返回的 next_cursor。首次查询时省略。 */
+                cursor?: components["parameters"]["StaticSitePageCursor"];
+            };
+            header?: never;
+            path: {
+                projectID: components["parameters"]["SiteProjectID"];
+                siteName: components["parameters"]["SiteName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 静态站点版本列表 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaticSiteVersionPage"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            503: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };
@@ -1308,6 +1618,73 @@ export interface operations {
             200: components["responses"]["StaticSiteVersion"];
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    downloadStaticSiteArtifact: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["SiteProjectID"];
+                siteName: components["parameters"]["SiteName"];
+                versionID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 原始 ZIP 的全部字节 */
+            200: {
+                headers: {
+                    "Content-Disposition"?: string;
+                    "Content-Length"?: number;
+                    /** @description ZIP 内容的 SHA-256 摘要。 */
+                    "Content-Digest"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/zip": string;
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    publishStaticSiteVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["SiteProjectID"];
+                siteName: components["parameters"]["SiteName"];
+                versionID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaticSitePublicationRequest"];
+            };
+        };
+        responses: {
+            /** @description 已生效的首个站点发布及其 Gateway 地址 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaticSitePublication"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };

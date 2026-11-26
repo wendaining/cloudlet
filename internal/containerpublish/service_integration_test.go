@@ -111,12 +111,16 @@ func TestContainerPublicationHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	publisher, err := routes.NewPublisherWithSites(store, front, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	configuration := config.ContainerRuntime{
 		HostID:       "container-" + uuid.NewString(),
 		HostBudget:   config.ResourceBudget{CPUMillis: 4000, MemoryBytes: 4 << 30, Instances: 4},
 		ProjectQuota: config.ResourceBudget{CPUMillis: 4000, MemoryBytes: 4 << 30, Instances: 4},
 	}
-	service, err := containerpublish.NewService(ctx, store, docker, front, configuration, "container-test")
+	service, err := containerpublish.NewService(ctx, store, docker, publisher, configuration, "container-test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +129,7 @@ func TestContainerPublicationHTTP(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	if duplicate, err := containerpublish.NewService(ctx, store, docker, front, configuration, "container-test"); err == nil {
+	if duplicate, err := containerpublish.NewService(ctx, store, docker, publisher, configuration, "container-test"); err == nil {
 		duplicate.Close()
 		t.Fatal("second container controller accepted")
 	}
@@ -348,7 +352,11 @@ func TestContainerPublicationHTTP(t *testing.T) {
 	if executionCount != 1 {
 		t.Fatalf("container executions = %d, want 1", executionCount)
 	}
-	request(owner, http.MethodPost, path, "web-other-key", valid, http.StatusConflict)
+	_, nameConflictBody := request(owner, http.MethodPost, path, "web-other-key", valid, http.StatusConflict)
+	_, replayNameConflictBody := request(owner, http.MethodPost, path, "web-other-key", valid, http.StatusConflict)
+	if string(replayNameConflictBody) != string(nameConflictBody) || !strings.Contains(string(nameConflictBody), database.ErrContainerAlreadyActive.Error()) {
+		t.Fatalf("idempotent name conflict replay = %s, want %s", replayNameConflictBody, nameConflictBody)
+	}
 	differentRequest := valid
 	differentRequest.CPUMillis = 600
 	request(owner, http.MethodPost, path, "web-key", differentRequest, http.StatusConflict)
@@ -410,16 +418,19 @@ func TestContainerPublicationHTTP(t *testing.T) {
 		t.Fatalf("over-quota container: %+v", tooBigResult)
 	}
 
-	publisher, err := routes.NewPublisher(store, front)
-	if err != nil {
-		t.Fatal(err)
-	}
 	if _, err := publisher.PublishProject(ctx, failureProject.ID, []routes.Route{{Resource: "site", Host: "taken.localhost", Target: "http://127.0.0.1:1"}}); err != nil {
 		t.Fatal(err)
 	}
 	conflict := valid
 	conflict.Name, conflict.Hostname = "conflict", "taken.localhost"
-	request(owner, http.MethodPost, collectionPath(project.ID), "conflict-key", conflict, http.StatusConflict)
+	_, conflictBody := request(owner, http.MethodPost, collectionPath(project.ID), "conflict-key", conflict, http.StatusConflict)
+	if !strings.Contains(string(conflictBody), database.ErrRouteConflict.Error()) {
+		t.Fatalf("route conflict response = %s", conflictBody)
+	}
+	_, replayConflictBody := request(owner, http.MethodPost, collectionPath(project.ID), "conflict-key", conflict, http.StatusConflict)
+	if string(replayConflictBody) != string(conflictBody) {
+		t.Fatalf("idempotent conflict replay = %s, want %s", replayConflictBody, conflictBody)
+	}
 	var conflictCount int64
 	if err := store.DB.Model(&database.Container{}).Where("project_id = ? AND name = ?", project.ID, "conflict").Count(&conflictCount).Error; err != nil {
 		t.Fatal(err)

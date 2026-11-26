@@ -3,16 +3,21 @@
 package database_test
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"fmt"
+	"image/png"
 	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -42,10 +47,16 @@ func TestBrowserSessionHTTP(t *testing.T) {
 	}
 	defer docker.Close()
 	const instance = "browser-integration"
-	service, err := browser.NewService(ctx, store, docker, instance, imageID, filepath.Join(runtimeDir, "seccomp.json"), make([]byte, 32))
+	screenshotDir := filepath.Join(t.TempDir(), "screenshots")
+	service, err := browser.NewService(ctx, store, docker, instance, imageID, filepath.Join(runtimeDir, "seccomp.json"), screenshotDir, make([]byte, 32))
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer func() {
+		if err := service.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
 	fixture := chromiumPage(t, ctx, docker)
 	server := httptest.NewUnstartedServer(nil)
 	handler, cleanup, err := controlplane.NewHandlerWithMCP(store, nil, service,
@@ -107,6 +118,20 @@ func TestBrowserSessionHTTP(t *testing.T) {
 	get(otherAPI, owner.ID, http.StatusNotFound)
 	get(otherAPI, other.ID, http.StatusNotFound)
 
+	capture := func(api *apigen.ClientWithResponses, project string, want int) *apigen.CaptureBrowserScreenshotResponse {
+		t.Helper()
+		response, err := api.CaptureBrowserScreenshotWithResponse(ctx, project, session.Id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if response.StatusCode() != want {
+			t.Fatalf("capture = %d %s, want %d", response.StatusCode(), response.Body, want)
+		}
+		return response
+	}
+	capture(ownerAPI, owner.ID, http.StatusConflict)
+	capture(otherAPI, owner.ID, http.StatusNotFound)
+
 	navigate := func(api *apigen.ClientWithResponses, project, target string, want int) *apigen.NavigateBrowserSessionResponse {
 		t.Helper()
 		response, err := api.NavigateBrowserSessionWithResponse(ctx, project, session.Id, apigen.NavigateBrowserSessionJSONRequestBody{Url: target})
@@ -120,6 +145,35 @@ func TestBrowserSessionHTTP(t *testing.T) {
 	}
 	navigate(otherAPI, owner.ID, fixture, http.StatusNotFound)
 	navigate(ownerAPI, owner.ID, "file:///not-a-web-page", http.StatusBadRequest)
+	counterURL, count := browserCounterPage(t, fixture)
+	navigate(ownerAPI, owner.ID, counterURL, http.StatusOK)
+	click := func(api *apigen.ClientWithResponses, project, selector string, timeout *int, want int) {
+		t.Helper()
+		result, err := api.ClickBrowserPageWithResponse(ctx, project, session.Id,
+			apigen.ClickBrowserPageJSONRequestBody{Selector: selector, TimeoutMs: timeout})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.StatusCode() != want {
+			t.Fatalf("click %#v = %d %s, want %d", selector, result.StatusCode(), result.Body, want)
+		}
+	}
+	click(otherAPI, owner.ID, "#counter", nil, http.StatusNotFound)
+	click(ownerAPI, owner.ID, " ", nil, http.StatusBadRequest)
+	click(ownerAPI, owner.ID, "button", nil, http.StatusUnprocessableEntity)
+	for range 2 {
+		click(ownerAPI, owner.ID, "#counter", nil, http.StatusNoContent)
+	}
+	for deadline := time.Now().Add(3 * time.Second); count.Load() < 2 && time.Now().Before(deadline); {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if count.Load() != 2 {
+		t.Fatalf("page counter = %d, want 2", count.Load())
+	}
+	short := 200
+	click(ownerAPI, owner.ID, "#absent", &short, http.StatusGatewayTimeout)
+	get(ownerAPI, owner.ID, http.StatusOK)
+	t.Log("real Chromium clicked the counter twice; ambiguous locator HTTP 422, absent locator HTTP 504, other project HTTP 404")
 	page := navigate(ownerAPI, owner.ID, fixture, http.StatusOK).JSON200
 	if page == nil || page.Url != fixture || page.Title != "Cloudlet Browser Run" {
 		t.Fatalf("unexpected Chromium page: %+v", page)
@@ -151,6 +205,47 @@ func TestBrowserSessionHTTP(t *testing.T) {
 		t.Fatalf("warning, truncated message or page error missing: warn=%v truncated=%v error=%v", logged, truncated, threw)
 	}
 	t.Log("console retains 100 messages, truncates long entries, captures uncaught errors and rejects another project")
+
+	captured := capture(ownerAPI, owner.ID, http.StatusCreated)
+	screenshot := captured.JSON201
+	if screenshot == nil || screenshot.Id == uuid.Nil || screenshot.CreatedAt.IsZero() {
+		t.Fatalf("missing screenshot metadata: %s", captured.Body)
+	}
+	downloadURL := endpoint + "/screenshots/" + screenshot.Id.String()
+	if screenshot.DownloadUrl != downloadURL || captured.HTTPResponse.Header.Get("Location") != downloadURL {
+		t.Fatalf("unexpected screenshot download URL: %+v", screenshot)
+	}
+	download := func(api *apigen.ClientWithResponses, project string, id uuid.UUID, want int) *apigen.DownloadBrowserScreenshotResponse {
+		t.Helper()
+		response, err := api.DownloadBrowserScreenshotWithResponse(ctx, project, id, screenshot.Id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if response.StatusCode() != want {
+			t.Fatalf("download = %d, want %d", response.StatusCode(), want)
+		}
+		return response
+	}
+	download(otherAPI, owner.ID, session.Id, http.StatusNotFound)
+	download(otherAPI, other.ID, session.Id, http.StatusNotFound)
+	download(ownerAPI, owner.ID, uuid.New(), http.StatusNotFound)
+	asset := download(ownerAPI, owner.ID, session.Id, http.StatusOK)
+	if asset.HTTPResponse.Header.Get("Content-Type") != "image/png" || !strings.HasPrefix(asset.HTTPResponse.Header.Get("Content-Disposition"), "attachment;") {
+		t.Fatalf("unexpected PNG response headers: %v", asset.HTTPResponse.Header)
+	}
+	hash := fmt.Sprintf("%x", sha256.Sum256(asset.Body))
+	if int64(len(asset.Body)) != screenshot.SizeBytes || hash != screenshot.ArtifactDigest {
+		t.Fatalf("download length or SHA-256 differs from screenshot metadata: %+v", screenshot)
+	}
+	stored, err := os.ReadFile(filepath.Join(screenshotDir, hash))
+	if err != nil || !bytes.Equal(stored, asset.Body) {
+		t.Fatalf("download differs from the stored PNG: %v", err)
+	}
+	decoded, err := png.Decode(bytes.NewReader(asset.Body))
+	if err != nil || decoded.Bounds().Dx() != 1280 || decoded.Bounds().Dy() != 720 {
+		t.Fatalf("invalid Chromium PNG: %v", err)
+	}
+	t.Logf("screenshot HTTP 201; download HTTP 200, %d bytes, PNG 1280x720, SHA-256 %s; cross-project download HTTP 404", screenshot.SizeBytes, hash)
 	second, err := ownerAPI.CreateBrowserSessionWithResponse(ctx, owner.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -163,6 +258,9 @@ func TestBrowserSessionHTTP(t *testing.T) {
 	}
 	if resolved := get(ownerAPI, owner.ID, http.StatusOK).JSON200; resolved == nil || string(resolved.Status) != "closed" {
 		t.Fatalf("expired session is not closed: %+v", resolved)
+	}
+	if afterClose := download(ownerAPI, owner.ID, session.Id, http.StatusOK); !bytes.Equal(afterClose.Body, asset.Body) {
+		t.Fatal("PNG changed after the browser session closed")
 	}
 	limits, err := capacity.NewStore(store.DB)
 	if err != nil {
@@ -229,7 +327,7 @@ func chromiumPage(t *testing.T, ctx context.Context, docker *client.Client) stri
 		ReadHeaderTimeout: time.Second,
 		Handler: http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 			writer.Header().Set("Content-Type", "text/html; charset=utf-8")
-			fmt.Fprint(writer, `<!doctype html><title>Cloudlet Browser Run</title>
+			fmt.Fprint(writer, `<!doctype html><title>Cloudlet Browser Run</title><h1>Cloudlet Browser Run</h1>
 <script>
 for (let i = 0; i < 110; i++) console.log('entry ' + i);
 console.warn('console fixture warning');
@@ -241,4 +339,40 @@ throw new Error('console fixture exception');
 	go server.Serve(listener)
 	t.Cleanup(func() { server.Close() })
 	return "http://" + listener.Addr().String() + "/index.html"
+}
+
+func browserCounterPage(t *testing.T, existingFixture string) (string, *atomic.Int64) {
+	t.Helper()
+	fixtureURL, err := url.Parse(existingFixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("tcp4", net.JoinHostPort(fixtureURL.Hostname(), "0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var count atomic.Int64
+	server := &http.Server{
+		ReadHeaderTimeout: time.Second,
+		Handler: http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			if request.Method == http.MethodPost && request.URL.Path == "/count" {
+				count.Add(1)
+				writer.WriteHeader(http.StatusNoContent)
+				return
+			}
+			writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+			fmt.Fprint(writer, `<!doctype html><title>Cloudlet Click Test</title>
+<button id="counter">0</button><button>Other</button>
+<script>
+const button = document.querySelector('#counter');
+button.onclick = () => {
+  button.textContent = String(Number(button.textContent) + 1);
+  void fetch('/count', { method: 'POST' });
+};
+</script>`)
+		}),
+	}
+	go server.Serve(listener)
+	t.Cleanup(func() { server.Close() })
+	return "http://" + listener.Addr().String() + "/index.html", &count
 }

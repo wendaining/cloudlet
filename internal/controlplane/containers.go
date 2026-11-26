@@ -63,6 +63,7 @@ func (h *handler) CreateContainer(c *gin.Context, projectID string, params apige
 			errors.Is(err, database.ErrContainerPublicationPending),
 			errors.Is(err, database.ErrRouteConflict),
 			errors.Is(err, operations.ErrIdempotencyConflict),
+			errors.Is(err, containerpublish.ErrRecordedFailure),
 			errors.Is(err, containerpublish.ErrPublicationIncomplete),
 			errors.Is(err, capacity.ErrIdempotencyConflict),
 			errors.Is(err, capacity.ErrOwnershipConflict),

@@ -15,6 +15,7 @@ import (
 	"github.com/wendaining/cloudlet/internal/capacity"
 	"github.com/wendaining/cloudlet/internal/containers"
 	"github.com/wendaining/cloudlet/internal/database"
+	"github.com/wendaining/cloudlet/internal/executions"
 )
 
 var (
@@ -53,6 +54,10 @@ func (s *Service) runtimeEndpoint(ctx context.Context, session database.BrowserS
 	if session.Status != "ready" {
 		return "", ErrSessionUnavailable
 	}
+	return s.boundRuntimeEndpoint(ctx, session)
+}
+
+func (s *Service) boundRuntimeEndpoint(ctx context.Context, session database.BrowserSession) (string, error) {
 	bound, err := s.capacity.GetReservation(ctx, session.ProjectID, session.ID)
 	if errors.Is(err, capacity.ErrReservationNotFound) {
 		return "", ErrSessionUnavailable
@@ -63,12 +68,21 @@ func (s *Service) runtimeEndpoint(ctx context.Context, session database.BrowserS
 	if bound.State != capacity.Active || bound.ContainerID == "" {
 		return "", ErrSessionUnavailable
 	}
-	observation, err := s.adapter.Observe(ctx, ownership(session), bound.ContainerID)
+	owner := ownership(session)
+	if bound.HostID != session.HostID || bound.Binding.Environment != owner.Environment ||
+		bound.Binding.Project != owner.Project || bound.Binding.Resource != owner.Resource ||
+		bound.Binding.Generation != owner.Generation || bound.Binding.Image == "" {
+		return "", fmt.Errorf("verify browser session %s reservation: %w", session.ID, executions.ErrExecutionConflict)
+	}
+	observation, err := s.adapter.Observe(ctx, owner, bound.ContainerID)
 	if errors.Is(err, containers.ErrNotFound) {
 		return "", ErrSessionUnavailable
 	}
 	if err != nil {
 		return "", err
+	}
+	if observation.Image != bound.Binding.Image {
+		return "", fmt.Errorf("verify browser session %s container image: %w", session.ID, executions.ErrExecutionConflict)
 	}
 	if !observation.Running {
 		return "", ErrSessionUnavailable
@@ -90,13 +104,7 @@ func (s *Service) navigate(ctx context.Context, endpoint string, id uuid.UUID, v
 	if err != nil {
 		return Navigation{}, err
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
-		return Navigation{}, err
-	}
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Authorization", "Bearer "+s.token(id))
-	response, err := s.http.Do(request)
+	response, err := s.postRuntime(ctx, endpoint, id, bytes.NewReader(body))
 	if errors.Is(err, context.DeadlineExceeded) {
 		return Navigation{}, ErrNavigationTimeout
 	}
@@ -126,4 +134,16 @@ func (s *Service) navigate(ctx context.Context, endpoint string, id uuid.UUID, v
 	default:
 		return Navigation{}, fmt.Errorf("%w: runtime HTTP %d", ErrNavigation, response.StatusCode)
 	}
+}
+
+func (s *Service) postRuntime(ctx context.Context, endpoint string, id uuid.UUID, body io.Reader) (*http.Response, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, body)
+	if err != nil {
+		return nil, err
+	}
+	if body != nil {
+		request.Header.Set("Content-Type", "application/json")
+	}
+	request.Header.Set("Authorization", "Bearer "+s.token(id))
+	return s.http.Do(request)
 }
