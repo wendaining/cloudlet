@@ -153,7 +153,8 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /** @description 项目所有者调整项目额度。三个额度字段都必须提供且为正整数；新额度低于活动预留占用时返回 409，原额度与预留保持不变。 */
+        patch: operations["updateProjectCapacity"];
         trace?: never;
     };
     "/api/v1/projects/{projectID}/members": {
@@ -639,6 +640,24 @@ export interface components {
             limit: components["schemas"]["ResourceAmounts"];
             used: components["schemas"]["ResourceAmounts"];
             remaining: components["schemas"]["ResourceAmounts"];
+        };
+        /** @description 调整后的项目额度。三个字段都必须提供，单位为 CPU 毫核、内存字节与实例数，非法或非正的单位返回 400。 */
+        UpdateProjectCapacityRequest: {
+            /**
+             * Format: int64
+             * @description CPU 毫核，必须为正整数。
+             */
+            cpu_millis: number;
+            /**
+             * Format: int64
+             * @description 内存字节，必须为正整数。
+             */
+            memory_bytes: number;
+            /**
+             * Format: int64
+             * @description 实例数，必须为正整数。
+             */
+            instances: number;
         };
         /** @enum {string} */
         ProjectMemberRole: "developer" | "viewer";
@@ -1223,6 +1242,38 @@ export interface operations {
             };
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    updateProjectCapacity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateProjectCapacityRequest"];
+            };
+        };
+        responses: {
+            /** @description 调整后的项目额度、活动预留占用与剩余量；三个值来自同一数据库事务。 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectCapacity"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
             default: components["responses"]["Error"];
         };
     };

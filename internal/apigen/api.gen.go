@@ -408,6 +408,18 @@ type StaticSiteVersionPage struct {
 	Versions   []StaticSiteVersion `json:"versions"`
 }
 
+// UpdateProjectCapacityRequest 调整后的项目额度。三个字段都必须提供，单位为 CPU 毫核、内存字节与实例数，非法或非正的单位返回 400。
+type UpdateProjectCapacityRequest struct {
+	// CpuMillis CPU 毫核，必须为正整数。
+	CpuMillis int64 `json:"cpu_millis"`
+
+	// Instances 实例数，必须为正整数。
+	Instances int64 `json:"instances"`
+
+	// MemoryBytes 内存字节，必须为正整数。
+	MemoryBytes int64 `json:"memory_bytes"`
+}
+
 // UpsertProjectMemberRequest defines model for UpsertProjectMemberRequest.
 type UpsertProjectMemberRequest struct {
 	// Email 已有账号的邮箱；服务端去除首尾空白并转为小写后查找。
@@ -511,6 +523,9 @@ type ClickBrowserPageJSONRequestBody = ClickBrowserPageRequest
 
 // NavigateBrowserSessionJSONRequestBody defines body for NavigateBrowserSession for application/json ContentType.
 type NavigateBrowserSessionJSONRequestBody = NavigateBrowserSessionRequest
+
+// UpdateProjectCapacityJSONRequestBody defines body for UpdateProjectCapacity for application/json ContentType.
+type UpdateProjectCapacityJSONRequestBody = UpdateProjectCapacityRequest
 
 // CreateContainerJSONRequestBody defines body for CreateContainer for application/json ContentType.
 type CreateContainerJSONRequestBody = CreateContainerRequest
@@ -684,6 +699,18 @@ type ClientInterface interface {
 	//
 	// 返回项目成员可见的项目额度、活动预留占用和剩余量；三个值来自同一数据库快照。.
 	GetProjectCapacity(ctx context.Context, projectID string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UpdateProjectCapacityWithBody performs a PATCH /api/v1/projects/{projectID}/capacity (the `UpdateProjectCapacity` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// 项目所有者调整项目额度。三个额度字段都必须提供且为正整数；新额度低于活动预留占用时返回 409，原额度与预留保持不变。.
+	UpdateProjectCapacityWithBody(ctx context.Context, projectID string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UpdateProjectCapacity performs a PATCH /api/v1/projects/{projectID}/capacity (the `UpdateProjectCapacity` operationId) request.
+	// Takes a body of the `application/json` content type.
+	//
+	// 项目所有者调整项目额度。三个额度字段都必须提供且为正整数；新额度低于活动预留占用时返回 409，原额度与预留保持不变。.
+	UpdateProjectCapacity(ctx context.Context, projectID string, body UpdateProjectCapacityJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// CreateContainerWithBody performs a POST /api/v1/projects/{projectID}/containers (the `CreateContainer` operationId) request,
 	// with any type of body and a specified content type.
@@ -1107,6 +1134,38 @@ func (c *Client) DownloadBrowserScreenshot(ctx context.Context, projectID Browse
 // 返回项目成员可见的项目额度、活动预留占用和剩余量；三个值来自同一数据库快照。.
 func (c *Client) GetProjectCapacity(ctx context.Context, projectID string, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetProjectCapacityRequest(c.Server, projectID)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// UpdateProjectCapacityWithBody performs a PATCH /api/v1/projects/{projectID}/capacity (the `UpdateProjectCapacity` operationId) request,
+// with any type of body and a specified content type.
+//
+// 项目所有者调整项目额度。三个额度字段都必须提供且为正整数；新额度低于活动预留占用时返回 409，原额度与预留保持不变。.
+func (c *Client) UpdateProjectCapacityWithBody(ctx context.Context, projectID string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateProjectCapacityRequestWithBody(c.Server, projectID, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// UpdateProjectCapacity performs a PATCH /api/v1/projects/{projectID}/capacity (the `UpdateProjectCapacity` operationId) request.
+// Takes a body of the `application/json` content type.
+//
+// 项目所有者调整项目额度。三个额度字段都必须提供且为正整数；新额度低于活动预留占用时返回 409，原额度与预留保持不变。.
+func (c *Client) UpdateProjectCapacity(ctx context.Context, projectID string, body UpdateProjectCapacityJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateProjectCapacityRequest(c.Server, projectID, body)
 	if err != nil {
 		return nil, err
 	}
@@ -2137,6 +2196,53 @@ func NewGetProjectCapacityRequest(server string, projectID string) (*http.Reques
 	if err != nil {
 		return nil, err
 	}
+
+	return req, nil
+}
+
+// NewUpdateProjectCapacityRequest calls the generic UpdateProjectCapacity builder with application/json body
+func NewUpdateProjectCapacityRequest(server string, projectID string, body UpdateProjectCapacityJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewUpdateProjectCapacityRequestWithBody(server, projectID, "application/json", bodyReader)
+}
+
+// NewUpdateProjectCapacityRequestWithBody constructs an http.Request for the UpdateProjectCapacity method, with any body, and a specified content type
+func NewUpdateProjectCapacityRequestWithBody(server string, projectID string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/capacity", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPatch, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -3217,6 +3323,20 @@ type ClientWithResponsesInterface interface {
 	//
 	// Returns a wrapper object for the known response body format(s).
 	GetProjectCapacityWithResponse(ctx context.Context, projectID string, reqEditors ...RequestEditorFn) (*GetProjectCapacityResponse, error)
+
+	// UpdateProjectCapacityWithBodyWithResponse performs a PATCH /api/v1/projects/{projectID}/capacity (the `UpdateProjectCapacity` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// 项目所有者调整项目额度。三个额度字段都必须提供且为正整数；新额度低于活动预留占用时返回 409，原额度与预留保持不变。.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	UpdateProjectCapacityWithBodyWithResponse(ctx context.Context, projectID string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateProjectCapacityResponse, error)
+
+	// UpdateProjectCapacityWithResponse performs a PATCH /api/v1/projects/{projectID}/capacity (the `UpdateProjectCapacity` operationId) request.
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// 项目所有者调整项目额度。三个额度字段都必须提供且为正整数；新额度低于活动预留占用时返回 409，原额度与预留保持不变。.
+	UpdateProjectCapacityWithResponse(ctx context.Context, projectID string, body UpdateProjectCapacityJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateProjectCapacityResponse, error)
 
 	// CreateContainerWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/containers (the `CreateContainer` operationId) request,
 	// with any type of body and a specified content type.
@@ -4306,6 +4426,89 @@ func (r GetProjectCapacityResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetProjectCapacityResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type UpdateProjectCapacityResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *ProjectCapacity
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *Error
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Error
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Error
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *Error
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r UpdateProjectCapacityResponse) GetJSON200() *ProjectCapacity {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r UpdateProjectCapacityResponse) GetJSON400() *Error {
+	return r.JSON400
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r UpdateProjectCapacityResponse) GetJSON401() *Error {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r UpdateProjectCapacityResponse) GetJSON403() *Error {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r UpdateProjectCapacityResponse) GetJSON404() *Error {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r UpdateProjectCapacityResponse) GetJSON409() *Error {
+	return r.JSON409
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r UpdateProjectCapacityResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r UpdateProjectCapacityResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r UpdateProjectCapacityResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r UpdateProjectCapacityResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r UpdateProjectCapacityResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -6085,6 +6288,32 @@ func (c *ClientWithResponses) GetProjectCapacityWithResponse(ctx context.Context
 	return ParseGetProjectCapacityResponse(rsp)
 }
 
+// UpdateProjectCapacityWithBodyWithResponse performs a PATCH /api/v1/projects/{projectID}/capacity (the `UpdateProjectCapacity` operationId) request,
+// with any type of body and a specified content type.
+//
+// 项目所有者调整项目额度。三个额度字段都必须提供且为正整数；新额度低于活动预留占用时返回 409，原额度与预留保持不变。.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) UpdateProjectCapacityWithBodyWithResponse(ctx context.Context, projectID string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateProjectCapacityResponse, error) {
+	rsp, err := c.UpdateProjectCapacityWithBody(ctx, projectID, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateProjectCapacityResponse(rsp)
+}
+
+// UpdateProjectCapacityWithResponse performs a PATCH /api/v1/projects/{projectID}/capacity (the `UpdateProjectCapacity` operationId) request.
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// 项目所有者调整项目额度。三个额度字段都必须提供且为正整数；新额度低于活动预留占用时返回 409，原额度与预留保持不变。.
+func (c *ClientWithResponses) UpdateProjectCapacityWithResponse(ctx context.Context, projectID string, body UpdateProjectCapacityJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateProjectCapacityResponse, error) {
+	rsp, err := c.UpdateProjectCapacity(ctx, projectID, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateProjectCapacityResponse(rsp)
+}
+
 // CreateContainerWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/containers (the `CreateContainer` operationId) request,
 // with any type of body and a specified content type.
 //
@@ -7072,6 +7301,74 @@ func ParseGetProjectCapacityResponse(rsp *http.Response) (*GetProjectCapacityRes
 			return nil, err
 		}
 		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseUpdateProjectCapacityResponse parses an HTTP response from a UpdateProjectCapacityWithResponse call
+func ParseUpdateProjectCapacityResponse(rsp *http.Response) (*UpdateProjectCapacityResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &UpdateProjectCapacityResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest ProjectCapacity
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
 		var dest Error
@@ -8446,6 +8743,9 @@ type ServerInterface interface {
 	// (GET /api/v1/projects/{projectID}/capacity)
 	GetProjectCapacity(c *gin.Context, projectID string)
 
+	// (PATCH /api/v1/projects/{projectID}/capacity)
+	UpdateProjectCapacity(c *gin.Context, projectID string)
+
 	// (POST /api/v1/projects/{projectID}/containers)
 	CreateContainer(c *gin.Context, projectID string, params CreateContainerParams)
 
@@ -8936,6 +9236,31 @@ func (siw *ServerInterfaceWrapper) GetProjectCapacity(c *gin.Context) {
 	}
 
 	siw.Handler.GetProjectCapacity(c, projectID)
+}
+
+// UpdateProjectCapacity operation middleware
+func (siw *ServerInterfaceWrapper) UpdateProjectCapacity(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.UpdateProjectCapacity(c, projectID)
 }
 
 // CreateContainer operation middleware
@@ -9666,6 +9991,7 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID", wrapper.GetProject)
 	router.PATCH(options.BaseURL+"/api/v1/projects/:projectID", wrapper.RenameProject)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/capacity", wrapper.GetProjectCapacity)
+	router.PATCH(options.BaseURL+"/api/v1/projects/:projectID/capacity", wrapper.UpdateProjectCapacity)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/members", wrapper.ListProjectMembers)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/members", wrapper.UpsertProjectMember)
 	router.DELETE(options.BaseURL+"/api/v1/projects/:projectID/members/:userID", wrapper.RemoveProjectMember)

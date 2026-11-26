@@ -337,12 +337,66 @@ func (h *handler) GetProjectCapacity(c *gin.Context, projectID string) {
 		h.failure(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, apigen.ProjectCapacity{
-		ProjectId: usage.ProjectID,
-		Limit:     resourceAmounts(usage.Limit),
-		Used:      resourceAmounts(usage.Used),
-		Remaining: resourceAmounts(usage.Remaining),
-	})
+	c.JSON(http.StatusOK, projectCapacityResponse(usage))
+}
+
+// UpdateProjectCapacity adjusts the project quota for an owner. The capacity
+// store holds the quota row lock while checking active reservations, so a
+// limit below current usage is rejected without changing the quota or any
+// running execution.
+func (h *handler) UpdateProjectCapacity(c *gin.Context, projectID string) {
+	_, normalizedID, membership, ok := h.projectAccess(c, projectID)
+	if !ok {
+		return
+	}
+	if membership.Role != "owner" {
+		c.JSON(http.StatusForbidden, apigen.Error{Message: "只有项目所有者可以调整项目额度"})
+		return
+	}
+	var body apigen.UpdateProjectCapacityRequest
+	decoder := json.NewDecoder(http.MaxBytesReader(c.Writer, c.Request.Body, 4096))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil {
+		c.JSON(http.StatusBadRequest, apigen.Error{Message: "项目额度请求格式无效"})
+		return
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		c.JSON(http.StatusBadRequest, apigen.Error{Message: "项目额度请求格式无效"})
+		return
+	}
+	resources := capacity.Resources{
+		CPUMillis:   body.CpuMillis,
+		MemoryBytes: body.MemoryBytes,
+		Instances:   body.Instances,
+	}
+	if resources.CPUMillis <= 0 || resources.MemoryBytes <= 0 || resources.Instances <= 0 {
+		c.JSON(http.StatusBadRequest, apigen.Error{Message: "项目额度需要正的 CPU 毫核、内存字节与实例数"})
+		return
+	}
+	capacityStore, err := capacity.NewStore(h.store.DB)
+	if err != nil {
+		h.failure(c, err)
+		return
+	}
+	usage, err := capacityStore.UpdateProjectQuota(c.Request.Context(), uuid.MustParse(normalizedID), resources)
+	if errors.Is(err, capacity.ErrQuotaInUse) {
+		c.JSON(http.StatusConflict, apigen.Error{Message: err.Error()})
+		return
+	}
+	if errors.Is(err, capacity.ErrProjectNotFound) || errors.Is(err, capacity.ErrProjectQuotaNotFound) {
+		c.JSON(http.StatusNotFound, apigen.Error{Message: "项目不存在或没有访问权限"})
+		return
+	}
+	if errors.Is(err, fs.ErrInvalid) {
+		c.JSON(http.StatusBadRequest, apigen.Error{Message: err.Error()})
+		return
+	}
+	if err != nil {
+		h.failure(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, projectCapacityResponse(usage))
 }
 
 func (h *handler) ListProjectMembers(c *gin.Context, projectID string) {
@@ -642,6 +696,15 @@ func resourceAmounts(resources capacity.Resources) apigen.ResourceAmounts {
 		CpuMillis:   resources.CPUMillis,
 		MemoryBytes: resources.MemoryBytes,
 		Instances:   resources.Instances,
+	}
+}
+
+func projectCapacityResponse(usage capacity.ProjectUsage) apigen.ProjectCapacity {
+	return apigen.ProjectCapacity{
+		ProjectId: usage.ProjectID,
+		Limit:     resourceAmounts(usage.Limit),
+		Used:      resourceAmounts(usage.Used),
+		Remaining: resourceAmounts(usage.Remaining),
 	}
 }
 

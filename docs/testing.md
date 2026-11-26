@@ -8,7 +8,7 @@
 | npm run lint:config | JSON、YAML、Issue 表单与 Actions 约定 |
 | npm run lint:tooling | 脚本语法、ShellCheck、配置文件与真实端口检查 |
 | make test | Go race 测试、真实 HTTP、Gateway 转发与服务停止 |
-| make test-integration | Docker 中的 PostgreSQL 迁移、账号、会话、项目与成员角色、操作记录、项目凭据、路由快照、容量预留、容器容量准入、项目容量查询、就绪检查、workerd 执行、管理 API 容器创建与 Gateway 访问，以及容器启动、观测、HTTP 就绪探测、配额触发、停止与删除 |
+| make test-integration | Docker 中的 PostgreSQL 迁移、账号、会话、项目与成员角色、操作记录、项目凭据、路由快照、容量预留、容器容量准入、项目容量查询与额度调整、就绪检查、workerd 执行、管理 API 容器创建与 Gateway 访问，以及容器启动、观测、HTTP 就绪探测、配额触发、停止与删除 |
 | make web-check | TypeScript、ESLint、Prettier、Vite 构建与接口生成一致性 |
 | make dev-check | 真实本机进程、数据库、热重载、完整停止、多实例与失败清理 |
 | make test-e2e | 真实 Chromium 在桌面和手机尺寸下完成登录、刷新和退出 |
@@ -91,6 +91,16 @@ go test -race -count=1 -tags=integration ./internal/controlplane
 ```
 
 用例创建两个实际预留，确认查询结果等于两项之和；释放其中一项后再次查询，确认占用减少且剩余量增加；查看者可以读取，非成员、未知项目和未配置配额返回 404，未登录返回 401。接口在 REPEATABLE READ 只读事务中读取配额和占用，两个值来自同一快照。剩余量只表示项目配额内的余量，不表示主机当前余量。
+
+## 项目额度调整验收
+
+项目额度调整使用真实 PostgreSQL、HTTP 管理 API 和实际 Docker 容器，验证所有者提高或降低额度、拒绝低于活动占用的设置，以及拒绝非法单位。
+
+```sh
+go test -race -count=1 -tags=integration -run 'TestProjectCapacityAdjustment' -v ./internal/controlplane
+```
+
+数据库用例先创建实际预留，确认所有者可以调高额度并取得同一事务内的额度、占用与剩余量；把 CPU、内存或实例额度分别降到占用以下时返回 409，额度与活动预留保持不变；额度等于占用时允许设置且剩余量为零；释放预留后可以继续降低。未配置配额的项目可以由所有者首次设置；查看者、开发者、非成员和未登录请求分别返回 403、403、404 和 401；零值、负值、缺失字段、小数、字符串、未知字段和多余 JSON 内容返回 400。并发降低额度与申请容量的用例确认两者恰好一个成功，最终占用不会超过额度。真实容器用例通过 `internal/executions` 启动固定 nginx 镜像，把额度调高后调低到容器占用以下，确认接口返回 409 且容器继续运行；停止并删除容器后才允许继续降低额度。
 
 ## 项目凭据验收
 
