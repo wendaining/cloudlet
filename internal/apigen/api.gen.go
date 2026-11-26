@@ -389,6 +389,25 @@ type ResourceAmounts struct {
 	MemoryBytes int64 `json:"memory_bytes"`
 }
 
+// S3Binding defines model for S3Binding.
+type S3Binding struct {
+	Bucket          string             `json:"bucket"`
+	Endpoint        string             `json:"endpoint"`
+	Name            string             `json:"name"`
+	Region          string             `json:"region"`
+	SecretVersionId openapi_types.UUID `json:"secret_version_id"`
+	VerifiedAt      time.Time          `json:"verified_at"`
+}
+
+// S3BindingInput defines model for S3BindingInput.
+type S3BindingInput struct {
+	Bucket          string             `json:"bucket"`
+	Endpoint        string             `json:"endpoint"`
+	Name            string             `json:"name"`
+	Region          string             `json:"region"`
+	SecretVersionId openapi_types.UUID `json:"secret_version_id"`
+}
+
 // Session defines model for Session.
 type Session struct {
 	Projects []Project `json:"projects"`
@@ -589,6 +608,9 @@ type UpsertProjectMemberJSONRequestBody = UpsertProjectMemberRequest
 
 // CreatePostgresBindingJSONRequestBody defines body for CreatePostgresBinding for application/json ContentType.
 type CreatePostgresBindingJSONRequestBody = PostgresBindingInput
+
+// CreateS3BindingJSONRequestBody defines body for CreateS3Binding for application/json ContentType.
+type CreateS3BindingJSONRequestBody = S3BindingInput
 
 // CreateProjectSecretVersionJSONRequestBody defines body for CreateProjectSecretVersion for application/json ContentType.
 type CreateProjectSecretVersionJSONRequestBody = CreateProjectSecretRequest
@@ -853,6 +875,23 @@ type ClientInterface interface {
 	//
 	// 项目成员查询 PostgreSQL 绑定元数据与验证时间。.
 	GetPostgresBinding(ctx context.Context, projectID string, name string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateS3BindingWithBody performs a POST /api/v1/projects/{projectID}/s3-bindings (the `CreateS3Binding` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// 项目所有者登记 S3 绑定。连接验证成功后保存。.
+	CreateS3BindingWithBody(ctx context.Context, projectID string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateS3Binding performs a POST /api/v1/projects/{projectID}/s3-bindings (the `CreateS3Binding` operationId) request.
+	// Takes a body of the `application/json` content type.
+	//
+	// 项目所有者登记 S3 绑定。连接验证成功后保存。.
+	CreateS3Binding(ctx context.Context, projectID string, body CreateS3BindingJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetS3Binding performs a GET /api/v1/projects/{projectID}/s3-bindings/{name} (the `GetS3Binding` operationId) request.
+	//
+	// 项目成员查询 S3 绑定元数据与验证时间。.
+	GetS3Binding(ctx context.Context, projectID string, name string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListProjectSecrets performs a GET /api/v1/projects/{projectID}/secrets (the `ListProjectSecrets` operationId) request.
 	//
@@ -1521,6 +1560,53 @@ func (c *Client) CreatePostgresBinding(ctx context.Context, projectID string, bo
 // 项目成员查询 PostgreSQL 绑定元数据与验证时间。.
 func (c *Client) GetPostgresBinding(ctx context.Context, projectID string, name string, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetPostgresBindingRequest(c.Server, projectID, name)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateS3BindingWithBody performs a POST /api/v1/projects/{projectID}/s3-bindings (the `CreateS3Binding` operationId) request,
+// with any type of body and a specified content type.
+//
+// 项目所有者登记 S3 绑定。连接验证成功后保存。.
+func (c *Client) CreateS3BindingWithBody(ctx context.Context, projectID string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateS3BindingRequestWithBody(c.Server, projectID, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateS3Binding performs a POST /api/v1/projects/{projectID}/s3-bindings (the `CreateS3Binding` operationId) request.
+// Takes a body of the `application/json` content type.
+//
+// 项目所有者登记 S3 绑定。连接验证成功后保存。.
+func (c *Client) CreateS3Binding(ctx context.Context, projectID string, body CreateS3BindingJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateS3BindingRequest(c.Server, projectID, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetS3Binding performs a GET /api/v1/projects/{projectID}/s3-bindings/{name} (the `GetS3Binding` operationId) request.
+//
+// 项目成员查询 S3 绑定元数据与验证时间。.
+func (c *Client) GetS3Binding(ctx context.Context, projectID string, name string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetS3BindingRequest(c.Server, projectID, name)
 	if err != nil {
 		return nil, err
 	}
@@ -3089,6 +3175,94 @@ func NewGetPostgresBindingRequest(server string, projectID string, name string) 
 	return req, nil
 }
 
+// NewCreateS3BindingRequest calls the generic CreateS3Binding builder with application/json body
+func NewCreateS3BindingRequest(server string, projectID string, body CreateS3BindingJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateS3BindingRequestWithBody(server, projectID, "application/json", bodyReader)
+}
+
+// NewCreateS3BindingRequestWithBody constructs an http.Request for the CreateS3Binding method, with any body, and a specified content type
+func NewCreateS3BindingRequestWithBody(server string, projectID string, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/s3-bindings", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewGetS3BindingRequest constructs an http.Request for the GetS3Binding method
+func NewGetS3BindingRequest(server string, projectID string, name string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "projectID", projectID, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "name", name, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/projects/%s/s3-bindings/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewListProjectSecretsRequest constructs an http.Request for the ListProjectSecrets method
 func NewListProjectSecretsRequest(server string, projectID string) (*http.Request, error) {
 	var err error
@@ -4033,6 +4207,27 @@ type ClientWithResponsesInterface interface {
 	//
 	// Returns a wrapper object for the known response body format(s).
 	GetPostgresBindingWithResponse(ctx context.Context, projectID string, name string, reqEditors ...RequestEditorFn) (*GetPostgresBindingResponse, error)
+
+	// CreateS3BindingWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/s3-bindings (the `CreateS3Binding` operationId) request,
+	// with any type of body and a specified content type.
+	//
+	// 项目所有者登记 S3 绑定。连接验证成功后保存。.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	CreateS3BindingWithBodyWithResponse(ctx context.Context, projectID string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateS3BindingResponse, error)
+
+	// CreateS3BindingWithResponse performs a POST /api/v1/projects/{projectID}/s3-bindings (the `CreateS3Binding` operationId) request.
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// 项目所有者登记 S3 绑定。连接验证成功后保存。.
+	CreateS3BindingWithResponse(ctx context.Context, projectID string, body CreateS3BindingJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateS3BindingResponse, error)
+
+	// GetS3BindingWithResponse performs a GET /api/v1/projects/{projectID}/s3-bindings/{name} (the `GetS3Binding` operationId) request.
+	//
+	// 项目成员查询 S3 绑定元数据与验证时间。.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	GetS3BindingWithResponse(ctx context.Context, projectID string, name string, reqEditors ...RequestEditorFn) (*GetS3BindingResponse, error)
 
 	// ListProjectSecretsWithResponse performs a GET /api/v1/projects/{projectID}/secrets (the `ListProjectSecrets` operationId) request.
 	//
@@ -6215,6 +6410,165 @@ func (r GetPostgresBindingResponse) ContentType() string {
 	return ""
 }
 
+type CreateS3BindingResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *S3Binding
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *Error
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Error
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Error
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *Error
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
+	// JSON422 the response for an HTTP 422 `application/json` response
+	JSON422 *Error
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *Error
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r CreateS3BindingResponse) GetJSON201() *S3Binding {
+	return r.JSON201
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r CreateS3BindingResponse) GetJSON400() *Error {
+	return r.JSON400
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r CreateS3BindingResponse) GetJSON401() *Error {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r CreateS3BindingResponse) GetJSON403() *Error {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r CreateS3BindingResponse) GetJSON404() *Error {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r CreateS3BindingResponse) GetJSON409() *Error {
+	return r.JSON409
+}
+
+// GetJSON422 returns the response for an HTTP 422 `application/json` response
+func (r CreateS3BindingResponse) GetJSON422() *Error {
+	return r.JSON422
+}
+
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r CreateS3BindingResponse) GetJSON503() *Error {
+	return r.JSON503
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r CreateS3BindingResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r CreateS3BindingResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateS3BindingResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateS3BindingResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CreateS3BindingResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetS3BindingResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *S3Binding
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Error
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *Error
+	// JSONDefault the response for an HTTP default `application/json` response
+	JSONDefault *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetS3BindingResponse) GetJSON200() *S3Binding {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r GetS3BindingResponse) GetJSON401() *Error {
+	return r.JSON401
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetS3BindingResponse) GetJSON404() *Error {
+	return r.JSON404
+}
+
+// GetJSONDefault returns the response for an HTTP default `application/json` response
+func (r GetS3BindingResponse) GetJSONDefault() *Error {
+	return r.JSONDefault
+}
+
+// GetBody returns the raw response body bytes
+func (r GetS3BindingResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetS3BindingResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetS3BindingResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetS3BindingResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type ListProjectSecretsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -7727,6 +8081,45 @@ func (c *ClientWithResponses) GetPostgresBindingWithResponse(ctx context.Context
 		return nil, err
 	}
 	return ParseGetPostgresBindingResponse(rsp)
+}
+
+// CreateS3BindingWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/s3-bindings (the `CreateS3Binding` operationId) request,
+// with any type of body and a specified content type.
+//
+// 项目所有者登记 S3 绑定。连接验证成功后保存。.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) CreateS3BindingWithBodyWithResponse(ctx context.Context, projectID string, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateS3BindingResponse, error) {
+	rsp, err := c.CreateS3BindingWithBody(ctx, projectID, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateS3BindingResponse(rsp)
+}
+
+// CreateS3BindingWithResponse performs a POST /api/v1/projects/{projectID}/s3-bindings (the `CreateS3Binding` operationId) request.
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// 项目所有者登记 S3 绑定。连接验证成功后保存。.
+func (c *ClientWithResponses) CreateS3BindingWithResponse(ctx context.Context, projectID string, body CreateS3BindingJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateS3BindingResponse, error) {
+	rsp, err := c.CreateS3Binding(ctx, projectID, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateS3BindingResponse(rsp)
+}
+
+// GetS3BindingWithResponse performs a GET /api/v1/projects/{projectID}/s3-bindings/{name} (the `GetS3Binding` operationId) request.
+//
+// 项目成员查询 S3 绑定元数据与验证时间。.
+//
+// Returns a wrapper object for the known response body format(s).
+func (c *ClientWithResponses) GetS3BindingWithResponse(ctx context.Context, projectID string, name string, reqEditors ...RequestEditorFn) (*GetS3BindingResponse, error) {
+	rsp, err := c.GetS3Binding(ctx, projectID, name, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetS3BindingResponse(rsp)
 }
 
 // ListProjectSecretsWithResponse performs a GET /api/v1/projects/{projectID}/secrets (the `ListProjectSecrets` operationId) request.
@@ -9582,6 +9975,135 @@ func ParseGetPostgresBindingResponse(rsp *http.Response) (*GetPostgresBindingRes
 	return response, nil
 }
 
+// ParseCreateS3BindingResponse parses an HTTP response from a CreateS3BindingWithResponse call
+func ParseCreateS3BindingResponse(rsp *http.Response) (*CreateS3BindingResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateS3BindingResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest S3Binding
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 422:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON422 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetS3BindingResponse parses an HTTP response from a GetS3BindingWithResponse call
+func ParseGetS3BindingResponse(rsp *http.Response) (*GetS3BindingResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetS3BindingResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest S3Binding
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && true:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSONDefault = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseListProjectSecretsResponse parses an HTTP response from a ListProjectSecretsWithResponse call
 func ParseListProjectSecretsResponse(rsp *http.Response) (*ListProjectSecretsResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -10555,6 +11077,12 @@ type ServerInterface interface {
 
 	// (GET /api/v1/projects/{projectID}/postgres-bindings/{name})
 	GetPostgresBinding(c *gin.Context, projectID string, name string)
+
+	// (POST /api/v1/projects/{projectID}/s3-bindings)
+	CreateS3Binding(c *gin.Context, projectID string)
+
+	// (GET /api/v1/projects/{projectID}/s3-bindings/{name})
+	GetS3Binding(c *gin.Context, projectID string, name string)
 
 	// (GET /api/v1/projects/{projectID}/secrets)
 	ListProjectSecrets(c *gin.Context, projectID string)
@@ -11569,6 +12097,65 @@ func (siw *ServerInterfaceWrapper) GetPostgresBinding(c *gin.Context) {
 	siw.Handler.GetPostgresBinding(c, projectID, name)
 }
 
+// CreateS3Binding operation middleware
+func (siw *ServerInterfaceWrapper) CreateS3Binding(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.CreateS3Binding(c, projectID)
+}
+
+// GetS3Binding operation middleware
+func (siw *ServerInterfaceWrapper) GetS3Binding(c *gin.Context) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "projectID" -------------
+	var projectID string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectID", c.Param("projectID"), &projectID, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter projectID: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	// ------------- Path parameter "name" -------------
+	var name string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", c.Param("name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandler(c, fmt.Errorf("Invalid format for parameter name: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		middleware(c)
+		if c.IsAborted() {
+			return
+		}
+	}
+
+	siw.Handler.GetS3Binding(c, projectID, name)
+}
+
 // ListProjectSecrets operation middleware
 func (siw *ServerInterfaceWrapper) ListProjectSecrets(c *gin.Context) {
 
@@ -12135,4 +12722,6 @@ func RegisterHandlersWithOptions(router gin.IRouter, si ServerInterface, options
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/containers/:containerID/restart", wrapper.RestartContainer)
 	router.POST(options.BaseURL+"/api/v1/projects/:projectID/postgres-bindings", wrapper.CreatePostgresBinding)
 	router.GET(options.BaseURL+"/api/v1/projects/:projectID/postgres-bindings/:name", wrapper.GetPostgresBinding)
+	router.POST(options.BaseURL+"/api/v1/projects/:projectID/s3-bindings", wrapper.CreateS3Binding)
+	router.GET(options.BaseURL+"/api/v1/projects/:projectID/s3-bindings/:name", wrapper.GetS3Binding)
 }
