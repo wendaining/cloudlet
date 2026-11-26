@@ -580,3 +580,14 @@ func TestWaitReadyRejectsInvalidContainerIDBeforeDocker(t *testing.T) {
 		t.Fatalf("WaitReady() error = %v, want fs.ErrInvalid", err)
 	}
 }
+
+func TestValidateReadinessProbeExported(t *testing.T) {
+	if err := ValidateReadinessProbe(validReadinessProbe()); err != nil {
+		t.Fatal(err)
+	}
+	invalid := validReadinessProbe()
+	invalid.Port = 0
+	if err := ValidateReadinessProbe(invalid); !errors.Is(err, fs.ErrInvalid) {
+		t.Fatalf("ValidateReadinessProbe() = %v, want fs.ErrInvalid", err)
+	}
+}

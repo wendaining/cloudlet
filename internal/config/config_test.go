@@ -162,6 +162,67 @@ func TestWorkerRuntimeConfiguration(t *testing.T) {
 	}
 }
 
+func TestContainerRuntimeConfiguration(t *testing.T) {
+	valid := config.ContainerRuntime{
+		HostID:       "host-1",
+		HostBudget:   config.ResourceBudget{CPUMillis: 4000, MemoryBytes: 4 << 30, Instances: 4},
+		ProjectQuota: config.ResourceBudget{CPUMillis: 1000, MemoryBytes: 256 << 20, Instances: 1},
+	}
+	if err := valid.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for _, change := range []func(*config.ContainerRuntime){
+		func(c *config.ContainerRuntime) { c.HostID = "" },
+		func(c *config.ContainerRuntime) { c.HostID = " host" },
+		func(c *config.ContainerRuntime) { c.HostBudget.CPUMillis = 999 },
+		func(c *config.ContainerRuntime) { c.ProjectQuota.MemoryBytes = (256 << 20) - 1 },
+		func(c *config.ContainerRuntime) { c.ProjectQuota.Instances = 0 },
+	} {
+		invalid := valid
+		change(&invalid)
+		if err := invalid.Validate(); err == nil {
+			t.Fatalf("invalid configuration accepted: %+v", invalid)
+		}
+	}
+	cfg := config.Config{APIAddress: "127.0.0.1:0", GatewayAddress: "127.0.0.1:0", Containers: &valid}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("Container runtime accepted without management dependencies")
+	}
+}
+
+func TestWorkerAndContainerRuntimesShareCapacity(t *testing.T) {
+	workers := config.WorkerRuntime{
+		Directory: t.TempDir(), HostID: "host-1",
+		HostBudget:   config.ResourceBudget{CPUMillis: 4000, MemoryBytes: 4 << 30, Instances: 4},
+		ProjectQuota: config.ResourceBudget{CPUMillis: 1000, MemoryBytes: 256 << 20, Instances: 1},
+	}
+	containers := config.ContainerRuntime{
+		HostID: workers.HostID, HostBudget: workers.HostBudget, ProjectQuota: workers.ProjectQuota,
+	}
+	cfg := config.Config{
+		APIAddress: "127.0.0.1:0", GatewayAddress: "127.0.0.1:0",
+		DatabaseURL: "postgres://example", Instance: "test", SiteStorageDirectory: t.TempDir(),
+		Workers: &workers, Containers: &containers,
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	containers.HostID = "host-2"
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("different host identifiers were accepted")
+	}
+	containers.HostID = workers.HostID
+	containers.HostBudget.Instances = 3
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("different host budgets were accepted")
+	}
+	containers.HostBudget = workers.HostBudget
+	containers.ProjectQuota.Instances = 2
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("different project quotas were accepted")
+	}
+}
+
 func TestManagementRequiresAbsoluteSiteStorageDirectory(t *testing.T) {
 	cfg := config.Config{
 		Environment: "development", Instance: "test", DatabaseURL: "postgres://example", SecretKey: make([]byte, 32),

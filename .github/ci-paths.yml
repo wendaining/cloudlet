@@ -109,6 +109,17 @@ browser:
 
 containers:
   - 'internal/containers/**'
+  - 'internal/containerpublish/**'
+  - 'internal/controlplane/**'
+  - 'internal/database/**'
+  - 'internal/routes/**'
+  - 'internal/gateway/**'
+  - 'internal/executions/**'
+  - 'internal/capacity/**'
+  - 'internal/operations/**'
+  - 'internal/config/**'
+  - 'api/**'
+  - 'migrations/**'
   - 'configs/images.json'
   - 'go.mod'
   - 'go.sum'
