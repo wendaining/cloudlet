@@ -369,6 +369,26 @@ paths:
           $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/browser-sessions/{sessionID}/form:
+    parameters:
+      - $ref: '#/components/parameters/BrowserProjectID'
+      - $ref: '#/components/parameters/BrowserSessionID'
+    post:
+      operationId: applyBrowserFormAction
+      description: 填写输入或选择原生选项，使用点击接口提交表单。
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BrowserFormActionRequest'
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '204':
+          description: 表单操作已完成
   /api/v1/projects/{projectID}/browser-sessions/{sessionID}/click:
     parameters:
       - $ref: '#/components/parameters/BrowserProjectID'
@@ -1137,13 +1157,198 @@ paths:
           $ref: "#/components/responses/Error"
         default:
           $ref: "#/components/responses/Error"
-  /api/v1/projects/{projectID}/browser-sessions/{sessionID}/form:
+    delete:
+      operationId: deleteContainer
+      description: 所有者或开发者删除容器，撤销公开路由并释放实际资源。删除确认后容器不再存在。同一幂等键重试返回相同结果。
+      security:
+        - SessionCookie: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+      responses:
+        "204":
+          description: 容器已删除
+        "400":
+          description: 删除请求参数无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          description: 容器状态不允许删除
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: 删除步骤失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/projects/{projectID}/containers/{containerID}/stop:
     parameters:
-      - $ref: '#/components/parameters/BrowserProjectID'
-      - $ref: '#/components/parameters/BrowserSessionID'
+      - name: projectID
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: containerID
+        in: path
+        required: true
+        schema:
+          type: string
     post:
-      operationId: applyBrowserFormAction
-      description: 填写输入或选择原生选项，使用点击接口提交表单。
+      operationId: stopContainer
+      description: 所有者或开发者停止容器，先撤销公开路由，再停止并删除 Docker 容器，确认清理后释放容量。同一幂等键重试返回停止状态。
+      security:
+        - SessionCookie: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+      responses:
+        "200":
+          description: 容器已停止
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Container"
+        "400":
+          description: 停止请求参数无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          description: 容器状态不允许停止或存在未完成操作
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: 停止运行时失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Container"
+        "500":
+          description: 停止步骤失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/projects/{projectID}/containers/{containerID}/restart:
+    parameters:
+      - name: projectID
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: containerID
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      operationId: restartContainer
+      description: 所有者或开发者使用最近保存的配置再次启动容器，就绪后重新注册公开路由。同一幂等键重试返回当前状态。
+      security:
+        - SessionCookie: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+      responses:
+        "200":
+          description: 容器已启动
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Container"
+        "400":
+          description: 再次启动请求参数无效
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Error"
+        "403":
+          $ref: "#/components/responses/Error"
+        "404":
+          $ref: "#/components/responses/Error"
+        "409":
+          description: 容器状态不允许再次启动
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: 镜像准备、容器启动或 HTTP 就绪检查失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Container"
+        "429":
+          description: 容量不足
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Container"
+        "500":
+          description: 再次启动步骤失败
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          $ref: "#/components/responses/Error"
+        default:
+          $ref: "#/components/responses/Error"
+  /api/v1/projects/{projectID}/postgres-bindings:
+    parameters:
+      - name: projectID
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      operationId: createPostgresBinding
+      description: 项目所有者登记 PostgreSQL 绑定。连接验证成功后保存。
       security:
         - SessionCookie: []
       requestBody:
@@ -1151,12 +1356,135 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/BrowserFormActionRequest'
+              $ref: '#/components/schemas/PostgresBindingInput'
       responses:
+        '201':
+          description: 已验证的绑定
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PostgresBinding'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+        '422':
+          $ref: '#/components/responses/Error'
+        '503':
+          $ref: '#/components/responses/Error'
         default:
           $ref: '#/components/responses/Error'
-        '204':
-          description: 表单操作已完成
+  /api/v1/projects/{projectID}/postgres-bindings/{name}:
+    parameters:
+      - name: projectID
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+          maxLength: 63
+    get:
+      operationId: getPostgresBinding
+      description: 项目成员查询 PostgreSQL 绑定元数据与验证时间。
+      security:
+        - SessionCookie: []
+      responses:
+        '200':
+          description: 绑定元数据
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PostgresBinding'
+        '401':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        default:
+          $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/s3-bindings:
+    parameters:
+      - name: projectID
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      operationId: createS3Binding
+      description: 项目所有者登记 S3 绑定。连接验证成功后保存。
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/S3BindingInput'
+      responses:
+        '201':
+          description: 已验证的绑定
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/S3Binding'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+        '422':
+          $ref: '#/components/responses/Error'
+        '503':
+          $ref: '#/components/responses/Error'
+        default:
+          $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/s3-bindings/{name}:
+    parameters:
+      - name: projectID
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: name
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+          maxLength: 63
+    get:
+      operationId: getS3Binding
+      description: 项目成员查询 S3 绑定元数据与验证时间。
+      security:
+        - SessionCookie: []
+      responses:
+        '200':
+          description: 绑定元数据
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/S3Binding'
+        '401':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        default:
+          $ref: '#/components/responses/Error'
 components:
   parameters:
     BrowserProjectID:
@@ -1533,6 +1861,28 @@ components:
       type: string
       enum: [ starting, ready, failed, closed ]
       x-enum-varnames: [ BrowserSessionStatusStarting, BrowserSessionStatusReady, BrowserSessionStatusFailed, BrowserSessionStatusClosed ]
+    BrowserFormActionRequest:
+      type: object
+      additionalProperties: false
+      required: [ action, selector, value ]
+      properties:
+        action:
+          type: string
+          enum: [ fill, select ]
+        selector:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          description: 唯一定位表单控件的 CSS 选择器
+        value:
+          type: string
+          maxLength: 1024
+          description: 填写文本或原生选项的 value。允许空字符串。
+        timeout_ms:
+          type: integer
+          minimum: 1
+          maximum: 30000
+          default: 10000
     BrowserSession:
       type: object
       required: [ id, endpoint, expires_at, status ]
@@ -1819,7 +2169,7 @@ components:
           format: int64
         state:
           type: string
-          description: 容器目标状态，取值为 pending、active 或 failed。
+          description: 容器目标状态，取值为 pending、active、stopped 或 failed。
         failure:
           type: string
         execution_state:
@@ -1938,28 +2288,104 @@ components:
         created_at:
           type: string
           format: date-time
-    BrowserFormActionRequest:
+    PostgresBindingInput:
       type: object
-      additionalProperties: false
-      required: [ action, selector, value ]
+      required: [ name, host, port, database, secret_version_id ]
       properties:
-        action:
+        name:
           type: string
-          enum: [ fill, select ]
-        selector:
+          pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+          maxLength: 63
+        host:
           type: string
           minLength: 1
-          maxLength: 1024
-          description: 唯一定位表单控件的 CSS 选择器
-        value:
-          type: string
-          maxLength: 1024
-          description: 填写文本或原生选项的 value。允许空字符串。
-        timeout_ms:
+          maxLength: 253
+        port:
           type: integer
           minimum: 1
-          maximum: 30000
-          default: 10000
+          maximum: 65535
+        database:
+          type: string
+          minLength: 1
+          maxLength: 63
+        secret_version_id:
+          type: string
+          format: uuid
+    PostgresBinding:
+      type: object
+      required: [ name, host, port, database, secret_version_id, verified_at ]
+      properties:
+        name:
+          type: string
+          pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+          maxLength: 63
+        host:
+          type: string
+          minLength: 1
+          maxLength: 253
+        port:
+          type: integer
+          minimum: 1
+          maximum: 65535
+        database:
+          type: string
+          minLength: 1
+          maxLength: 63
+        secret_version_id:
+          type: string
+          format: uuid
+        verified_at:
+          type: string
+          format: date-time
+    S3BindingInput:
+      type: object
+      required: [ name, endpoint, region, bucket, secret_version_id ]
+      properties:
+        name:
+          type: string
+          pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+          maxLength: 63
+        endpoint:
+          type: string
+          minLength: 1
+          maxLength: 512
+        region:
+          type: string
+          minLength: 1
+          maxLength: 63
+        bucket:
+          type: string
+          minLength: 3
+          maxLength: 63
+        secret_version_id:
+          type: string
+          format: uuid
+    S3Binding:
+      type: object
+      required: [ name, endpoint, region, bucket, secret_version_id, verified_at ]
+      properties:
+        name:
+          type: string
+          pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+          maxLength: 63
+        endpoint:
+          type: string
+          minLength: 1
+          maxLength: 512
+        region:
+          type: string
+          minLength: 1
+          maxLength: 63
+        bucket:
+          type: string
+          minLength: 3
+          maxLength: 63
+        secret_version_id:
+          type: string
+          format: uuid
+        verified_at:
+          type: string
+          format: date-time
   responses:
     StaticSiteVersion:
       description: 不可变静态站点版本
