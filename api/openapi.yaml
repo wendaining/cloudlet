@@ -448,6 +448,31 @@ paths:
           $ref: '#/components/responses/Error'
         '204':
           description: 额外页面已关闭
+  /api/v1/projects/{projectID}/browser-sessions/{sessionID}/wait:
+    parameters:
+      - $ref: '#/components/parameters/BrowserProjectID'
+      - $ref: '#/components/parameters/BrowserSessionID'
+    post:
+      operationId: waitForBrowserPage
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WaitForBrowserPageRequest'
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '204':
+          description: 默认页面已满足等待条件
+        '504':
+          description: 在截止时间内未满足等待条件
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
   /api/v1/projects/{projectID}/browser-sessions/{sessionID}/text:
     parameters:
       - $ref: '#/components/parameters/BrowserProjectID'
@@ -2144,6 +2169,26 @@ components:
           description: 当前标题，最多 512 个 UTF-16 单元
         title_truncated:
           type: boolean
+    WaitForBrowserPageRequest:
+      type: object
+      additionalProperties: false
+      required: [ condition ]
+      properties:
+        condition:
+          type: string
+          enum: [ ready, text ]
+          x-enum-varnames: [ BrowserWaitReady, BrowserWaitText ]
+          description: ready 等待页面加载完成，text 等待默认页面正文包含指定可见文本
+        text:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          description: 仅在 condition 为 text 时必填，区分大小写
+        timeout_ms:
+          type: integer
+          minimum: 1
+          maximum: 30000
+          default: 10000
     BrowserPageText:
       type: object
       required: [ title, title_truncated, text, text_truncated ]
