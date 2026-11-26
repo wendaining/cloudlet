@@ -46,17 +46,17 @@ export function planIssueStatusUpdate(issue, from, to, assignee) {
 
   const labels = labelNames(issue);
   const statuses = labels.filter(label => label.startsWith('status:'));
-  assert(statuses.length === 1 && [from, to].includes(statuses[0]), '当前状态与预期不符，请人工核对');
+  assert(statuses.length > 0 && statuses.every(status => status === from || status === to), '当前状态与预期不符，请人工核对');
 
   const assignees = issue.assignees.map(person => person.login.toLowerCase());
   if (assignee) {
     assert(assignees.length === 0 || assignees.includes(assignee.toLowerCase()), '任务已有其他负责人');
   }
 
-  const update = {};
-  const nextLabels = labels.map(label => label === from ? to : label);
+  const nextLabels = [...labels.filter(label => label !== from && label !== to), to];
   if (['status:ready', 'status:in-progress'].includes(to)) validateTask({ ...issue, labels: nextLabels });
-  if (statuses[0] === from) update.labels = nextLabels;
-  if (assignee && assignees.length === 0) update.assignees = [assignee];
-  return Object.keys(update).length ? update : null;
+  if (assignee && assignees.length === 0) return 'assign';
+  if (!statuses.includes(to)) return 'add';
+  if (statuses.includes(from)) return 'remove';
+  return null;
 }

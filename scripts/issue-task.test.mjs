@@ -63,25 +63,28 @@ test('checks migrated triage issues and reports all metadata and status problems
   assert.equal(result.problems.length, 5);
 });
 
-test('prepares one claim update and safely retries after an uncertain result', () => {
+test('adds an assignee before changing status and can resume after each write', () => {
   const issue = { state: 'open', labels: [...readyLabels, 'legacy-label'], assignees: [] };
   const claim = current => planIssueStatusUpdate(current, 'status:ready', 'status:in-progress', 'owner');
-  const labels = [...taskLabels, 'status:in-progress', 'legacy-label'];
-  assert.deepEqual(claim(issue), { labels, assignees: ['owner'] });
-  assert.deepEqual(claim({ ...issue, labels }), { assignees: ['owner'] });
-  assert.deepEqual(claim({ ...issue, assignees: [{ login: 'owner' }] }), { labels });
-  assert.equal(claim({ ...issue, labels, assignees: [{ login: 'Owner' }] }), null);
+  const assigned = { ...issue, assignees: [{ login: 'Owner' }] };
+  const labels = [...assigned.labels, 'status:in-progress'];
+  assert.equal(claim(issue), 'assign');
+  assert.equal(claim(assigned), 'add');
+  assert.equal(claim({ ...assigned, labels }), 'remove');
+  assert.equal(claim({ ...assigned, labels: labels.filter(label => label !== 'status:ready') }), null);
   assert.throws(() => claim({ ...issue, assignees: [{ login: 'other' }] }), /已有其他负责人/u);
   assert.throws(() => claim({ ...issue, labels: taskLabels }), /状态与预期不符/u);
 });
 
-test('preserves unrelated labels and assignees on a status-only transition', () => {
+test('resumes only the expected status transition and leaves other labels and assignees alone', () => {
   const issue = { state: 'open', labels: [...taskLabels, 'status:blocked', 'legacy-label'], assignees: [{ login: 'owner' }] };
-  const update = planIssueStatusUpdate(issue, 'status:blocked', 'status:ready');
-  assert.deepEqual(update, { labels: [...readyLabels, 'legacy-label'] });
-  assert.equal(planIssueStatusUpdate({ ...issue, ...update }, 'status:blocked', 'status:ready'), null);
+  const advance = current => planIssueStatusUpdate(current, 'status:blocked', 'status:ready');
+  const labels = [...issue.labels, 'status:ready'];
+  assert.equal(advance(issue), 'add');
+  assert.equal(advance({ ...issue, labels }), 'remove');
+  assert.equal(advance({ ...issue, labels: labels.filter(label => label !== 'status:blocked') }), null);
   assert.throws(
-    () => planIssueStatusUpdate({ ...issue, labels: [...issue.labels, 'status:triage'] }, 'status:blocked', 'status:ready'),
+    () => advance({ ...issue, labels: [...labels, 'status:triage'] }),
     /状态与预期不符/u,
   );
 });
