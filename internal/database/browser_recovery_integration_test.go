@@ -109,7 +109,7 @@ func TestBrowserSessionRecoveryAfterServerRestart(t *testing.T) {
 	}
 	capture := func(id uuid.UUID) []byte {
 		t.Helper()
-		image, err := api.CaptureBrowserScreenshotWithResponse(ctx, owner.ID, id)
+		image, err := api.CaptureBrowserScreenshotWithResponse(ctx, owner.ID, id, nil)
 		if err != nil || image.StatusCode() != http.StatusCreated || image.JSON201 == nil {
 			t.Fatalf("capture original page: %v (%v)", image, err)
 		}
