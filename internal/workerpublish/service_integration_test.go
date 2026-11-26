@@ -1075,6 +1075,20 @@ export default {
 		}
 		read(second.Hostname, "updated")
 		read(first.Hostname, original)
+
+		// Also publish and activate a second version on the same Worker with updated bindings,
+		// then verify the new version serves the updated value while version A retains its snapshot.
+		sameWorkerReq := input
+		sameWorkerReq.Hostname = first.Hostname
+		sameWorkerReq.Stage = true
+		sameWorkerReq.Environment = map[string]string{"MESSAGE": "updated-same", "EMPTY": ""}
+		secondSame := decode(request(outsider, http.MethodPost, path, "text-a-v2", sameWorkerReq, http.StatusCreated))
+		if secondSame.ArtifactDigest != first.ArtifactDigest || secondSame.ConfigDigest == first.ConfigDigest {
+			t.Fatalf("same-Worker update should reuse artifact and create a new config snapshot: %+v / %+v", first, secondSame)
+		}
+		request(outsider, http.MethodPost, metadataPath(otherProject.ID, secondSame.Id)+"/activate", "activate-text-a-v2", nil, http.StatusOK)
+		read(first.Hostname, "updated-same")
+
 		firstStored := decode(request(outsider, http.MethodGet, metadataPath(otherProject.ID, first.Id), "", nil, http.StatusOK))
 		if firstStored.ConfigDigest != first.ConfigDigest {
 			t.Fatalf("initial version configuration changed: %+v", firstStored)
@@ -1082,7 +1096,7 @@ export default {
 		for _, version := range []struct {
 			digest string
 			value  string
-		}{{first.ConfigDigest, original}, {second.ConfigDigest, "updated"}} {
+		}{{first.ConfigDigest, original}, {second.ConfigDigest, "updated"}, {secondSame.ConfigDigest, "updated-same"}} {
 			digest := fmt.Sprintf("%x", sha256.Sum256([]byte(version.value)))
 			configBytes, err := os.ReadFile(filepath.Join(configuration.Directory, version.digest))
 			if err != nil || !bytes.Contains(configBytes, []byte("environment/MESSAGE-"+digest+".txt")) {
