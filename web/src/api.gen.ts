@@ -535,6 +535,45 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{projectID}/containers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用。同一幂等键复用操作。 */
+        post: operations["createContainer"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/containers/{containerID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+                containerID: string;
+            };
+            cookie?: never;
+        };
+        /** @description 项目成员查询容器配置、执行与操作结果。 */
+        get: operations["getContainer"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -774,6 +813,86 @@ export interface components {
         };
         Error: {
             message: string;
+        };
+        CreateContainerRequest: {
+            /** @description 项目内稳定的容器名称。 */
+            name: string;
+            /** @description 包含不可变摘要的镜像引用，格式为 repository@sha256:digest。仅使用标签的引用会被拒绝。 */
+            image: string;
+            /** @description 容器内 HTTP 服务监听的 TCP 端口。 */
+            port: number;
+            /** @description 无端口的公开域名，由 Gateway 提供根路径路由。 */
+            hostname: string;
+            /**
+             * Format: int64
+             * @description 申请并限制的 CPU 毫核。
+             */
+            cpu_millis: number;
+            /**
+             * Format: int64
+             * @description 申请并限制的内存字节。
+             */
+            memory_bytes: number;
+            /** @description 非 root 运行身份，格式为 user 或 user:group。省略时使用 1000:1000。 */
+            user?: string;
+            /** @description 覆盖镜像命令的参数数组。省略时使用镜像默认命令。 */
+            command?: string[];
+            /** @description KEY=value 形式的环境变量。请求体总大小最多 64 KiB。 */
+            env?: string[];
+            /**
+             * @description 就绪探测的绝对请求路径。
+             * @default /
+             */
+            health_check_path: string;
+            /**
+             * Format: int64
+             * @description 就绪探测的总截止时间。接受 200 至 399 的最终 HTTP 状态。
+             * @default 15000
+             */
+            health_check_timeout_ms: number;
+        };
+        Container: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            project_id: string;
+            /** Format: uuid */
+            execution_id: string;
+            /** Format: uuid */
+            operation_id: string;
+            name: string;
+            image: string;
+            image_digest: string;
+            port: number;
+            hostname: string;
+            path_prefix: string;
+            /** Format: int64 */
+            cpu_millis: number;
+            /** Format: int64 */
+            memory_bytes: number;
+            /** Format: int64 */
+            pids: number;
+            /** Format: int64 */
+            open_files: number;
+            user: string;
+            command?: string[];
+            env?: string[];
+            health_check_path: string;
+            /** Format: int64 */
+            health_check_timeout_ms: number;
+            /** @description 容器目标状态，取值为 pending、active 或 failed。 */
+            state: string;
+            failure: string;
+            /** @description 实际执行状态，取值为 pending、running、stopped 或 failed。 */
+            execution_state: string;
+            docker_container_id: string;
+            target: string;
+            operation_phase: string;
+            operation_outcome: string;
+            /** Format: int64 */
+            generation: number;
+            /** Format: date-time */
+            created_at: string;
         };
         DeployWorkerRequest: {
             /** @description 已打包的单文件 JavaScript ES Module，UTF-8 编码后最多 1048576 字节。入口固定为 index.mjs。 */
@@ -1843,6 +1962,130 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkerDeployment"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    createContainer: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                projectID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateContainerRequest"];
+            };
+        };
+        responses: {
+            /** @description 已存在的容器创建结果 */
+            200: {
+                headers: {
+                    /** @description 已登记容器的项目内查询地址。容器尚未登记时省略。 */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Container"];
+                };
+            };
+            /** @description 新容器创建结果 */
+            201: {
+                headers: {
+                    /** @description 已登记容器的项目内查询地址。容器尚未登记时省略。 */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Container"];
+                };
+            };
+            /** @description 容器创建请求参数无效 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            /** @description 容器名称、路由或幂等键冲突 */
+            409: {
+                headers: {
+                    /** @description 已登记容器的项目内查询地址。容器尚未登记时省略。 */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 镜像准备、容器启动或 HTTP 就绪检查失败 */
+            422: {
+                headers: {
+                    /** @description 已登记容器的项目内查询地址。容器尚未登记时省略。 */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Container"];
+                };
+            };
+            /** @description 容量不足 */
+            429: {
+                headers: {
+                    /** @description 已登记容器的项目内查询地址。容器尚未登记时省略。 */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Container"];
+                };
+            };
+            /** @description 容器创建步骤失败 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getContainer: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: string;
+                containerID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 容器创建结果 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Container"];
                 };
             };
             401: components["responses"]["Error"];
