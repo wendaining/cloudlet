@@ -461,6 +461,12 @@ func TestBrowserSessionHTTP(t *testing.T) {
 	}
 	t.Log("a second real Chromium session has no logs from the first")
 	verifyBrowserUpload(t, ctx, ownerAPI, owner.ID, replacement.JSON201.Id, session.Id, screenshot, downloaded, fixture)
+	if err := expire(replacement.JSON201.Id); err != nil {
+		t.Fatal(err)
+	}
+	t.Run("replay acceptance example", func(t *testing.T) {
+		verifyBrowserAcceptanceExample(t, ctx, server.URL, owner.ID, fixture, emails[0], password)
+	})
 }
 
 func browserRuntimeImage(t *testing.T, ctx context.Context) (string, string) {
