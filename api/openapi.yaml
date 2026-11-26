@@ -420,6 +420,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BrowserPageText'
+  /api/v1/projects/{projectID}/browser-sessions/{sessionID}/form:
+    parameters:
+      - $ref: '#/components/parameters/BrowserProjectID'
+      - $ref: '#/components/parameters/BrowserSessionID'
+    post:
+      operationId: applyBrowserFormAction
+      description: 填写输入或选择原生选项，使用点击接口提交表单。
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BrowserFormActionRequest'
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '204':
+          description: 表单操作已完成
   /api/v1/projects/{projectID}/browser-sessions/{sessionID}/click:
     parameters:
       - $ref: '#/components/parameters/BrowserProjectID'
@@ -1906,6 +1926,28 @@ components:
           maxLength: 4096
         text_truncated:
           type: boolean
+    BrowserFormActionRequest:
+      type: object
+      additionalProperties: false
+      required: [ action, selector, value ]
+      properties:
+        action:
+          type: string
+          enum: [ fill, select ]
+        selector:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          description: 唯一定位表单控件的 CSS 选择器
+        value:
+          type: string
+          maxLength: 1024
+          description: 填写文本或原生选项的 value。允许空字符串。
+        timeout_ms:
+          type: integer
+          minimum: 1
+          maximum: 30000
+          default: 10000
     BrowserSession:
       type: object
       required: [ id, endpoint, expires_at, status, desired_status, actual_status ]
