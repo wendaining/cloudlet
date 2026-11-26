@@ -111,6 +111,23 @@ func verifyImage(info image.InspectResponse, canonical string, want digest.Diges
 	return Image{}, fmt.Errorf("verify image %s: Docker reports digests %v, want %s: %w", canonical, info.RepoDigests, want, ErrImageDigestMismatch)
 }
 
+// ValidateImageReference reports whether value is an immutable repository@digest
+// reference. It does not contact Docker Engine.
+func ValidateImageReference(value string) error {
+	_, _, err := parseImageReference(value)
+	return err
+}
+
+// ParseImageReference returns the canonical repository@digest reference and the
+// requested digest without contacting Docker Engine.
+func ParseImageReference(value string) (string, string, error) {
+	canonical, want, err := parseImageReference(value)
+	if err != nil {
+		return "", "", err
+	}
+	return canonical, want.String(), nil
+}
+
 // parseImageReference returns the canonical repository@digest reference and the
 // requested digest. Tag-only references are rejected because they can resolve
 // to different content over time.

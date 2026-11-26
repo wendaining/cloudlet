@@ -51,6 +51,6 @@ else if (action === 'migrate' || action === 'db-status') {
 else if (action === 'test-integration') {
   const config = await loadConfig();
   await connectDocker(config);
-  await run('go', ['test', '-race', '-count=1', '-tags=integration', './internal/database', './internal/routes', './internal/capacity', './internal/controlplane', './internal/executions', './internal/workers', './internal/workerpublish', './internal/containers'], config.env);
+  await run('go', ['test', '-race', '-count=1', '-tags=integration', './internal/database', './internal/routes', './internal/capacity', './internal/controlplane', './internal/executions', './internal/workers', './internal/workerpublish', './internal/containers', './internal/containerpublish'], config.env);
 }
 else throw new Error(`未知开发命令：${action}`);

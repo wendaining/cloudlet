@@ -47,6 +47,8 @@ make dev 检查配置与端口，使用 compose.yaml 和 compose.dev.yaml 启动
 
 开发入口在实例配置中启用 Worker 首发，产物保存到 `.local/实例名称/workers`。主机预算与项目初始配额均配置为 4000 CPU 毫核、四 GiB 内存与四个实例。已有项目配额保持原值。每个 Worker 执行申请 1000 CPU 毫核、256 MiB 内存与一个实例。发布方法见 [Worker 发布](workers.md)。
 
+开发入口同时启用容器创建，与 Worker 共享同一主机预算和项目初始配额。创建请求使用不可变镜像摘要，容器就绪后通过 Gateway 访问所声明的域名。接口、限制和失败清理见 [容器创建与公开访问](containers.md)。
+
 开发账号使用 CLOUDLET_DEV_EMAIL 与 CLOUDLET_DEV_PASSWORD，走正常登录流程。后续启动保留数据库中已有的账号与密码。生产环境禁止执行开发账号初始化。
 
 | 命令 | 行为 |

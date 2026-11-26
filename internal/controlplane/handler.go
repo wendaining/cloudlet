@@ -20,6 +20,7 @@ import (
 	"github.com/wendaining/cloudlet/internal/browser"
 	"github.com/wendaining/cloudlet/internal/capacity"
 	"github.com/wendaining/cloudlet/internal/config"
+	"github.com/wendaining/cloudlet/internal/containerpublish"
 	"github.com/wendaining/cloudlet/internal/database"
 	"github.com/wendaining/cloudlet/internal/mcpserver"
 	"github.com/wendaining/cloudlet/internal/routes"
@@ -39,10 +40,11 @@ type handler struct {
 	config     config.Config
 	logger     *slog.Logger
 	workers    *workerpublish.Service
+	containers *containerpublish.Service
 }
 
 func NewHandler(store *database.Store, cfg config.Config, logger *slog.Logger) (http.Handler, func()) {
-	return newHandler(store, nil, nil, cfg, logger, nil, nil, nil)
+	return newHandler(store, nil, nil, cfg, logger, nil, nil, nil, nil)
 }
 
 // NewHandlerWithMCP mounts the read-only MCP endpoint on the management API.
@@ -52,22 +54,34 @@ func NewHandlerWithMCP(store *database.Store, sites *staticdeploy.Service, brows
 
 // NewHandlerWithMCPAndWorkers mounts the management API with Worker and site publication.
 func NewHandlerWithMCPAndWorkers(store *database.Store, sites *staticdeploy.Service, browserService *browser.Service, cfg config.Config, logger *slog.Logger, apiEndpoint string, publication *workerpublish.Service, siteRoutes *routes.Publisher) (http.Handler, func(), error) {
+	return NewHandlerWithMCPWorkersAndContainers(store, sites, browserService, cfg, logger, apiEndpoint, publication, siteRoutes, nil)
+}
+
+// NewHandlerWithMCPWorkersAndContainers mounts the management API with Worker
+// publication, static site publication and container creation.
+func NewHandlerWithMCPWorkersAndContainers(store *database.Store, sites *staticdeploy.Service, browserService *browser.Service, cfg config.Config, logger *slog.Logger, apiEndpoint string, publication *workerpublish.Service, siteRoutes *routes.Publisher, containers *containerpublish.Service) (http.Handler, func(), error) {
 	mcpHandler, err := mcpserver.NewHandler(apiEndpoint)
 	if err != nil {
 		return nil, nil, err
 	}
-	handler, cleanup := newHandler(store, sites, browserService, cfg, logger, mcpHandler, publication, siteRoutes)
+	handler, cleanup := newHandler(store, sites, browserService, cfg, logger, mcpHandler, publication, siteRoutes, containers)
 	return handler, cleanup, nil
 }
 
 // NewHandlerWithWorkers mounts the shared Worker publication API. The caller
 // owns publication and must close it after the HTTP handler stops.
 func NewHandlerWithWorkers(store *database.Store, cfg config.Config, logger *slog.Logger, publication *workerpublish.Service) (http.Handler, func()) {
-	return newHandler(store, nil, nil, cfg, logger, nil, publication, nil)
+	return newHandler(store, nil, nil, cfg, logger, nil, publication, nil, nil)
 }
 
-func newHandler(store *database.Store, sites *staticdeploy.Service, browserService *browser.Service, cfg config.Config, logger *slog.Logger, mcpHandler http.Handler, publication *workerpublish.Service, siteRoutes *routes.Publisher) (http.Handler, func()) {
-	h := &handler{store: store, sites: sites, siteRoutes: siteRoutes, browser: browserService, config: cfg, logger: logger, workers: publication}
+// NewHandlerWithContainers mounts the container creation API. The caller owns
+// containers and must close it after the HTTP handler stops.
+func NewHandlerWithContainers(store *database.Store, cfg config.Config, logger *slog.Logger, containers *containerpublish.Service) (http.Handler, func()) {
+	return newHandler(store, nil, nil, cfg, logger, nil, nil, nil, containers)
+}
+
+func newHandler(store *database.Store, sites *staticdeploy.Service, browserService *browser.Service, cfg config.Config, logger *slog.Logger, mcpHandler http.Handler, publication *workerpublish.Service, siteRoutes *routes.Publisher, containers *containerpublish.Service) (http.Handler, func()) {
+	h := &handler{store: store, sites: sites, siteRoutes: siteRoutes, browser: browserService, config: cfg, logger: logger, workers: publication, containers: containers}
 	router := gin.New()
 	router.GET("/healthz", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
 	router.GET("/readyz", func(c *gin.Context) {
@@ -77,6 +91,15 @@ func newHandler(store *database.Store, sites *staticdeploy.Service, browserServi
 			if err := h.workers.Ready(ctx); err != nil {
 				h.logger.Error("Worker controller readiness failed", "error", err)
 				c.JSON(http.StatusServiceUnavailable, apigen.Error{Message: "Worker 控制器尚未就绪"})
+				return
+			}
+		}
+		if h.containers != nil {
+			ctx, cancel := context.WithTimeout(c.Request.Context(), time.Second)
+			defer cancel()
+			if err := h.containers.Ready(ctx); err != nil {
+				h.logger.Error("container controller readiness failed", "error", err)
+				c.JSON(http.StatusServiceUnavailable, apigen.Error{Message: "容器控制器尚未就绪"})
 				return
 			}
 		}
