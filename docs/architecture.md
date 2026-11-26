@@ -81,6 +81,8 @@ PostgreSQL 当前保存账号、登录会话、项目、操作记录、项目凭
 | /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID} | GET | 项目成员查询指定版本及其产物摘要 |
 | /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/artifact | GET | 项目成员下载原始 ZIP 并读取内容摘要 |
 | /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/publish | POST | 所有者绑定域名、激活首个就绪版本并获取 Gateway 地址 |
+| /api/v1/projects/{projectID}/postgres-bindings | POST | 所有者验证并登记 PostgreSQL 绑定 |
+| /api/v1/projects/{projectID}/postgres-bindings/{name} | GET | 项目成员查询 PostgreSQL 绑定元数据和验证时间 |
 | /api/v1/projects/{projectID}/s3-bindings | POST | 所有者验证并登记 S3 绑定 |
 | /api/v1/projects/{projectID}/s3-bindings/{name} | GET | 项目成员查询 S3 绑定元数据和验证时间 |
 | /api/v1/projects/{projectID}/secrets | GET、POST | 列出项目凭据元数据；所有者追加加密版本 |
@@ -89,6 +91,8 @@ PostgreSQL 当前保存账号、登录会话、项目、操作记录、项目凭
 | /api/v1/projects/{projectID}/workers/{name}/deployments | POST | 所有者或开发者发布首个无状态 Worker，按 Idempotency-Key 复用操作 |
 | /api/v1/projects/{projectID}/worker-deployments/{deploymentID} | GET | 项目成员查询版本、产物摘要、执行与 Operation 结果 |
 | /mcp | MCP Streamable HTTP | 使用当前会话查询项目、发布 Worker 并查询项目操作 |
+
+PostgreSQL 绑定按项目和名称存储。登记时引用本项目不可变的 Secret 版本。只有实际验证成功才保存元数据和验证时间。凭据值使用含有 `username` 与 `password` 的 JSON 对象。登记时连接指定数据库并执行 Ping，默认校验服务器证书与主机名。开发环境可使用回环地址连接本地无 TLS PostgreSQL。
 
 S3 绑定按项目和名称存储。登记时引用本项目不可变的 Secret 版本。只有实际验证成功才保存元数据和验证时间。凭据值使用含有 `access_key_id`、`secret_access_key` 和可选 `session_token` 的 JSON 对象。登记时使用 AWS SDK 对指定桶执行 `HeadBucket`，成功表示所提供的凭据可以访问桶元数据。端点默认需要 HTTPS，开发环境允许回环 HTTP。
 
