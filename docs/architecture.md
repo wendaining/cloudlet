@@ -81,12 +81,16 @@ PostgreSQL 当前保存账号、登录会话、项目、操作记录、项目凭
 | /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID} | GET | 项目成员查询指定版本及其产物摘要 |
 | /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/artifact | GET | 项目成员下载原始 ZIP 并读取内容摘要 |
 | /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/publish | POST | 所有者绑定域名、激活首个就绪版本并获取 Gateway 地址 |
+| /api/v1/projects/{projectID}/postgres-bindings | POST | 所有者验证并登记 PostgreSQL 绑定 |
+| /api/v1/projects/{projectID}/postgres-bindings/{name} | GET | 项目成员查询 PostgreSQL 绑定元数据和验证时间 |
 | /api/v1/projects/{projectID}/secrets | GET、POST | 列出项目凭据元数据；所有者追加加密版本 |
 | /api/v1/projects/{projectID}/secrets/{name} | GET | 列出项目凭据的版本元数据 |
 | /api/v1/projects/{projectID}/secrets/{name}/versions/{version}/value | GET | 所有者读取指定版本的值 |
 | /api/v1/projects/{projectID}/workers/{name}/deployments | POST | 所有者或开发者发布首个无状态 Worker，按 Idempotency-Key 复用操作 |
 | /api/v1/projects/{projectID}/worker-deployments/{deploymentID} | GET | 项目成员查询版本、产物摘要、执行与 Operation 结果 |
 | /mcp | MCP Streamable HTTP | 使用当前会话查询项目、发布 Worker 并查询项目操作 |
+
+PostgreSQL 绑定按项目和名称存储。登记时引用本项目不可变的 Secret 版本。只有实际验证成功才保存元数据和验证时间。凭据值使用含有 `username` 与 `password` 的 JSON 对象。登记时连接指定数据库并执行 Ping，默认校验服务器证书与主机名。开发环境可使用回环地址连接本地无 TLS PostgreSQL。
 
 两组监听端口完成初始化后才开始接受请求。管理环境启动前验证数据库连接和迁移版本，就绪接口同时检查数据库连接，数据库不可用时返回 503。
 
