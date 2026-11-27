@@ -61,6 +61,7 @@ func (h *handler) CreateContainer(c *gin.Context, projectID string, params apige
 			c.JSON(http.StatusBadRequest, apigen.Error{Message: err.Error()})
 		case errors.Is(err, database.ErrContainerAlreadyActive),
 			errors.Is(err, database.ErrContainerPublicationPending),
+			errors.Is(err, database.ErrContainerVolumeConflict),
 			errors.Is(err, database.ErrRouteConflict),
 			errors.Is(err, operations.ErrIdempotencyConflict),
 			errors.Is(err, containerpublish.ErrRecordedFailure),
@@ -68,7 +69,8 @@ func (h *handler) CreateContainer(c *gin.Context, projectID string, params apige
 			errors.Is(err, capacity.ErrIdempotencyConflict),
 			errors.Is(err, capacity.ErrOwnershipConflict),
 			errors.Is(err, capacity.ErrExecutionReleased),
-			errors.Is(err, executions.ErrExecutionConflict):
+			errors.Is(err, executions.ErrExecutionConflict),
+			errors.Is(err, containers.ErrNotOwned):
 			c.JSON(http.StatusConflict, apigen.Error{Message: err.Error()})
 		case errors.Is(err, capacity.ErrInsufficientCapacity):
 			if result.Container.ID == uuid.Nil {
@@ -80,6 +82,8 @@ func (h *handler) CreateContainer(c *gin.Context, projectID string, params apige
 			errors.Is(err, containers.ErrImageDigestMismatch),
 			errors.Is(err, containers.ErrNotReady),
 			errors.Is(err, containerpublish.ErrRuntimeNotReady),
+			errors.Is(err, containerpublish.ErrDataVolumeMissing),
+			errors.Is(err, containers.ErrDataVolume),
 			errors.Is(err, containers.ErrConflict),
 			errors.Is(err, containers.ErrNetworkNotFound):
 			if result.Container.ID == uuid.Nil {
@@ -150,6 +154,11 @@ func containerResponse(result containerpublish.Result) apigen.Container {
 	if len(execution.Env) > 0 {
 		env := append([]string(nil), execution.Env...)
 		response.Env = &env
+	}
+	if execution.VolumeName != "" {
+		response.DataVolume = &apigen.ContainerDataVolume{
+			Name: execution.VolumeName, MountPath: execution.VolumeMountPath, Directory: execution.VolumeDirectory,
+		}
 	}
 	return response
 }
@@ -250,7 +259,8 @@ func (h *handler) containerLifecycleFailure(c *gin.Context, projectID string, re
 		errors.Is(err, capacity.ErrIdempotencyConflict),
 		errors.Is(err, capacity.ErrOwnershipConflict),
 		errors.Is(err, capacity.ErrExecutionReleased),
-		errors.Is(err, executions.ErrExecutionConflict):
+		errors.Is(err, executions.ErrExecutionConflict),
+		errors.Is(err, containers.ErrNotOwned):
 		c.JSON(http.StatusConflict, apigen.Error{Message: err.Error()})
 	case errors.Is(err, capacity.ErrInsufficientCapacity):
 		if result.Container.ID == uuid.Nil {
@@ -263,6 +273,8 @@ func (h *handler) containerLifecycleFailure(c *gin.Context, projectID string, re
 		errors.Is(err, containers.ErrNotReady),
 		errors.Is(err, containerpublish.ErrRuntimeNotReady),
 		errors.Is(err, containerpublish.ErrRuntimeStop),
+		errors.Is(err, containerpublish.ErrDataVolumeMissing),
+		errors.Is(err, containers.ErrDataVolume),
 		errors.Is(err, containers.ErrConflict),
 		errors.Is(err, containers.ErrNetworkNotFound):
 		if result.Container.ID == uuid.Nil {

@@ -1284,6 +1284,18 @@ export interface components {
              * @default 15000
              */
             health_check_timeout_ms: number;
+            data_volume?: components["schemas"]["CreateDataVolumeRequest"];
+        };
+        CreateDataVolumeRequest: {
+            /** @description 数据卷在容器内的绝对挂载路径，不能是根路径。 */
+            mount_path: string;
+            /** @description 平台在卷内初始化并交给运行用户所有的单段目录名。实际可写路径为 mount_path/directory。 */
+            directory: string;
+        };
+        ContainerDataVolume: {
+            name: string;
+            mount_path: string;
+            directory: string;
         };
         Container: {
             /** Format: uuid */
@@ -1325,6 +1337,7 @@ export interface components {
             operation_outcome: string;
             /** Format: int64 */
             generation: number;
+            data_volume?: components["schemas"]["ContainerDataVolume"];
             /** Format: date-time */
             created_at: string;
         };

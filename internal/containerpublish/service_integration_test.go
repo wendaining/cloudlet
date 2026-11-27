@@ -6,12 +6,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -97,6 +99,19 @@ func TestContainerPublicationHTTP(t *testing.T) {
 			}
 			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
 			_, err := docker.ContainerRemove(cleanupCtx, execution.DockerContainerID, client.ContainerRemoveOptions{Force: true})
+			cleanupCancel()
+			if err != nil && !cerrdefs.IsNotFound(err) {
+				t.Error(err)
+			}
+		}
+		var volumes []string
+		if err := store.DB.Model(&database.ContainerExecution{}).Where("volume_name <> ''").Pluck("volume_name", &volumes).Error; err != nil {
+			t.Error(err)
+			return
+		}
+		for _, volume := range volumes {
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			_, err := docker.VolumeRemove(cleanupCtx, volume, client.VolumeRemoveOptions{Force: true})
 			cleanupCancel()
 			if err != nil && !cerrdefs.IsNotFound(err) {
 				t.Error(err)
@@ -234,11 +249,29 @@ func TestContainerPublicationHTTP(t *testing.T) {
 	itemPath := func(projectID string, id uuid.UUID) string {
 		return collectionPath(projectID) + "/" + id.String()
 	}
+	runInContainer := func(id, command string) string {
+		t.Helper()
+		output, err := exec.CommandContext(ctx, "docker", "exec", id, "sh", "-c", command).CombinedOutput()
+		if err != nil {
+			t.Fatalf("docker exec %s: %v\n%s", id, err, output)
+		}
+		return strings.TrimSpace(string(output))
+	}
+	volumeExists := func(name string) bool {
+		t.Helper()
+		if _, err := docker.VolumeInspect(ctx, name, client.VolumeInspectOptions{}); err == nil {
+			return true
+		} else if !cerrdefs.IsNotFound(err) {
+			t.Fatal(err)
+		}
+		return false
+	}
 
 	valid := containerpublish.Request{
 		Name: "web", Image: images.ContainerHTTP, Port: 8080, Hostname: "container.localhost",
 		CPUMillis: 500, MemoryBytes: 128 << 20, User: "101:101",
-		Env: []string{"CLOUDLET_CONTAINER_TEST=1"},
+		Env:        []string{"CLOUDLET_CONTAINER_TEST=1"},
+		DataVolume: &containerpublish.DataVolumeRequest{MountPath: "/data", Directory: "state"},
 	}
 	path := collectionPath(project.ID)
 	request(viewer, http.MethodPost, path, "viewer", valid, http.StatusForbidden)
@@ -282,6 +315,17 @@ func TestContainerPublicationHTTP(t *testing.T) {
 	if created.Env == nil || !slices.Equal(*created.Env, []string{"CLOUDLET_CONTAINER_TEST=1"}) {
 		t.Fatalf("container environment: %+v", created.Env)
 	}
+	if created.DataVolume == nil || created.DataVolume.Name == "" || created.DataVolume.MountPath != "/data" || created.DataVolume.Directory != "state" {
+		t.Fatalf("container data volume: %+v", created.DataVolume)
+	}
+	volume, err := docker.VolumeInspect(ctx, created.DataVolume.Name, client.VolumeInspectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if volume.Volume.Labels[containers.LabelProject] != project.ID || volume.Volume.Labels[containers.LabelResource] != created.Id.String() || volume.Volume.Labels[containers.LabelVolume] != "writable" {
+		t.Fatalf("data volume labels: %+v", volume.Volume.Labels)
+	}
+	runInContainer(created.DockerContainerId, "printf cloudlet-volume > /data/state/note.txt")
 
 	inspect, err := docker.ContainerInspect(ctx, created.DockerContainerId, client.ContainerInspectOptions{})
 	if err != nil {
@@ -354,6 +398,15 @@ func TestContainerPublicationHTTP(t *testing.T) {
 		return response.StatusCode
 	}
 
+	adapter, err := containers.New(ctx, docker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherOwnership := containers.Ownership{Environment: "container-test", Project: uuid.NewString(), Resource: created.Id.String(), Generation: 1}
+	if _, err := adapter.EnsureDataVolume(ctx, otherOwnership, containers.DataVolume{Name: created.DataVolume.Name, MountPath: "/data", Directory: "state"}); !errors.Is(err, containers.ErrNotOwned) {
+		t.Fatalf("another ownership accepted the data volume: %v", err)
+	}
+
 	_, replay := request(developer, http.MethodPost, path, "web-key", valid, http.StatusOK)
 	replayed := decode(replay)
 	if replayed.Id != created.Id || replayed.DockerContainerId != created.DockerContainerId {
@@ -409,6 +462,9 @@ func TestContainerPublicationHTTP(t *testing.T) {
 	if _, err := docker.ContainerInspect(ctx, created.DockerContainerId, client.ContainerInspectOptions{}); !cerrdefs.IsNotFound(err) {
 		t.Fatalf("stopped container still exists: %v", err)
 	}
+	if !volumeExists(created.DataVolume.Name) {
+		t.Fatal("stopping the container removed its data volume")
+	}
 	usage, err = capacityStore.ProjectUsage(ctx, uuid.MustParse(project.ID))
 	if err != nil {
 		t.Fatal(err)
@@ -420,6 +476,9 @@ func TestContainerPublicationHTTP(t *testing.T) {
 	if decode(data).State != "stopped" {
 		t.Fatal("idempotent stop did not return the stopped state")
 	}
+	differentVolume := valid
+	differentVolume.DataVolume = &containerpublish.DataVolumeRequest{MountPath: "/other", Directory: "state"}
+	request(owner, http.MethodPost, path, "web-volume-change", differentVolume, http.StatusConflict)
 	_, data = request(viewer, http.MethodGet, itemPath(project.ID, created.Id), "", nil, http.StatusOK)
 	if decode(data).State != "stopped" {
 		t.Fatal("stopped container is not readable")
@@ -433,6 +492,12 @@ func TestContainerPublicationHTTP(t *testing.T) {
 	}
 	if restarted.DockerContainerId == "" || restarted.DockerContainerId == created.DockerContainerId {
 		t.Fatalf("restart Docker container = %q, want a new container", restarted.DockerContainerId)
+	}
+	if restarted.DataVolume == nil || restarted.DataVolume.Name != created.DataVolume.Name {
+		t.Fatalf("restarted data volume = %+v, want %s", restarted.DataVolume, created.DataVolume.Name)
+	}
+	if got := runInContainer(restarted.DockerContainerId, "cat /data/state/note.txt"); got != "cloudlet-volume" {
+		t.Fatalf("persisted volume content = %q", got)
 	}
 	getPublic("container.localhost")
 	request(owner, http.MethodPost, restartPath, "web-restart-active", nil, http.StatusConflict)
@@ -464,6 +529,9 @@ func TestContainerPublicationHTTP(t *testing.T) {
 	}
 	if _, err := docker.ContainerInspect(ctx, restarted.DockerContainerId, client.ContainerInspectOptions{}); !cerrdefs.IsNotFound(err) {
 		t.Fatalf("deleted container still exists: %v", err)
+	}
+	if volumeExists(created.DataVolume.Name) {
+		t.Fatal("deleting the container retained its data volume")
 	}
 	usage, err = capacityStore.ProjectUsage(ctx, uuid.MustParse(project.ID))
 	if err != nil {
@@ -497,6 +565,9 @@ func TestContainerPublicationHTTP(t *testing.T) {
 	if _, err := docker.ContainerInspect(ctx, brokenResult.DockerContainerId, client.ContainerInspectOptions{}); !cerrdefs.IsNotFound(err) {
 		t.Fatalf("failed container still exists: %v", err)
 	}
+	if brokenResult.DataVolume == nil || volumeExists(brokenResult.DataVolume.Name) {
+		t.Fatalf("failed container retained its data volume: %+v", brokenResult.DataVolume)
+	}
 	usage, err = capacityStore.ProjectUsage(ctx, uuid.MustParse(failureProject.ID))
 	if err != nil {
 		t.Fatal(err)
@@ -511,6 +582,9 @@ func TestContainerPublicationHTTP(t *testing.T) {
 	tooBigResult := decode(data)
 	if tooBigResult.State != "failed" || tooBigResult.OperationOutcome != "failed" || tooBigResult.DockerContainerId != "" {
 		t.Fatalf("over-quota container: %+v", tooBigResult)
+	}
+	if tooBigResult.DataVolume == nil || volumeExists(tooBigResult.DataVolume.Name) {
+		t.Fatalf("over-quota container retained its data volume: %+v", tooBigResult.DataVolume)
 	}
 
 	if _, err := publisher.PublishProject(ctx, failureProject.ID, []routes.Route{{Resource: "site", Host: "taken.localhost", Target: "http://127.0.0.1:1"}}); err != nil {

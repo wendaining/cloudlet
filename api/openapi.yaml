@@ -2477,6 +2477,37 @@ components:
           maximum: 60000
           default: 15000
           description: 就绪探测的总截止时间。接受 200 至 399 的最终 HTTP 状态。
+        data_volume:
+          $ref: "#/components/schemas/CreateDataVolumeRequest"
+    CreateDataVolumeRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - mount_path
+        - directory
+      properties:
+        mount_path:
+          type: string
+          maxLength: 4096
+          pattern: '^/'
+          description: 数据卷在容器内的绝对挂载路径，不能是根路径。
+        directory:
+          type: string
+          maxLength: 255
+          description: 平台在卷内初始化并交给运行用户所有的单段目录名。实际可写路径为 mount_path/directory。
+    ContainerDataVolume:
+      type: object
+      required:
+        - name
+        - mount_path
+        - directory
+      properties:
+        name:
+          type: string
+        mount_path:
+          type: string
+        directory:
+          type: string
     Container:
       type: object
       required:
@@ -2577,6 +2608,8 @@ components:
         generation:
           type: integer
           format: int64
+        data_volume:
+          $ref: "#/components/schemas/ContainerDataVolume"
         created_at:
           type: string
           format: date-time
