@@ -33,6 +33,8 @@ const (
 	// exposed ports into the container configuration, so this label selects
 	// the port that the adapter observes as the managed endpoint.
 	LabelPort = "io.cloudlet.port"
+	// LabelVolume marks a managed persistent volume.
+	LabelVolume = "io.cloudlet.volume"
 
 	ComponentRuntime = "runtime"
 )
@@ -86,6 +88,8 @@ var (
 	// ErrImageDigestMismatch reports that the local image does not report the
 	// requested immutable digest.
 	ErrImageDigestMismatch = errors.New("image digest mismatch")
+	// ErrDataVolume reports that a managed data volume operation failed.
+	ErrDataVolume = errors.New("data volume operation failed")
 )
 
 // Ownership is the platform scope that owns a managed container. Environment

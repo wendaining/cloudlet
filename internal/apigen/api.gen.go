@@ -285,12 +285,13 @@ type ClickBrowserPageRequest struct {
 
 // Container defines model for Container.
 type Container struct {
-	Command           *[]string          `json:"command,omitempty"`
-	CpuMillis         int64              `json:"cpu_millis"`
-	CreatedAt         time.Time          `json:"created_at"`
-	DockerContainerId string             `json:"docker_container_id"`
-	Env               *[]string          `json:"env,omitempty"`
-	ExecutionId       openapi_types.UUID `json:"execution_id"`
+	Command           *[]string            `json:"command,omitempty"`
+	CpuMillis         int64                `json:"cpu_millis"`
+	CreatedAt         time.Time            `json:"created_at"`
+	DataVolume        *ContainerDataVolume `json:"data_volume,omitempty"`
+	DockerContainerId string               `json:"docker_container_id"`
+	Env               *[]string            `json:"env,omitempty"`
+	ExecutionId       openapi_types.UUID   `json:"execution_id"`
 
 	// ExecutionState 实际执行状态，取值为 pending、running、stopped 或 failed。
 	ExecutionState       string             `json:"execution_state"`
@@ -319,13 +320,21 @@ type Container struct {
 	User   string `json:"user"`
 }
 
+// ContainerDataVolume defines model for ContainerDataVolume.
+type ContainerDataVolume struct {
+	Directory string `json:"directory"`
+	MountPath string `json:"mount_path"`
+	Name      string `json:"name"`
+}
+
 // CreateContainerRequest defines model for CreateContainerRequest.
 type CreateContainerRequest struct {
 	// Command 覆盖镜像命令的参数数组。省略时使用镜像默认命令。
 	Command *[]string `json:"command,omitempty"`
 
 	// CpuMillis 申请并限制的 CPU 毫核。
-	CpuMillis int64 `json:"cpu_millis"`
+	CpuMillis  int64                    `json:"cpu_millis"`
+	DataVolume *CreateDataVolumeRequest `json:"data_volume,omitempty"`
 
 	// Env KEY=value 形式的环境变量。请求体总大小最多 64 KiB。
 	Env *[]string `json:"env,omitempty"`
@@ -353,6 +362,15 @@ type CreateContainerRequest struct {
 
 	// User 非 root 运行身份，格式为 user 或 user:group。省略时使用 1000:1000。
 	User *string `json:"user,omitempty"`
+}
+
+// CreateDataVolumeRequest defines model for CreateDataVolumeRequest.
+type CreateDataVolumeRequest struct {
+	// Directory 平台在卷内初始化并交给运行用户所有的单段目录名。实际可写路径为 mount_path/directory。
+	Directory string `json:"directory"`
+
+	// MountPath 数据卷在容器内的绝对挂载路径，不能是根路径。
+	MountPath string `json:"mount_path"`
 }
 
 // CreateProjectRequest defines model for CreateProjectRequest.

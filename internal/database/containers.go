@@ -16,6 +16,7 @@ import (
 var (
 	ErrContainerAlreadyActive      = errors.New("容器已有活动执行")
 	ErrContainerPublicationPending = errors.New("容器已有未完成创建")
+	ErrContainerVolumeConflict     = errors.New("容器数据卷声明与已有配置不一致")
 )
 
 // Container is the stable identity of one project container. Its active
@@ -54,6 +55,9 @@ type ContainerExecution struct {
 	Env               []string  `gorm:"column:env;type:text;serializer:json"`
 	HealthPath        string    `gorm:"column:health_path"`
 	HealthTimeoutMS   int64     `gorm:"column:health_timeout_ms"`
+	VolumeName        string    `gorm:"column:volume_name"`
+	VolumeMountPath   string    `gorm:"column:volume_mount_path"`
+	VolumeDirectory   string    `gorm:"column:volume_directory"`
 	DockerContainerID string    `gorm:"column:docker_container_id"`
 	Target            string    `gorm:"column:target"`
 	State             string    `gorm:"column:state"`
@@ -160,8 +164,23 @@ func (s *Store) ContainerResult(ctx context.Context, projectID, containerID uuid
 	if err := s.DB.WithContext(ctx).Where("project_id = ? AND id = ?", projectID, containerID).Take(&container).Error; err != nil {
 		return Container{}, ContainerExecution{}, err
 	}
+	return s.containerExecution(ctx, container)
+}
+
+// ContainerByName reads one container and its active or latest execution by
+// project and stable name. It is used to compare a repeated creation request
+// with the existing volume declaration before writing a new execution.
+func (s *Store) ContainerByName(ctx context.Context, projectID uuid.UUID, name string) (Container, ContainerExecution, error) {
+	var container Container
+	if err := s.DB.WithContext(ctx).Where("project_id = ? AND name = ?", projectID, name).Take(&container).Error; err != nil {
+		return Container{}, ContainerExecution{}, err
+	}
+	return s.containerExecution(ctx, container)
+}
+
+func (s *Store) containerExecution(ctx context.Context, container Container) (Container, ContainerExecution, error) {
 	var execution ContainerExecution
-	query := s.DB.WithContext(ctx).Where("project_id = ? AND container_id = ?", projectID, containerID)
+	query := s.DB.WithContext(ctx).Where("project_id = ? AND container_id = ?", container.ProjectID, container.ID)
 	if container.ActiveExecutionID != nil {
 		query = query.Where("id = ?", *container.ActiveExecutionID)
 	} else {
