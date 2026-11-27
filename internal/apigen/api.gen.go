@@ -222,30 +222,37 @@ type Container struct {
 	ExecutionId       openapi_types.UUID `json:"execution_id"`
 
 	// ExecutionState 实际执行状态，取值为 pending、running、stopped 或 failed。
-	ExecutionState       string             `json:"execution_state"`
-	Failure              string             `json:"failure"`
-	Generation           int64              `json:"generation"`
-	HealthCheckPath      string             `json:"health_check_path"`
-	HealthCheckTimeoutMs int64              `json:"health_check_timeout_ms"`
-	Hostname             string             `json:"hostname"`
-	Id                   openapi_types.UUID `json:"id"`
-	Image                string             `json:"image"`
-	ImageDigest          string             `json:"image_digest"`
-	MemoryBytes          int64              `json:"memory_bytes"`
-	Name                 string             `json:"name"`
-	OpenFiles            int64              `json:"open_files"`
-	OperationId          openapi_types.UUID `json:"operation_id"`
-	OperationOutcome     string             `json:"operation_outcome"`
-	OperationPhase       string             `json:"operation_phase"`
-	PathPrefix           string             `json:"path_prefix"`
-	Pids                 int64              `json:"pids"`
-	Port                 int                `json:"port"`
-	ProjectId            openapi_types.UUID `json:"project_id"`
+	ExecutionState       string                    `json:"execution_state"`
+	Failure              string                    `json:"failure"`
+	Generation           int64                     `json:"generation"`
+	HealthCheckPath      string                    `json:"health_check_path"`
+	HealthCheckTimeoutMs int64                     `json:"health_check_timeout_ms"`
+	Hostname             string                    `json:"hostname"`
+	Id                   openapi_types.UUID        `json:"id"`
+	Image                string                    `json:"image"`
+	ImageDigest          string                    `json:"image_digest"`
+	MemoryBytes          int64                     `json:"memory_bytes"`
+	Name                 string                    `json:"name"`
+	OpenFiles            int64                     `json:"open_files"`
+	OperationId          openapi_types.UUID        `json:"operation_id"`
+	OperationOutcome     string                    `json:"operation_outcome"`
+	OperationPhase       string                    `json:"operation_phase"`
+	PathPrefix           string                    `json:"path_prefix"`
+	Pids                 int64                     `json:"pids"`
+	Port                 int                       `json:"port"`
+	PostgresBinding      *ContainerPostgresBinding `json:"postgres_binding,omitempty"`
+	ProjectId            openapi_types.UUID        `json:"project_id"`
 
 	// State 容器目标状态，取值为 pending、active、stopped 或 failed。
 	State  string `json:"state"`
 	Target string `json:"target"`
 	User   string `json:"user"`
+}
+
+// ContainerPostgresBinding defines model for ContainerPostgresBinding.
+type ContainerPostgresBinding struct {
+	Name            string             `json:"name"`
+	SecretVersionId openapi_types.UUID `json:"secret_version_id"`
 }
 
 // CreateContainerRequest defines model for CreateContainerRequest.
@@ -279,6 +286,9 @@ type CreateContainerRequest struct {
 
 	// Port 容器内 HTTP 服务监听的 TCP 端口。
 	Port int `json:"port"`
+
+	// PostgresBinding 项目内已授权的 PostgreSQL 绑定名称。
+	PostgresBinding *string `json:"postgres_binding,omitempty"`
 
 	// User 非 root 运行身份，格式为 user 或 user:group。省略时使用 1000:1000。
 	User *string `json:"user,omitempty"`
@@ -1041,13 +1051,13 @@ type ClientInterface interface {
 	// DeployWorkerWithBody performs a POST /api/v1/projects/{projectID}/workers/{name}/deployments (the `DeployWorker` operationId) request,
 	// with any type of body and a specified content type.
 	//
-	// 发布首个无状态 Worker 版本，等待真实运行时就绪并激活域名。所有者和开发者可以调用。同一幂等键复用操作。.
+	// 发布首个无状态 Worker 版本，等待真实运行时就绪并激活域名。所有者和开发者可以调用，引用 PostgreSQL 绑定时仅所有者可以调用。同一幂等键复用操作。.
 	DeployWorkerWithBody(ctx context.Context, projectID string, name string, params *DeployWorkerParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// DeployWorker performs a POST /api/v1/projects/{projectID}/workers/{name}/deployments (the `DeployWorker` operationId) request.
 	// Takes a body of the `application/json` content type.
 	//
-	// 发布首个无状态 Worker 版本，等待真实运行时就绪并激活域名。所有者和开发者可以调用。同一幂等键复用操作。.
+	// 发布首个无状态 Worker 版本，等待真实运行时就绪并激活域名。所有者和开发者可以调用，引用 PostgreSQL 绑定时仅所有者可以调用。同一幂等键复用操作。.
 	DeployWorker(ctx context.Context, projectID string, name string, params *DeployWorkerParams, body DeployWorkerJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetVersion performs a GET /api/v1/version (the `GetVersion` operationId) request.
@@ -1940,7 +1950,7 @@ func (c *Client) GetWorkerDeployment(ctx context.Context, projectID string, depl
 // DeployWorkerWithBody performs a POST /api/v1/projects/{projectID}/workers/{name}/deployments (the `DeployWorker` operationId) request,
 // with any type of body and a specified content type.
 //
-// 发布首个无状态 Worker 版本，等待真实运行时就绪并激活域名。所有者和开发者可以调用。同一幂等键复用操作。.
+// 发布首个无状态 Worker 版本，等待真实运行时就绪并激活域名。所有者和开发者可以调用，引用 PostgreSQL 绑定时仅所有者可以调用。同一幂等键复用操作。.
 func (c *Client) DeployWorkerWithBody(ctx context.Context, projectID string, name string, params *DeployWorkerParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewDeployWorkerRequestWithBody(c.Server, projectID, name, params, contentType, body)
 	if err != nil {
@@ -1956,7 +1966,7 @@ func (c *Client) DeployWorkerWithBody(ctx context.Context, projectID string, nam
 // DeployWorker performs a POST /api/v1/projects/{projectID}/workers/{name}/deployments (the `DeployWorker` operationId) request.
 // Takes a body of the `application/json` content type.
 //
-// 发布首个无状态 Worker 版本，等待真实运行时就绪并激活域名。所有者和开发者可以调用。同一幂等键复用操作。.
+// 发布首个无状态 Worker 版本，等待真实运行时就绪并激活域名。所有者和开发者可以调用，引用 PostgreSQL 绑定时仅所有者可以调用。同一幂等键复用操作。.
 func (c *Client) DeployWorker(ctx context.Context, projectID string, name string, params *DeployWorkerParams, body DeployWorkerJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewDeployWorkerRequest(c.Server, projectID, name, params, body)
 	if err != nil {
@@ -4617,7 +4627,7 @@ type ClientWithResponsesInterface interface {
 	// DeployWorkerWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/workers/{name}/deployments (the `DeployWorker` operationId) request,
 	// with any type of body and a specified content type.
 	//
-	// 发布首个无状态 Worker 版本，等待真实运行时就绪并激活域名。所有者和开发者可以调用。同一幂等键复用操作。.
+	// 发布首个无状态 Worker 版本，等待真实运行时就绪并激活域名。所有者和开发者可以调用，引用 PostgreSQL 绑定时仅所有者可以调用。同一幂等键复用操作。.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	DeployWorkerWithBodyWithResponse(ctx context.Context, projectID string, name string, params *DeployWorkerParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*DeployWorkerResponse, error)
@@ -4625,7 +4635,7 @@ type ClientWithResponsesInterface interface {
 	// DeployWorkerWithResponse performs a POST /api/v1/projects/{projectID}/workers/{name}/deployments (the `DeployWorker` operationId) request.
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
-	// 发布首个无状态 Worker 版本，等待真实运行时就绪并激活域名。所有者和开发者可以调用。同一幂等键复用操作。.
+	// 发布首个无状态 Worker 版本，等待真实运行时就绪并激活域名。所有者和开发者可以调用，引用 PostgreSQL 绑定时仅所有者可以调用。同一幂等键复用操作。.
 	DeployWorkerWithResponse(ctx context.Context, projectID string, name string, params *DeployWorkerParams, body DeployWorkerJSONRequestBody, reqEditors ...RequestEditorFn) (*DeployWorkerResponse, error)
 
 	// GetVersionWithResponse performs a GET /api/v1/version (the `GetVersion` operationId) request.
@@ -8721,7 +8731,7 @@ func (c *ClientWithResponses) GetWorkerDeploymentWithResponse(ctx context.Contex
 // DeployWorkerWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/workers/{name}/deployments (the `DeployWorker` operationId) request,
 // with any type of body and a specified content type.
 //
-// 发布首个无状态 Worker 版本，等待真实运行时就绪并激活域名。所有者和开发者可以调用。同一幂等键复用操作。.
+// 发布首个无状态 Worker 版本，等待真实运行时就绪并激活域名。所有者和开发者可以调用，引用 PostgreSQL 绑定时仅所有者可以调用。同一幂等键复用操作。.
 //
 // Returns a wrapper object for the known response body format(s).
 func (c *ClientWithResponses) DeployWorkerWithBodyWithResponse(ctx context.Context, projectID string, name string, params *DeployWorkerParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*DeployWorkerResponse, error) {
@@ -8735,7 +8745,7 @@ func (c *ClientWithResponses) DeployWorkerWithBodyWithResponse(ctx context.Conte
 // DeployWorkerWithResponse performs a POST /api/v1/projects/{projectID}/workers/{name}/deployments (the `DeployWorker` operationId) request.
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
-// 发布首个无状态 Worker 版本，等待真实运行时就绪并激活域名。所有者和开发者可以调用。同一幂等键复用操作。.
+// 发布首个无状态 Worker 版本，等待真实运行时就绪并激活域名。所有者和开发者可以调用，引用 PostgreSQL 绑定时仅所有者可以调用。同一幂等键复用操作。.
 func (c *ClientWithResponses) DeployWorkerWithResponse(ctx context.Context, projectID string, name string, params *DeployWorkerParams, body DeployWorkerJSONRequestBody, reqEditors ...RequestEditorFn) (*DeployWorkerResponse, error) {
 	rsp, err := c.DeployWorker(ctx, projectID, name, params, body, reqEditors...)
 	if err != nil {

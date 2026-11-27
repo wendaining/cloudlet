@@ -49,6 +49,7 @@ database:
   - 'internal/capacity/**'
   - 'internal/staticdeploy/**'
   - 'internal/siteartifact/**'
+  - 'internal/postgresbinding/**'
   - 'internal/controlplane/**'
   - 'internal/config/**'
   - 'internal/server/**'
@@ -110,6 +111,7 @@ browser:
 containers:
   - 'internal/containers/**'
   - 'internal/containerpublish/**'
+  - 'internal/postgresbinding/**'
   - 'internal/controlplane/**'
   - 'internal/database/**'
   - 'internal/routes/**'

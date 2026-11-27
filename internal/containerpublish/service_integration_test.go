@@ -35,6 +35,14 @@ import (
 )
 
 func TestContainerPublicationHTTP(t *testing.T) {
+	testContainerPublicationHTTP(t, false)
+}
+
+func TestContainerPostgresBindingHTTP(t *testing.T) {
+	testContainerPublicationHTTP(t, true)
+}
+
+func testContainerPublicationHTTP(t *testing.T, postgresBinding bool) {
 	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Minute)
 	defer cancel()
 
@@ -120,7 +128,7 @@ func TestContainerPublicationHTTP(t *testing.T) {
 		HostBudget:   config.ResourceBudget{CPUMillis: 4000, MemoryBytes: 4 << 30, Instances: 4},
 		ProjectQuota: config.ResourceBudget{CPUMillis: 4000, MemoryBytes: 4 << 30, Instances: 4},
 	}
-	service, err := containerpublish.NewService(ctx, store, docker, publisher, configuration, "container-test")
+	service, err := containerpublish.NewService(ctx, store, docker, publisher, configuration, "container-test", make([]byte, 32))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +137,7 @@ func TestContainerPublicationHTTP(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	if duplicate, err := containerpublish.NewService(ctx, store, docker, publisher, configuration, "container-test"); err == nil {
+	if duplicate, err := containerpublish.NewService(ctx, store, docker, publisher, configuration, "container-test", make([]byte, 32)); err == nil {
 		duplicate.Close()
 		t.Fatal("second container controller accepted")
 	}
@@ -174,7 +182,7 @@ func TestContainerPublicationHTTP(t *testing.T) {
 	owner, ownerUser := login("container-owner@cloudlet.local")
 	viewer, viewerUser := login("container-viewer@cloudlet.local")
 	developer, developerUser := login("container-developer@cloudlet.local")
-	outsider, _ := login("container-outsider@cloudlet.local")
+	outsider, outsiderUser := login("container-outsider@cloudlet.local")
 	project, err := store.CreateProject(ctx, ownerUser.ID, "Container integration")
 	if err != nil {
 		t.Fatal(err)
@@ -235,12 +243,131 @@ func TestContainerPublicationHTTP(t *testing.T) {
 		return collectionPath(projectID) + "/" + id.String()
 	}
 
+	path := collectionPath(project.ID)
+	if postgresBinding {
+		business, businessHost, ca := businessPostgres(t, ctx, images.Postgres)
+		secretKey := make([]byte, 32)
+		credentials, err := json.Marshal(map[string]string{"username": businessUser, "password": businessPassword})
+		if err != nil {
+			t.Fatal(err)
+		}
+		seedBinding := func(projectID, name string) uuid.UUID {
+			t.Helper()
+			secret, err := store.CreateProjectSecretVersion(ctx, projectID, "APP_DB", string(credentials), secretKey)
+			if err != nil {
+				t.Fatal(err)
+			}
+			version := uuid.MustParse(secret.ID)
+			found, err := store.CreatePostgresBinding(ctx, database.PostgresBinding{
+				ProjectID: projectID, Name: name, Host: businessHost, Port: 5432,
+				Database: businessDatabase, SecretVersionID: version, VerifiedAt: time.Now(),
+			})
+			if err != nil || !found {
+				t.Fatalf("seed real database binding: %t %v", found, err)
+			}
+			return version
+		}
+		foreignProject, err := store.CreateProject(ctx, outsiderUser.ID, "Foreign database binding")
+		if err != nil {
+			t.Fatal(err)
+		}
+		foreignBinding := "foreign-db"
+		seedBinding(foreignProject.ID, foreignBinding)
+		name := "business-db"
+		version := seedBinding(project.ID, name)
+		app := containerpublish.Request{
+			Name: "business-app", Image: images.Postgres, Port: 8080, Hostname: "business-app.localhost",
+			CPUMillis: 500, MemoryBytes: 128 << 20,
+			Command: []string{"/bin/sh", "-ec", businessAppCommand},
+			Env:     []string{"FIXTURE_CA=" + ca}, PostgresBinding: &name,
+		}
+		unauthorized := app
+		unauthorized.PostgresBinding = &foreignBinding
+		request(owner, http.MethodPost, path, "foreign-db-present", unauthorized, http.StatusNotFound)
+		request(developer, http.MethodPost, path, "developer-bind", app, http.StatusForbidden)
+		reservedEnv := app
+		reservedEnv.Env = []string{"CLOUDLET_POSTGRES_URL_FILE=/somewhere"}
+		request(owner, http.MethodPost, path, "env-file-override", reservedEnv, http.StatusBadRequest)
+		assertBusinessResponse := func(want string) {
+			t.Helper()
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, public.URL, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Host = app.Hostname
+			response, err := public.Client().Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			body, err := io.ReadAll(response.Body)
+			if err != nil || response.StatusCode != http.StatusOK || string(body) != want {
+				t.Fatalf("business app: HTTP %d, body %q, want %q, error %v", response.StatusCode, body, want, err)
+			}
+		}
+		assertBinding := func(data []byte) apigen.Container {
+			t.Helper()
+			value := decode(data)
+			if value.PostgresBinding == nil || value.PostgresBinding.Name != name || value.PostgresBinding.SecretVersionId != version {
+				t.Fatal("response did not retain the authorized binding and Secret version")
+			}
+			if bytes.Contains(data, []byte(businessPassword)) || bytes.Contains(data, []byte("postgres://")) {
+				t.Fatal("container response includes connection credentials")
+			}
+			return value
+		}
+		_, data := request(owner, http.MethodPost, path, "create-business-app", app, http.StatusCreated)
+		bound := assertBinding(data)
+		_, data = request(viewer, http.MethodGet, itemPath(project.ID, bound.Id), "", nil, http.StatusOK)
+		assertBinding(data)
+		assertBusinessRows(t, ctx, business, 1)
+		assertBusinessResponse("1")
+		var onPlatform bool
+		if err := store.SQL.QueryRowContext(ctx, "SELECT to_regclass('issue172_business_rows') IS NOT NULL").Scan(&onPlatform); err != nil || onPlatform {
+			t.Fatalf("business table in platform database = %t: %v", onPlatform, err)
+		}
+		var storedEnvironment string
+		if err := store.SQL.QueryRowContext(ctx, "SELECT env FROM container_executions WHERE id = $1", bound.ExecutionId).Scan(&storedEnvironment); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(storedEnvironment, businessPassword) || strings.Contains(storedEnvironment, "postgres://") {
+			t.Fatal("platform stored credentials with the execution environment")
+		}
+		inspected, err := docker.ContainerInspect(ctx, bound.DockerContainerId, client.ContainerInspectOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Contains(inspected.Container.Config.Env, "CLOUDLET_POSTGRES_URL_FILE=/cloudlet-postgres-url") {
+			t.Fatal("container is missing the credential file reference")
+		}
+		if strings.Contains(strings.Join(inspected.Container.Config.Env, " "), businessPassword) {
+			t.Fatal("Docker configuration contains the plaintext password")
+		}
+		request(developer, http.MethodPost, itemPath(project.ID, bound.Id)+"/stop", "stop-business", nil, http.StatusOK)
+		newSecret, err := store.CreateProjectSecretVersion(ctx, project.ID, "APP_DB", `{"username":"application","password":"unusable-new-password"}`, secretKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.DB.WithContext(ctx).Model(&database.PostgresBinding{}).Where("project_id = ? AND name = ?", project.ID, name).
+			Update("secret_version_id", newSecret.ID).Error; err != nil {
+			t.Fatal(err)
+		}
+		_, data = request(developer, http.MethodPost, itemPath(project.ID, bound.Id)+"/restart", "restart-business", nil, http.StatusOK)
+		restartedBinding := assertBinding(data)
+		if restartedBinding.ExecutionId == bound.ExecutionId || restartedBinding.Generation != bound.Generation+1 {
+			t.Fatal("restart did not create a new execution of the saved binding")
+		}
+		assertBusinessRows(t, ctx, business, 2)
+		assertBusinessResponse("2")
+		request(owner, http.MethodDelete, itemPath(project.ID, bound.Id), "delete-business", nil, http.StatusNoContent)
+		return
+	}
+
 	valid := containerpublish.Request{
 		Name: "web", Image: images.ContainerHTTP, Port: 8080, Hostname: "container.localhost",
 		CPUMillis: 500, MemoryBytes: 128 << 20, User: "101:101",
 		Env: []string{"CLOUDLET_CONTAINER_TEST=1"},
 	}
-	path := collectionPath(project.ID)
 	request(viewer, http.MethodPost, path, "viewer", valid, http.StatusForbidden)
 	request(outsider, http.MethodPost, path, "outsider", valid, http.StatusNotFound)
 	request(&http.Client{Timeout: 10 * time.Second}, http.MethodPost, path, "anonymous", valid, http.StatusUnauthorized)
