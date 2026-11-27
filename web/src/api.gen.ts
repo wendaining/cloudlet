@@ -1338,6 +1338,15 @@ export interface components {
             compatibility_date: string;
             /** @description 无端口的公开域名。 */
             hostname: string;
+            /** @description 显式声明的 workerd 兼容标志，由部署采用的固定版本验证。 */
+            compatibility_flags?: string[];
+            /** @description SQLite Durable Object 类及其环境绑定，命名空间由项目和 Worker 自动分配。 */
+            durable_objects?: components["schemas"]["WorkerDurableObjectBinding"][];
+        };
+        WorkerDurableObjectBinding: {
+            /** @description 模块中导出的 Durable Object 类名。 */
+            class_name: string;
+            bindings: string[];
             /**
              * @description 现有 Worker 的候选版本使用 true，域名须与活动版本相同。候选版本就绪后需显式激活。
              * @default false
@@ -1359,6 +1368,8 @@ export interface components {
             config_digest: string;
             entry: string;
             compatibility_date: string;
+            /** @description 该版本声明的兼容标志。成功版本的标志已由实际 workerd 验证。 */
+            compatibility_flags: string[];
             runtime_version: string;
             runtime_image: string;
             hostname: string;
@@ -1366,6 +1377,7 @@ export interface components {
             failure: string;
             container_id: string;
             execution_state: string;
+            last_exit?: components["schemas"]["WorkerExecutionExit"];
             operation_phase: string;
             operation_outcome: string;
             /** Format: int64 */
@@ -1412,6 +1424,21 @@ export interface components {
             secret_version_id: string;
             /** Format: date-time */
             verified_at: string;
+        };
+        WorkerExecutionExit: {
+            /** @description 退出观察结果，包括正常退出、非零退出、内存超限、Docker 错误、容器缺失或容器未运行。 */
+            reason: string;
+            /** @description Docker 报告的退出码。 */
+            exit_code?: number;
+            /**
+             * Format: date-time
+             * @description Docker 报告的执行结束时间。
+             */
+            finished_at?: string;
+            /** Format: date-time */
+            observed_at: string;
+            /** @description Docker 报告的错误或容器状态。 */
+            detail?: string;
         };
     };
     responses: {

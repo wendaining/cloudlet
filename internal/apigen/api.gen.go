@@ -374,14 +374,17 @@ type DeployWorkerRequest struct {
 	// CompatibilityDate 固定 workerd 支持的兼容日期。
 	CompatibilityDate openapi_types.Date `json:"compatibility_date"`
 
+	// CompatibilityFlags 显式声明的 workerd 兼容标志，由部署采用的固定版本验证。
+	CompatibilityFlags *[]string `json:"compatibility_flags,omitempty"`
+
+	// DurableObjects SQLite Durable Object 类及其环境绑定，命名空间由项目和 Worker 自动分配。
+	DurableObjects *[]WorkerDurableObjectBinding `json:"durable_objects,omitempty"`
+
 	// Hostname 无端口的公开域名。
 	Hostname string `json:"hostname"`
 
 	// Module 已打包的单文件 JavaScript ES Module，UTF-8 编码后最多 1048576 字节。入口固定为 index.mjs。
 	Module string `json:"module"`
-
-	// Stage 现有 Worker 的候选版本使用 true，域名须与活动版本相同。候选版本就绪后需显式激活。
-	Stage *bool `json:"stage,omitempty"`
 }
 
 // Environment defines model for Environment.
@@ -645,28 +648,59 @@ type WaitForBrowserPageRequestCondition string
 
 // WorkerDeployment defines model for WorkerDeployment.
 type WorkerDeployment struct {
-	ArtifactDigest    string             `json:"artifact_digest"`
-	CompatibilityDate string             `json:"compatibility_date"`
-	ConfigDigest      string             `json:"config_digest"`
-	ContainerId       string             `json:"container_id"`
-	CpuMillis         int64              `json:"cpu_millis"`
-	CreatedAt         time.Time          `json:"created_at"`
-	Entry             string             `json:"entry"`
-	ExecutionId       openapi_types.UUID `json:"execution_id"`
-	ExecutionState    string             `json:"execution_state"`
-	Failure           string             `json:"failure"`
-	Generation        int64              `json:"generation"`
-	Hostname          string             `json:"hostname"`
-	Id                openapi_types.UUID `json:"id"`
-	MemoryBytes       int64              `json:"memory_bytes"`
-	OperationId       openapi_types.UUID `json:"operation_id"`
-	OperationOutcome  string             `json:"operation_outcome"`
-	OperationPhase    string             `json:"operation_phase"`
-	ProjectId         openapi_types.UUID `json:"project_id"`
-	RuntimeImage      string             `json:"runtime_image"`
-	RuntimeVersion    string             `json:"runtime_version"`
-	State             string             `json:"state"`
-	WorkerId          openapi_types.UUID `json:"worker_id"`
+	ArtifactDigest    string `json:"artifact_digest"`
+	CompatibilityDate string `json:"compatibility_date"`
+
+	// CompatibilityFlags 该版本声明的兼容标志。成功版本的标志已由实际 workerd 验证。
+	CompatibilityFlags []string             `json:"compatibility_flags"`
+	ConfigDigest       string               `json:"config_digest"`
+	ContainerId        string               `json:"container_id"`
+	CpuMillis          int64                `json:"cpu_millis"`
+	CreatedAt          time.Time            `json:"created_at"`
+	Entry              string               `json:"entry"`
+	ExecutionId        openapi_types.UUID   `json:"execution_id"`
+	ExecutionState     string               `json:"execution_state"`
+	Failure            string               `json:"failure"`
+	Generation         int64                `json:"generation"`
+	Hostname           string               `json:"hostname"`
+	Id                 openapi_types.UUID   `json:"id"`
+	LastExit           *WorkerExecutionExit `json:"last_exit,omitempty"`
+	MemoryBytes        int64                `json:"memory_bytes"`
+	OperationId        openapi_types.UUID   `json:"operation_id"`
+	OperationOutcome   string               `json:"operation_outcome"`
+	OperationPhase     string               `json:"operation_phase"`
+	ProjectId          openapi_types.UUID   `json:"project_id"`
+	RuntimeImage       string               `json:"runtime_image"`
+	RuntimeVersion     string               `json:"runtime_version"`
+	State              string               `json:"state"`
+	WorkerId           openapi_types.UUID   `json:"worker_id"`
+}
+
+// WorkerDurableObjectBinding defines model for WorkerDurableObjectBinding.
+type WorkerDurableObjectBinding struct {
+	Bindings []string `json:"bindings"`
+
+	// ClassName 模块中导出的 Durable Object 类名。
+	ClassName string `json:"class_name"`
+
+	// Stage 现有 Worker 的候选版本使用 true，域名须与活动版本相同。候选版本就绪后需显式激活。
+	Stage *bool `json:"stage,omitempty"`
+}
+
+// WorkerExecutionExit defines model for WorkerExecutionExit.
+type WorkerExecutionExit struct {
+	// Detail Docker 报告的错误或容器状态。
+	Detail *string `json:"detail,omitempty"`
+
+	// ExitCode Docker 报告的退出码。
+	ExitCode *int `json:"exit_code,omitempty"`
+
+	// FinishedAt Docker 报告的执行结束时间。
+	FinishedAt *time.Time `json:"finished_at,omitempty"`
+	ObservedAt time.Time  `json:"observed_at"`
+
+	// Reason 退出观察结果，包括正常退出、非零退出、内存超限、Docker 错误、容器缺失或容器未运行。
+	Reason string `json:"reason"`
 }
 
 // BrowserProjectID defines model for BrowserProjectID.

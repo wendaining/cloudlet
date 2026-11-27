@@ -27,6 +27,7 @@ import (
 	"github.com/wendaining/cloudlet/internal/config"
 	"github.com/wendaining/cloudlet/internal/containers"
 	"github.com/wendaining/cloudlet/internal/database"
+	"github.com/wendaining/cloudlet/internal/durableobjects"
 	"github.com/wendaining/cloudlet/internal/executions"
 	"github.com/wendaining/cloudlet/internal/gateway"
 	"github.com/wendaining/cloudlet/internal/operations"
@@ -43,10 +44,37 @@ var (
 )
 
 type Request struct {
-	Module            string `json:"module"`
-	CompatibilityDate string `json:"compatibility_date"`
-	Hostname          string `json:"hostname"`
-	Stage             bool   `json:"stage,omitempty"`
+	Module             string                 `json:"module"`
+	CompatibilityDate  string                 `json:"compatibility_date"`
+	Hostname           string                 `json:"hostname"`
+	CompatibilityFlags []string               `json:"compatibility_flags,omitempty"`
+	Stage              bool                   `json:"stage,omitempty"`
+	DurableObjects     []DurableObjectBinding `json:"durable_objects,omitempty"`
+}
+
+type DurableObjectBinding struct {
+	ClassName string   `json:"class_name"`
+	Bindings  []string `json:"bindings"`
+}
+
+func (r Request) namespaces(projectID uuid.UUID, worker string) ([]durableobjects.Namespace, error) {
+	if len(r.DurableObjects) > 16 {
+		return nil, fmt.Errorf("Worker supports up to 16 Durable Object classes: %w", fs.ErrInvalid)
+	}
+	var namespaces []durableobjects.Namespace
+	for _, binding := range r.DurableObjects {
+		if len(binding.ClassName) > 128 || len(binding.Bindings) > 16 {
+			return nil, fmt.Errorf("Durable Object class or bindings exceed their limits: %w", fs.ErrInvalid)
+		}
+		for _, name := range binding.Bindings {
+			if len(name) > 128 {
+				return nil, fmt.Errorf("Durable Object binding exceeds 128 bytes: %w", fs.ErrInvalid)
+			}
+		}
+		id := uuid.NewSHA1(projectID, []byte("cloudlet/durable-object/"+worker+"/"+binding.ClassName))
+		namespaces = append(namespaces, durableobjects.Namespace{ID: id, ClassName: binding.ClassName, Bindings: binding.Bindings})
+	}
+	return namespaces, nil
 }
 
 func ValidateRequest(name, key string, request Request) (workers.RuntimeConfig, error) {
@@ -59,7 +87,7 @@ func ValidateRequest(name, key string, request Request) (workers.RuntimeConfig, 
 	if err := config.ValidateRoutes([]config.Route{{Host: request.Hostname, Target: "http://127.0.0.1:8080"}}); err != nil {
 		return workers.RuntimeConfig{}, fmt.Errorf("validate Worker hostname: %w: %w", fs.ErrInvalid, err)
 	}
-	prepared, err := workers.PrepareModule([]byte(request.Module), request.CompatibilityDate)
+	prepared, err := workers.PrepareModuleWithFlags([]byte(request.Module), request.CompatibilityDate, request.CompatibilityFlags)
 	if err != nil {
 		return prepared, fmt.Errorf("validate Worker module: %w: %w", fs.ErrInvalid, err)
 	}
@@ -223,6 +251,12 @@ func (s *Service) Get(ctx context.Context, projectID, deploymentID uuid.UUID) (R
 	if err != nil {
 		return Result{}, err
 	}
+	if deployment.State == "active" && (execution.State == "running" || execution.LastExit.Reason != "") {
+		execution, err = s.observeExecution(ctx, deployment, execution)
+		if err != nil {
+			return Result{}, err
+		}
+	}
 	op, err := s.operations.Get(ctx, projectID, deployment.OperationID)
 	return Result{Deployment: deployment, Execution: execution, Operation: op}, err
 }
@@ -236,6 +270,16 @@ func (s *Service) Deploy(ctx context.Context, projectID uuid.UUID, name, key str
 	if projectID == uuid.Nil || s.publisher.ReservedHost(request.Hostname) {
 		return result, false, fmt.Errorf("Worker project or hostname is unavailable: %w", fs.ErrInvalid)
 	}
+	namespaces, err := request.namespaces(projectID, name)
+	if err != nil {
+		return result, false, err
+	}
+	if len(namespaces) > 0 {
+		prepared, err = workers.PrepareDurableModuleWithFlags(prepared.Module, prepared.CompatibilityDate, namespaces, prepared.CompatibilityFlags)
+		if err != nil {
+			return result, false, fmt.Errorf("validate Durable Object bindings: %w: %w", fs.ErrInvalid, err)
+		}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
@@ -246,6 +290,7 @@ func (s *Service) Deploy(ctx context.Context, projectID uuid.UUID, name, key str
 		return result, false, fmt.Errorf("verify Worker controller ownership: %w", err)
 	}
 	request.Hostname = gateway.CanonicalHost(request.Hostname)
+	request.CompatibilityFlags = prepared.CompatibilityFlags
 	encoded, err := json.Marshal(request)
 	if err != nil {
 		return result, false, err
@@ -323,7 +368,7 @@ func (s *Service) Deploy(ctx context.Context, projectID uuid.UUID, name, key str
 	deployment, workerExecution, err := s.store.CreateWorkerDeployment(ctx, name, database.WorkerDeployment{
 		ID: uuid.New(), ProjectID: projectID, OperationID: op.ID, ArtifactDigest: moduleDigest, ConfigDigest: configDigest,
 		Entry: prepared.Entry, CompatibilityDate: prepared.CompatibilityDate, RuntimeVersion: workers.RuntimeVersion, RuntimeImage: s.image,
-		Hostname: request.Hostname, CPUMillis: 1000, MemoryBytes: 256 << 20, State: "pending",
+		Hostname: request.Hostname, CompatibilityFlags: prepared.CompatibilityFlags, CPUMillis: 1000, MemoryBytes: 256 << 20, State: "pending",
 	}, request.Stage)
 	if err != nil {
 		return result, true, err
@@ -349,10 +394,18 @@ func (s *Service) Deploy(ctx context.Context, projectID uuid.UUID, name, key str
 	if err = s.advance(ctx, &result, operations.Progress{Phase: operations.Preparing, Outcome: operations.InProgress}); err != nil {
 		return result, true, err
 	}
+	var dataVolume *containers.DataVolume
+	if len(namespaces) != 0 {
+		dataVolume, err = s.claimDurableVolume(ctx, result.Execution, namespaces)
+		if err != nil {
+			return result, true, err
+		}
+	}
 	execution, err := s.executions.Start(ctx, executions.StartRequest{ExecutionID: result.Execution.ID, ProjectID: projectID, Spec: containers.Spec{
 		Ownership: ownership, Image: s.image, User: "1000:1000", Port: workers.HTTPPort, Access: containers.AccessPublished, Command: workers.ServeArgs(),
-		Limits: containers.Limits{CPUMillis: 1000, MemoryBytes: 256 << 20, PIDs: 128, OpenFiles: 1024},
-		Files:  []containers.File{{Path: "worker/config.capnp", Data: prepared.Config}, {Path: "worker/worker.mjs", Data: prepared.Module}},
+		Limits:     containers.Limits{CPUMillis: 1000, MemoryBytes: 256 << 20, PIDs: 128, OpenFiles: 1024},
+		Files:      []containers.File{{Path: "worker/config.capnp", Data: prepared.Config}, {Path: "worker/worker.mjs", Data: prepared.Module}},
+		DataVolume: dataVolume,
 	}})
 	result.Execution.ContainerID = execution.Container.ID
 	if result.Execution.ContainerID != "" {

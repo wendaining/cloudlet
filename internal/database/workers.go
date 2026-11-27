@@ -27,32 +27,35 @@ type Worker struct {
 
 // WorkerDeployment contains the immutable deployment inputs and its outcome.
 type WorkerDeployment struct {
-	ID                uuid.UUID
-	ProjectID         uuid.UUID
-	WorkerID          uuid.UUID
-	OperationID       uuid.UUID
-	ArtifactDigest    string
-	ConfigDigest      string
-	Entry             string
-	CompatibilityDate string
-	RuntimeVersion    string
-	RuntimeImage      string
-	Hostname          string
-	CPUMillis         int64
-	MemoryBytes       int64
-	State             string
-	Failure           string
-	CreatedAt         time.Time
+	ID                 uuid.UUID
+	ProjectID          uuid.UUID
+	WorkerID           uuid.UUID
+	OperationID        uuid.UUID
+	ArtifactDigest     string
+	ConfigDigest       string
+	Entry              string
+	CompatibilityDate  string
+	CompatibilityFlags []string `gorm:"serializer:json;type:jsonb"`
+	RuntimeVersion     string
+	RuntimeImage       string
+	Hostname           string
+	CPUMillis          int64
+	MemoryBytes        int64
+	State              string
+	Failure            string
+	CreatedAt          time.Time
 }
 
 type WorkerExecution struct {
-	ID           uuid.UUID
-	ProjectID    uuid.UUID
-	WorkerID     uuid.UUID
-	DeploymentID uuid.UUID
-	Generation   uint64
-	ContainerID  string
-	State        string
+	ID                 uuid.UUID
+	ProjectID          uuid.UUID
+	WorkerID           uuid.UUID
+	DeploymentID       uuid.UUID
+	Generation         uint64
+	ContainerID        string
+	State              string
+	ObservationVersion int64
+	LastExit           WorkerExit `gorm:"embedded;embeddedPrefix:last_exit_"`
 }
 
 // CheckWorkerPublication validates the deployment before writing artifacts.
@@ -103,6 +106,9 @@ func checkWorkerPublication(db *gorm.DB, worker Worker, hostname string, stage b
 
 // CreateWorkerDeployment records a complete artifact before starting runtime work.
 func (s *Store) CreateWorkerDeployment(ctx context.Context, name string, deployment WorkerDeployment, stage bool) (WorkerDeployment, WorkerExecution, error) {
+	if deployment.CompatibilityFlags == nil {
+		deployment.CompatibilityFlags = []string{}
+	}
 	worker := Worker{ID: uuid.New(), ProjectID: deployment.ProjectID, Name: name}
 	execution := WorkerExecution{ID: uuid.New(), ProjectID: deployment.ProjectID, DeploymentID: deployment.ID, State: "pending"}
 	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -209,7 +215,10 @@ func (s *Store) FailWorkerDeployment(ctx context.Context, deploymentID uuid.UUID
 			return err
 		}
 		if cleaned {
-			return tx.Model(&WorkerExecution{}).Where("deployment_id = ?", deploymentID).Update("state", "stopped").Error
+			if err := tx.Model(&WorkerExecution{}).Where("deployment_id = ?", deploymentID).Update("state", "stopped").Error; err != nil {
+				return err
+			}
+			return tx.Exec("UPDATE worker_durable_storage SET owner_execution_id = NULL WHERE owner_execution_id IN (SELECT id FROM worker_executions WHERE deployment_id = ?)", deploymentID).Error
 		}
 		return nil
 	})

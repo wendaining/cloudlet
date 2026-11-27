@@ -51,7 +51,7 @@ Cloudlet 在一台 Linux 服务器上管理计算资源。本地开发在成员�
 | pkg/client | CLI 与其他客户端共享的 API 客户端 |
 | internal/mcpserver | MCP 项目查询、Worker 发布与操作查询，复用管理 API 会话权限 |
 
-PostgreSQL 当前保存账号、登录会话、项目、操作记录、项目凭据、项目路由、容量预留、静态站点版本、浏览器会话、容器与执行记录以及 Worker 部署与执行记录。首个无状态 Worker 可以通过管理 API 发布并访问。Durable Objects 的运行配置与存储能力通过独立 workerd 集成验证。
+PostgreSQL 当前保存账号、登录会话、项目、操作记录、项目凭据、项目路由、容量预留、静态站点版本、浏览器会话、容器与执行记录以及 Worker 部署与执行记录。首个无状态 Worker 可以通过管理 API 发布并访问。具有 Durable Object 绑定的 Worker 可以通过同一管理 API 首次发布，PostgreSQL 记录命名空间、持久化数据卷和唯一执行所有者。
 
 项目拥有稳定的 project_id。创建项目在事务内写入项目和创建者的 owner 成员记录。项目列表和单项目读取同时校验当前会话账号的项目成员关系。项目成员列表对所有成员开放；所有者可以按邮箱把已有账号添加为 developer 或 viewer，或更新已有成员的角色，创建者的 owner 身份保持不变。非成员访问返回 404，成员越权修改返回 403。
 
