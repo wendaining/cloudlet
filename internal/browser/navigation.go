@@ -35,7 +35,7 @@ func validURL(value string) bool {
 		(parsed.Scheme == "http" || parsed.Scheme == "https")
 }
 
-func (s *Service) Navigate(ctx context.Context, projectID, id uuid.UUID, value string) (Navigation, error) {
+func (s *Service) Navigate(ctx context.Context, projectID, id uuid.UUID, value string, pageID *uuid.UUID) (Navigation, error) {
 	session, err := s.Session(ctx, projectID, id)
 	if err != nil {
 		return Navigation{}, err
@@ -47,7 +47,7 @@ func (s *Service) Navigate(ctx context.Context, projectID, id uuid.UUID, value s
 	if err != nil {
 		return Navigation{}, err
 	}
-	page, err := s.navigate(ctx, endpoint+"/navigate", id, value)
+	page, err := s.navigate(ctx, endpoint+"/navigate", id, value, pageID)
 	if errors.Is(err, ErrNavigationTimeout) || errors.Is(err, ErrNavigation) {
 		recordCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
 		defer cancel()
@@ -107,12 +107,13 @@ func (s *Service) boundRuntimeEndpoint(ctx context.Context, session database.Bro
 	return "", ErrSessionUnavailable
 }
 
-func (s *Service) navigate(ctx context.Context, endpoint string, id uuid.UUID, value string) (Navigation, error) {
+func (s *Service) navigate(ctx context.Context, endpoint string, id uuid.UUID, value string, pageID *uuid.UUID) (Navigation, error) {
 	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
 	body, err := json.Marshal(struct {
-		URL string `json:"url"`
-	}{value})
+		URL    string     `json:"url"`
+		PageID *uuid.UUID `json:"page_id,omitempty"`
+	}{value, pageID})
 	if err != nil {
 		return Navigation{}, err
 	}
@@ -139,6 +140,11 @@ func (s *Service) navigate(ctx context.Context, endpoint string, id uuid.UUID, v
 		return result, nil
 	case http.StatusBadRequest:
 		return Navigation{}, ErrInvalidURL
+	case http.StatusNotFound:
+		if pageID != nil {
+			return Navigation{}, ErrPageNotFound
+		}
+		return Navigation{}, ErrNavigation
 	case http.StatusConflict, http.StatusGone:
 		return Navigation{}, ErrSessionUnavailable
 	case http.StatusGatewayTimeout:

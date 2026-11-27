@@ -3,14 +3,11 @@ package controlplane
 import (
 	"context"
 	"crypto/tls"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"net/netip"
-	"net/url"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -18,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/wendaining/cloudlet/internal/apigen"
+	"github.com/wendaining/cloudlet/internal/postgresbinding"
 )
 
 var postgresBindingName = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
@@ -46,24 +44,14 @@ func validPostgresHost(host string) bool {
 }
 
 func verifyPostgresBinding(ctx context.Context, input apigen.PostgresBindingInput, value string, development bool) (string, error) {
-	var secret struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
+	endpoint, err := postgresbinding.ConnectionURL(input.Host, input.Port, input.Database, value)
+	if errors.Is(err, postgresbinding.ErrIncompleteCredentials) {
+		return "PostgreSQL 凭据缺少有效的用户名或密码", err
 	}
-	if err := json.Unmarshal([]byte(value), &secret); err != nil {
-		return "PostgreSQL 凭据格式无效", fmt.Errorf("decode database credentials: %w", err)
+	if err != nil {
+		return "PostgreSQL 凭据格式无效", err
 	}
-	if secret.Username == "" || secret.Password == "" || strings.ContainsRune(secret.Username, 0) || strings.ContainsRune(secret.Password, 0) {
-		return "PostgreSQL 凭据缺少有效的用户名或密码", errors.New("invalid database credentials")
-	}
-
-	endpoint := url.URL{
-		Scheme:   "postgres",
-		User:     url.UserPassword(secret.Username, secret.Password),
-		Host:     net.JoinHostPort(input.Host, strconv.Itoa(input.Port)),
-		Path:     "/" + input.Database,
-		RawQuery: "sslmode=disable&sslnegotiation=postgres&sslcertmode=disable&target_session_attrs=any",
-	}
+	endpoint.RawQuery = "sslmode=disable&sslnegotiation=postgres&sslcertmode=disable&target_session_attrs=any"
 	cfg, err := pgx.ParseConfig(endpoint.String())
 	if err != nil {
 		return "PostgreSQL 连接配置无效", fmt.Errorf("build database connection: %w", err)

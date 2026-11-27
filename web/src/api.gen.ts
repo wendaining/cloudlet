@@ -235,6 +235,83 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{projectID}/browser-sessions/{sessionID}/pages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["openBrowserPage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/browser-sessions/{sessionID}/pages/{pageID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+                pageID: string;
+            };
+            cookie?: never;
+        };
+        get: operations["getBrowserPage"];
+        put?: never;
+        post?: never;
+        delete: operations["closeBrowserPage"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/browser-sessions/{sessionID}/wait": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["waitForBrowserPage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/browser-sessions/{sessionID}/text": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        get: operations["getBrowserPageText"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{projectID}/browser-sessions/{sessionID}/form": {
         parameters: {
             query?: never;
@@ -370,6 +447,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{projectID}/browser-sessions/{sessionID}/uploads": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 将同项目内的截图或浏览器下载产物放入默认页面的文件输入。 */
+        post: operations["attachBrowserArtifact"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{projectID}/browser-sessions/{sessionID}/downloads": {
         parameters: {
             query?: never;
@@ -493,6 +590,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/projects/{projectID}/sites/{siteName}/publication": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["SiteProjectID"];
+                siteName: components["parameters"]["SiteName"];
+            };
+            cookie?: never;
+        };
+        /** @description 项目成员读取当前发布版本、固定域名和切换所需的修订值。 */
+        get: operations["getStaticSitePublication"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["SiteProjectID"];
+                siteName: components["parameters"]["SiteName"];
+                versionID: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** @description 项目所有者使用当前修订值在现有域名切换版本。目标已经生效时，重复调用不修改路由。 */
+        post: operations["activateStaticSiteVersion"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/projects/{projectID}/secrets": {
         parameters: {
             query?: never;
@@ -605,7 +743,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用。同一幂等键复用操作。 */
+        /** @description 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用，引用 PostgreSQL 绑定时仅所有者可以调用。同一幂等键复用操作。 */
         post: operations["createContainer"];
         delete?: never;
         options?: never;
@@ -936,6 +1074,18 @@ export interface components {
             /** Format: date-time */
             created_at: string;
         };
+        AttachBrowserArtifactRequest: {
+            /** @enum {string} */
+            artifact_kind: "screenshot" | "download";
+            /** Format: uuid */
+            source_session_id: string;
+            /** Format: uuid */
+            artifact_id: string;
+            /** @description 唯一定位文件输入的 CSS 选择器 */
+            selector: string;
+            /** @default 10000 */
+            timeout_ms: number;
+        };
         CaptureBrowserDownloadRequest: {
             /** @description 触发下载的主框架控件的 CSS 选择器 */
             selector: string;
@@ -955,6 +1105,33 @@ export interface components {
         };
         /** @enum {string} */
         BrowserSessionStatus: "starting" | "ready" | "failed" | "closed";
+        BrowserPage: {
+            /** Format: uuid */
+            id: string;
+            /** @description 当前地址，最多 4096 个 UTF-8 字节 */
+            url: string;
+            url_truncated: boolean;
+            /** @description 当前标题，最多 512 个 UTF-16 单元 */
+            title: string;
+            title_truncated: boolean;
+        };
+        WaitForBrowserPageRequest: {
+            /**
+             * @description ready 等待页面加载完成，text 等待默认页面正文包含指定可见文本
+             * @enum {string}
+             */
+            condition: "ready" | "text";
+            /** @description 仅在 condition 为 text 时必填，区分大小写 */
+            text?: string;
+            /** @default 10000 */
+            timeout_ms: number;
+        };
+        BrowserPageText: {
+            title: string;
+            title_truncated: boolean;
+            text: string;
+            text_truncated: boolean;
+        };
         BrowserFormActionRequest: {
             /** @enum {string} */
             action: "fill" | "select";
@@ -985,6 +1162,11 @@ export interface components {
         };
         NavigateBrowserSessionRequest: {
             url: string;
+            /**
+             * Format: uuid
+             * @description 额外页面标识，省略时导航默认页面
+             */
+            page_id?: string;
         };
         BrowserNavigation: {
             url: string;
@@ -1002,6 +1184,24 @@ export interface components {
             hostname: string;
             /** Format: uri */
             url: string;
+        };
+        StaticSiteActivationRequest: {
+            /**
+             * Format: date-time
+             * @description 最近一次从发布查询或切换响应取得的修订值。
+             */
+            expected_revision: string;
+        };
+        StaticSiteActivePublication: {
+            /** Format: uuid */
+            site_id: string;
+            /** Format: uuid */
+            version_id: string;
+            hostname: string;
+            /** Format: uri */
+            url: string;
+            /** Format: date-time */
+            revision: string;
         };
         StaticSiteSummary: {
             /** Format: uuid */
@@ -1073,6 +1273,8 @@ export interface components {
             command?: string[];
             /** @description KEY=value 形式的环境变量。请求体总大小最多 64 KiB。 */
             env?: string[];
+            /** @description 项目内已授权的 PostgreSQL 绑定名称。 */
+            postgres_binding?: string;
             /**
              * @description 就绪探测的绝对请求路径。
              * @default /
@@ -1084,6 +1286,18 @@ export interface components {
              * @default 15000
              */
             health_check_timeout_ms: number;
+            data_volume?: components["schemas"]["CreateDataVolumeRequest"];
+        };
+        CreateDataVolumeRequest: {
+            /** @description 数据卷在容器内的绝对挂载路径，不能是根路径。 */
+            mount_path: string;
+            /** @description 平台在卷内初始化并交给运行用户所有的单段目录名。实际可写路径为 mount_path/directory。 */
+            directory: string;
+        };
+        ContainerDataVolume: {
+            name: string;
+            mount_path: string;
+            directory: string;
         };
         Container: {
             /** Format: uuid */
@@ -1111,6 +1325,7 @@ export interface components {
             user: string;
             command?: string[];
             env?: string[];
+            postgres_binding?: components["schemas"]["ContainerPostgresBinding"];
             health_check_path: string;
             /** Format: int64 */
             health_check_timeout_ms: number;
@@ -1125,8 +1340,14 @@ export interface components {
             operation_outcome: string;
             /** Format: int64 */
             generation: number;
+            data_volume?: components["schemas"]["ContainerDataVolume"];
             /** Format: date-time */
             created_at: string;
+        };
+        ContainerPostgresBinding: {
+            name: string;
+            /** Format: uuid */
+            secret_version_id: string;
         };
         DeployWorkerRequest: {
             /** @description 已打包的单文件 JavaScript ES Module，UTF-8 编码后最多 1048576 字节。入口固定为 index.mjs。 */
@@ -1758,6 +1979,141 @@ export interface operations {
             default: components["responses"]["Error"];
         };
     };
+    openBrowserPage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 已打开的额外页面 */
+            201: {
+                headers: {
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrowserPage"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getBrowserPage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+                pageID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 页面当前地址与标题 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrowserPage"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    closeBrowserPage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+                pageID: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 额外页面已关闭 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    waitForBrowserPage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WaitForBrowserPageRequest"];
+            };
+        };
+        responses: {
+            /** @description 默认页面已满足等待条件 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 在截止时间内未满足等待条件 */
+            504: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Error"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
+    getBrowserPageText: {
+        parameters: {
+            query?: {
+                /** @description 可选 CSS 选择器，唯一限定文本范围 */
+                selector?: string;
+            };
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 页面标题及限定范围的可见文本 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BrowserPageText"];
+                };
+            };
+            default: components["responses"]["Error"];
+        };
+    };
     applyBrowserFormAction: {
         parameters: {
             query?: never;
@@ -1952,6 +2308,32 @@ export interface operations {
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
             503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    attachBrowserArtifact: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["BrowserProjectID"];
+                sessionID: components["parameters"]["BrowserSessionID"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AttachBrowserArtifactRequest"];
+            };
+        };
+        responses: {
+            /** @description 文件已放入输入控件，可通过点击命令提交表单 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             default: components["responses"]["Error"];
         };
     };
@@ -2160,6 +2542,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StaticSitePublication"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    getStaticSitePublication: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["SiteProjectID"];
+                siteName: components["parameters"]["SiteName"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 当前活动版本和修订值 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaticSiteActivePublication"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+            default: components["responses"]["Error"];
+        };
+    };
+    activateStaticSiteVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectID: components["parameters"]["SiteProjectID"];
+                siteName: components["parameters"]["SiteName"];
+                versionID: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StaticSiteActivationRequest"];
+            };
+        };
+        responses: {
+            /** @description 当前活动版本和修订值 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StaticSiteActivePublication"];
                 };
             };
             400: components["responses"]["Error"];

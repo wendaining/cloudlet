@@ -112,7 +112,7 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 		}
 		if cfg.Containers != nil {
 			startupCtx, cancel := context.WithTimeout(ctx, time.Minute)
-			containersService, err = containerpublish.NewService(startupCtx, store, docker, publisher, *cfg.Containers, cfg.Instance)
+			containersService, err = containerpublish.NewService(startupCtx, store, docker, publisher, *cfg.Containers, cfg.Instance, cfg.SecretKey)
 			cancel()
 			if err != nil {
 				return fmt.Errorf("configure container creation: %w", err)

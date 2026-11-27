@@ -78,7 +78,34 @@ func TestValidateRequestRejectsInvalidInput(t *testing.T) {
 		"long timeout":         func(r *Request) { r.HealthCheckTimeoutMS = 60001 },
 		"too many commands":    func(r *Request) { r.Command = make([]string, 65) },
 		"too many env entries": func(r *Request) { r.Env = make([]string, 129) },
-		"long user":            func(r *Request) { r.User = strings.Repeat("a", 129) },
+		"invalid PostgreSQL binding": func(r *Request) {
+			name := "foreign/db"
+			r.PostgresBinding = &name
+		},
+		"override managed PostgreSQL file": func(r *Request) {
+			name := "business-db"
+			r.PostgresBinding = &name
+			r.Env = []string{postgresURLFileEnv + "=/arbitrary"}
+		},
+		"volume overlaps PostgreSQL credential file": func(r *Request) {
+			name := "business-db"
+			r.PostgresBinding = &name
+			r.DataVolume = &DataVolumeRequest{MountPath: "/" + postgresURLPath + "/data", Directory: "state"}
+		},
+		"long user": func(r *Request) { r.User = strings.Repeat("a", 129) },
+		"relative volume mount": func(r *Request) {
+			r.DataVolume = &DataVolumeRequest{MountPath: "data", Directory: "state"}
+		},
+		"root volume mount": func(r *Request) {
+			r.DataVolume = &DataVolumeRequest{MountPath: "/", Directory: "state"}
+		},
+		"nested volume directory": func(r *Request) {
+			r.DataVolume = &DataVolumeRequest{MountPath: "/data", Directory: "a/b"}
+		},
+		"non numeric volume user": func(r *Request) {
+			r.User = "pwuser"
+			r.DataVolume = &DataVolumeRequest{MountPath: "/data", Directory: "state"}
+		},
 	}
 	for name, change := range tests {
 		t.Run(name, func(t *testing.T) {

@@ -51,16 +51,27 @@ func (h *handler) CreateContainer(c *gin.Context, projectID string, params apige
 		c.JSON(http.StatusBadRequest, apigen.Error{Message: "容器创建请求需要单个 JSON 对象"})
 		return
 	}
+	if request.PostgresBinding != nil && membership.Role != "owner" {
+		c.JSON(http.StatusForbidden, apigen.Error{Message: "只有项目所有者可以授权容器使用 PostgreSQL 绑定"})
+		return
+	}
 	result, created, err := h.containers.Create(c.Request.Context(), uuid.MustParse(normalizedID), params.IdempotencyKey, request)
 	if result.Container.ID != uuid.Nil {
 		c.Header("Location", containerLocation(normalizedID, result.Container.ID))
 	}
 	if err != nil {
 		switch {
+		case errors.Is(err, containerpublish.ErrPostgresBindingNotFound):
+			c.JSON(http.StatusNotFound, apigen.Error{Message: "项目 PostgreSQL 绑定不存在"})
+		case errors.Is(err, containerpublish.ErrPostgresBindingUnavailable):
+			c.JSON(http.StatusConflict, apigen.Error{Message: "项目 PostgreSQL 绑定凭据不可用于容器"})
+		case errors.Is(err, containerpublish.ErrPostgresSecretKeyUnavailable):
+			c.JSON(http.StatusServiceUnavailable, apigen.Error{Message: "容器的项目凭据存储未配置"})
 		case errors.Is(err, fs.ErrInvalid):
 			c.JSON(http.StatusBadRequest, apigen.Error{Message: err.Error()})
 		case errors.Is(err, database.ErrContainerAlreadyActive),
 			errors.Is(err, database.ErrContainerPublicationPending),
+			errors.Is(err, database.ErrContainerVolumeConflict),
 			errors.Is(err, database.ErrRouteConflict),
 			errors.Is(err, operations.ErrIdempotencyConflict),
 			errors.Is(err, containerpublish.ErrRecordedFailure),
@@ -68,7 +79,8 @@ func (h *handler) CreateContainer(c *gin.Context, projectID string, params apige
 			errors.Is(err, capacity.ErrIdempotencyConflict),
 			errors.Is(err, capacity.ErrOwnershipConflict),
 			errors.Is(err, capacity.ErrExecutionReleased),
-			errors.Is(err, executions.ErrExecutionConflict):
+			errors.Is(err, executions.ErrExecutionConflict),
+			errors.Is(err, containers.ErrNotOwned):
 			c.JSON(http.StatusConflict, apigen.Error{Message: err.Error()})
 		case errors.Is(err, capacity.ErrInsufficientCapacity):
 			if result.Container.ID == uuid.Nil {
@@ -80,6 +92,8 @@ func (h *handler) CreateContainer(c *gin.Context, projectID string, params apige
 			errors.Is(err, containers.ErrImageDigestMismatch),
 			errors.Is(err, containers.ErrNotReady),
 			errors.Is(err, containerpublish.ErrRuntimeNotReady),
+			errors.Is(err, containerpublish.ErrDataVolumeMissing),
+			errors.Is(err, containers.ErrDataVolume),
 			errors.Is(err, containers.ErrConflict),
 			errors.Is(err, containers.ErrNetworkNotFound):
 			if result.Container.ID == uuid.Nil {
@@ -143,6 +157,11 @@ func containerResponse(result containerpublish.Result) apigen.Container {
 		OperationPhase: string(op.Phase), OperationOutcome: string(op.Outcome),
 		Generation: int64(execution.Generation), CreatedAt: container.CreatedAt,
 	}
+	if execution.PostgresBindingName != nil && execution.PostgresSecretVersionID != nil {
+		response.PostgresBinding = &apigen.ContainerPostgresBinding{
+			Name: *execution.PostgresBindingName, SecretVersionId: *execution.PostgresSecretVersionID,
+		}
+	}
 	if len(execution.Command) > 0 {
 		command := append([]string(nil), execution.Command...)
 		response.Command = &command
@@ -150,6 +169,11 @@ func containerResponse(result containerpublish.Result) apigen.Container {
 	if len(execution.Env) > 0 {
 		env := append([]string(nil), execution.Env...)
 		response.Env = &env
+	}
+	if execution.VolumeName != "" {
+		response.DataVolume = &apigen.ContainerDataVolume{
+			Name: execution.VolumeName, MountPath: execution.VolumeMountPath, Directory: execution.VolumeDirectory,
+		}
 	}
 	return response
 }
@@ -237,6 +261,10 @@ func containerIDFromPath(c *gin.Context, value string) (uuid.UUID, bool) {
 
 func (h *handler) containerLifecycleFailure(c *gin.Context, projectID string, result containerpublish.Result, err error) {
 	switch {
+	case errors.Is(err, containerpublish.ErrPostgresBindingNotFound), errors.Is(err, containerpublish.ErrPostgresBindingUnavailable):
+		c.JSON(http.StatusConflict, apigen.Error{Message: "容器的 PostgreSQL 绑定或凭据不可用"})
+	case errors.Is(err, containerpublish.ErrPostgresSecretKeyUnavailable):
+		c.JSON(http.StatusServiceUnavailable, apigen.Error{Message: "容器的项目凭据存储未配置"})
 	case errors.Is(err, fs.ErrInvalid):
 		c.JSON(http.StatusBadRequest, apigen.Error{Message: err.Error()})
 	case errors.Is(err, gorm.ErrRecordNotFound):
@@ -250,7 +278,8 @@ func (h *handler) containerLifecycleFailure(c *gin.Context, projectID string, re
 		errors.Is(err, capacity.ErrIdempotencyConflict),
 		errors.Is(err, capacity.ErrOwnershipConflict),
 		errors.Is(err, capacity.ErrExecutionReleased),
-		errors.Is(err, executions.ErrExecutionConflict):
+		errors.Is(err, executions.ErrExecutionConflict),
+		errors.Is(err, containers.ErrNotOwned):
 		c.JSON(http.StatusConflict, apigen.Error{Message: err.Error()})
 	case errors.Is(err, capacity.ErrInsufficientCapacity):
 		if result.Container.ID == uuid.Nil {
@@ -263,6 +292,8 @@ func (h *handler) containerLifecycleFailure(c *gin.Context, projectID string, re
 		errors.Is(err, containers.ErrNotReady),
 		errors.Is(err, containerpublish.ErrRuntimeNotReady),
 		errors.Is(err, containerpublish.ErrRuntimeStop),
+		errors.Is(err, containerpublish.ErrDataVolumeMissing),
+		errors.Is(err, containers.ErrDataVolume),
 		errors.Is(err, containers.ErrConflict),
 		errors.Is(err, containers.ErrNetworkNotFound):
 		if result.Container.ID == uuid.Nil {

@@ -3,6 +3,7 @@
 package containerpublish
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -58,6 +59,7 @@ var (
 	ErrLifecycleState        = errors.New("容器状态不允许该操作")
 	ErrLifecycleFailed       = errors.New("容器生命周期操作失败")
 	ErrRuntimeStop           = errors.New("容器执行停止失败")
+	ErrDataVolumeMissing     = errors.New("容器数据卷不存在")
 )
 
 // RecordedFailure returns a failure that happened before a container execution
@@ -70,23 +72,33 @@ func (e *RecordedFailure) Error() string { return e.Failure }
 
 func (e *RecordedFailure) Unwrap() error { return ErrRecordedFailure }
 
+// DataVolumeRequest declares one writable data volume for the container.
+type DataVolumeRequest struct {
+	MountPath string `json:"mount_path"`
+	Directory string `json:"directory"`
+}
+
 // Request is one container creation request. Image must be an immutable
 // repository@digest reference. The service applies defaults for User,
 // HealthCheckPath and HealthCheckTimeoutMS.
 type Request struct {
-	Name                 string   `json:"name"`
-	Image                string   `json:"image"`
-	Port                 uint16   `json:"port"`
-	Hostname             string   `json:"hostname"`
-	CPUMillis            int64    `json:"cpu_millis"`
-	MemoryBytes          int64    `json:"memory_bytes"`
-	User                 string   `json:"user,omitempty"`
-	Command              []string `json:"command,omitempty"`
-	Env                  []string `json:"env,omitempty"`
-	HealthCheckPath      string   `json:"health_check_path,omitempty"`
-	HealthCheckTimeoutMS int64    `json:"health_check_timeout_ms,omitempty"`
+	Name                 string             `json:"name"`
+	Image                string             `json:"image"`
+	Port                 uint16             `json:"port"`
+	Hostname             string             `json:"hostname"`
+	CPUMillis            int64              `json:"cpu_millis"`
+	MemoryBytes          int64              `json:"memory_bytes"`
+	User                 string             `json:"user,omitempty"`
+	Command              []string           `json:"command,omitempty"`
+	Env                  []string           `json:"env,omitempty"`
+	HealthCheckPath      string             `json:"health_check_path,omitempty"`
+	HealthCheckTimeoutMS int64              `json:"health_check_timeout_ms,omitempty"`
+	DataVolume           *DataVolumeRequest `json:"data_volume,omitempty"`
+
+	PostgresBinding *string `json:"postgres_binding,omitempty"`
 
 	imageDigest string
+	volumeName  string
 }
 
 // ValidateRequest validates and normalizes one request without contacting
@@ -97,6 +109,23 @@ func ValidateRequest(request Request) (Request, error) {
 	}
 	if len(request.Command) > 64 || len(request.Env) > 128 {
 		return Request{}, fmt.Errorf("container command or environment exceeds its item limit: %w", fs.ErrInvalid)
+	}
+	if request.PostgresBinding != nil {
+		credentialPath := "/" + postgresURLPath
+		if request.DataVolume != nil && (request.DataVolume.MountPath == credentialPath ||
+			strings.HasPrefix(request.DataVolume.MountPath, credentialPath+"/")) {
+			return Request{}, fmt.Errorf("container data volume cannot use the PostgreSQL credential file path: %w", fs.ErrInvalid)
+		}
+		name := *request.PostgresBinding
+		if len(name) > 63 || !namePattern.MatchString(name) {
+			return Request{}, fmt.Errorf("invalid PostgreSQL binding name: %w", fs.ErrInvalid)
+		}
+		for _, entry := range request.Env {
+			key, _, _ := strings.Cut(entry, "=")
+			if key == postgresURLFileEnv {
+				return Request{}, fmt.Errorf("environment key %s is reserved for the PostgreSQL binding: %w", key, fs.ErrInvalid)
+			}
+		}
 	}
 	if len(request.User) > 128 {
 		return Request{}, fmt.Errorf("container user exceeds 128 bytes: %w", fs.ErrInvalid)
@@ -128,6 +157,12 @@ func ValidateRequest(request Request) (Request, error) {
 	}
 	if request.User == "" {
 		request.User = DefaultUser
+	}
+	if request.DataVolume != nil {
+		volume := containers.DataVolume{Name: "validation", MountPath: request.DataVolume.MountPath, Directory: request.DataVolume.Directory}
+		if err := containers.ValidateDataVolume(volume, request.User); err != nil {
+			return Request{}, fmt.Errorf("validate container data volume: %w: %w", fs.ErrInvalid, err)
+		}
 	}
 	if request.HealthCheckPath == "" {
 		request.HealthCheckPath = DefaultHealthPath
@@ -182,6 +217,7 @@ type Service struct {
 	publisher      *routes.Publisher
 	configuration  config.ContainerRuntime
 	instance       string
+	secretKey      []byte
 	controller     *sql.Conn
 	controlContext context.Context
 	stopController context.CancelCauseFunc
@@ -192,9 +228,12 @@ type Service struct {
 // NewService verifies every configured dependency before enabling container
 // creation. A PostgreSQL session lock allows only one container controller for
 // the host.
-func NewService(ctx context.Context, store *database.Store, docker *client.Client, publisher *routes.Publisher, configuration config.ContainerRuntime, instance string) (service *Service, err error) {
+func NewService(ctx context.Context, store *database.Store, docker *client.Client, publisher *routes.Publisher, configuration config.ContainerRuntime, instance string, secretKey []byte) (service *Service, err error) {
 	if store == nil || docker == nil || publisher == nil {
 		return nil, fmt.Errorf("container creation requires database, Docker and route publisher: %w", fs.ErrInvalid)
+	}
+	if len(secretKey) != 0 && len(secretKey) != 32 {
+		return nil, fmt.Errorf("container project secret key must be 32 bytes: %w", fs.ErrInvalid)
 	}
 	if err := configuration.Validate(); err != nil {
 		return nil, err
@@ -209,7 +248,7 @@ func NewService(ctx context.Context, store *database.Store, docker *client.Clien
 	if err != nil {
 		return nil, err
 	}
-	s := &Service{store: store, containers: runtime, configuration: configuration, instance: instance, publisher: publisher}
+	s := &Service{store: store, containers: runtime, configuration: configuration, instance: instance, publisher: publisher, secretKey: bytes.Clone(secretKey)}
 	defer func() {
 		if err != nil {
 			err = errors.Join(err, s.Close())
@@ -337,6 +376,10 @@ func (s *Service) Create(ctx context.Context, projectID uuid.UUID, key string, r
 	if err := s.Ready(ctx); err != nil {
 		return result, false, fmt.Errorf("verify container controller ownership: %w", err)
 	}
+	binding, err := s.resolvePostgresBinding(ctx, projectID, prepared.PostgresBinding, nil)
+	if err != nil {
+		return result, false, err
+	}
 	encoded, err := json.Marshal(prepared)
 	if err != nil {
 		return result, false, err
@@ -353,6 +396,8 @@ func (s *Service) Create(ctx context.Context, projectID uuid.UUID, key string, r
 		return s.resume(ctx, projectID, &result)
 	}
 	reserved, activated, recorded := false, false, false
+	var dataVolume *containers.DataVolume
+	volumeCreated := false
 	defer func() {
 		if err != nil && context.Cause(s.controlContext) != nil {
 			err = errors.Join(err, context.Cause(s.controlContext))
@@ -377,6 +422,9 @@ func (s *Service) Create(ctx context.Context, projectID uuid.UUID, key string, r
 			result.Container.State, result.Container.Failure = "failed", cause.Error()
 			result.Execution.State, result.Execution.Failure = "failed", cause.Error()
 		}
+		if cleaned && dataVolume != nil && volumeCreated {
+			err = errors.Join(err, s.containers.RemoveDataVolume(cleanupCtx, s.ownership(result), *dataVolume))
+		}
 		if cleaned {
 			if !recorded {
 				err = errors.Join(err, s.store.RecordContainerOperationFailure(cleanupCtx, projectID, result.Operation.ID, cause))
@@ -384,8 +432,18 @@ func (s *Service) Create(ctx context.Context, projectID uuid.UUID, key string, r
 			err = errors.Join(err, s.advance(cleanupCtx, &result, operations.Progress{Phase: result.Operation.Phase, Outcome: operations.Failed}))
 		}
 	}()
+	if prepared.DataVolume != nil {
+		prepared.volumeName = containers.DataVolumeName(s.instance, projectID.String(), prepared.Name)
+	}
 	if err = s.store.CheckContainerPublication(ctx, projectID, prepared.Name); err != nil {
 		return result, true, err
+	}
+	if _, latest, lookupErr := s.store.ContainerByName(ctx, projectID, prepared.Name); lookupErr == nil {
+		if latest.VolumeName != prepared.volumeName || latest.VolumeMountPath != dataVolumeMountPath(prepared) || latest.VolumeDirectory != dataVolumeDirectory(prepared) {
+			return result, true, database.ErrContainerVolumeConflict
+		}
+	} else if !errors.Is(lookupErr, gorm.ErrRecordNotFound) {
+		return result, true, lookupErr
 	}
 	if err = s.checkHostConflict(ctx, projectID, prepared.Hostname); err != nil {
 		return result, true, err
@@ -399,7 +457,11 @@ func (s *Service) Create(ctx context.Context, projectID uuid.UUID, key string, r
 		Hostname: prepared.Hostname, PathPrefix: "/", CPUMillis: prepared.CPUMillis,
 		MemoryBytes: prepared.MemoryBytes, PIDs: containerPIDs, OpenFiles: containerOpenFiles,
 		UserName: prepared.User, Command: prepared.Command, Env: prepared.Env,
+		PostgresBindingName: binding.name, PostgresSecretVersionID: binding.secretVersionID,
 		HealthPath: prepared.HealthCheckPath, HealthTimeoutMS: prepared.HealthCheckTimeoutMS,
+		VolumeName:      prepared.volumeName,
+		VolumeMountPath: dataVolumeMountPath(prepared),
+		VolumeDirectory: dataVolumeDirectory(prepared),
 	})
 	if err != nil {
 		return result, true, err
@@ -416,10 +478,19 @@ func (s *Service) Create(ctx context.Context, projectID uuid.UUID, key string, r
 	if image.Digest != prepared.imageDigest {
 		return result, true, fmt.Errorf("prepared image digest %s does not match requested digest %s: %w", image.Digest, prepared.imageDigest, containers.ErrImageDigestMismatch)
 	}
+	ownership := s.ownership(result)
+	if prepared.DataVolume != nil {
+		dataVolume = &containers.DataVolume{
+			Name: prepared.volumeName, MountPath: prepared.DataVolume.MountPath, Directory: prepared.DataVolume.Directory,
+		}
+		volumeCreated, err = s.containers.EnsureDataVolume(ctx, ownership, *dataVolume)
+		if err != nil {
+			return result, true, err
+		}
+	}
 	if err = s.reservations.EnsureProjectQuota(ctx, projectID, resources(s.configuration.ProjectQuota)); err != nil {
 		return result, true, err
 	}
-	ownership := s.ownership(result)
 	_, _, err = s.reservations.Reserve(ctx, capacity.Request{
 		ExecutionID: result.Execution.ID, HostID: s.configuration.HostID, ProjectID: projectID,
 		Resources: capacity.Resources{CPUMillis: prepared.CPUMillis, MemoryBytes: prepared.MemoryBytes, Instances: 1},
@@ -434,8 +505,8 @@ func (s *Service) Create(ctx context.Context, projectID uuid.UUID, key string, r
 	reserved = true
 	executionResult, err := s.executions.Start(ctx, executions.StartRequest{ExecutionID: result.Execution.ID, ProjectID: projectID, Spec: containers.Spec{
 		Ownership: ownership, Image: image.Reference, User: prepared.User,
-		Command: prepared.Command, Env: prepared.Env, Port: prepared.Port,
-		Access: containers.AccessPublished,
+		Command: prepared.Command, Env: binding.environment(prepared.Env), Files: binding.files, Port: prepared.Port,
+		Access: containers.AccessPublished, DataVolume: dataVolume,
 		Limits: containers.Limits{CPUMillis: prepared.CPUMillis, MemoryBytes: prepared.MemoryBytes, PIDs: containerPIDs, OpenFiles: containerOpenFiles},
 	}})
 	result.Execution.DockerContainerID = executionResult.Container.ID
@@ -444,6 +515,9 @@ func (s *Service) Create(ctx context.Context, projectID uuid.UUID, key string, r
 	}
 	if err != nil {
 		return result, true, fmt.Errorf("%w: %w", ErrRuntimeNotReady, err)
+	}
+	if dataVolume != nil && executionResult.Observation.WritableVolumes[dataVolume.MountPath] != dataVolume.Name {
+		return result, true, fmt.Errorf("container data volume %s is not mounted at %s: %w", dataVolume.Name, dataVolume.MountPath, fs.ErrInvalid)
 	}
 	readiness, err := s.containers.WaitReady(ctx, ownership, executionResult.Container.ID, containers.ReadinessProbe{
 		Port: prepared.Port, Path: prepared.HealthCheckPath, Timeout: time.Duration(prepared.HealthCheckTimeoutMS) * time.Millisecond,
@@ -670,6 +744,10 @@ func (s *Service) Restart(ctx context.Context, projectID, containerID uuid.UUID,
 			return result, priorErr
 		}
 	}
+	binding, err := s.resolvePostgresBinding(ctx, projectID, execution.PostgresBindingName, execution.PostgresSecretVersionID)
+	if err != nil {
+		return result, err
+	}
 	if result.Operation.Phase == operations.Received {
 		if err = s.advance(ctx, &result, operations.Progress{Phase: operations.Preparing, Outcome: operations.InProgress}); err != nil {
 			return result, err
@@ -682,7 +760,9 @@ func (s *Service) Restart(ctx context.Context, projectID, containerID uuid.UUID,
 		CPUMillis: execution.CPUMillis, MemoryBytes: execution.MemoryBytes,
 		PIDs: execution.PIDs, OpenFiles: execution.OpenFiles, UserName: execution.UserName,
 		Command: append([]string(nil), execution.Command...), Env: append([]string(nil), execution.Env...),
+		PostgresBindingName: binding.name, PostgresSecretVersionID: binding.secretVersionID,
 		HealthPath: execution.HealthPath, HealthTimeoutMS: execution.HealthTimeoutMS,
+		VolumeName: execution.VolumeName, VolumeMountPath: execution.VolumeMountPath, VolumeDirectory: execution.VolumeDirectory,
 	}
 	container, execution, err = s.store.CreateContainerExecution(ctx, container.Name, next)
 	if err != nil {
@@ -729,6 +809,17 @@ func (s *Service) Restart(ctx context.Context, projectID, containerID uuid.UUID,
 		return result, err
 	}
 	ownership := s.ownership(result)
+	var dataVolume *containers.DataVolume
+	if execution.VolumeName != "" {
+		dataVolume = &containers.DataVolume{Name: execution.VolumeName, MountPath: execution.VolumeMountPath, Directory: execution.VolumeDirectory}
+		found, findErr := s.containers.FindDataVolume(ctx, ownership, *dataVolume)
+		if findErr != nil {
+			return result, findErr
+		}
+		if !found {
+			return result, fmt.Errorf("%w: %s", ErrDataVolumeMissing, execution.VolumeName)
+		}
+	}
 	_, _, err = s.reservations.Reserve(ctx, capacity.Request{
 		ExecutionID: result.Execution.ID, HostID: s.configuration.HostID, ProjectID: projectID,
 		Resources: capacity.Resources{CPUMillis: execution.CPUMillis, MemoryBytes: execution.MemoryBytes, Instances: 1},
@@ -743,8 +834,8 @@ func (s *Service) Restart(ctx context.Context, projectID, containerID uuid.UUID,
 	reserved = true
 	executionResult, err := s.executions.Start(ctx, executions.StartRequest{ExecutionID: result.Execution.ID, ProjectID: projectID, Spec: containers.Spec{
 		Ownership: ownership, Image: image.Reference, User: execution.UserName,
-		Command: execution.Command, Env: execution.Env, Port: execution.Port,
-		Access: containers.AccessPublished,
+		Command: execution.Command, Env: binding.environment(execution.Env), Files: binding.files, Port: execution.Port,
+		Access: containers.AccessPublished, DataVolume: dataVolume,
 		Limits: containers.Limits{CPUMillis: execution.CPUMillis, MemoryBytes: execution.MemoryBytes, PIDs: execution.PIDs, OpenFiles: execution.OpenFiles},
 	}})
 	result.Execution.DockerContainerID = executionResult.Container.ID
@@ -753,6 +844,9 @@ func (s *Service) Restart(ctx context.Context, projectID, containerID uuid.UUID,
 	}
 	if err != nil {
 		return result, fmt.Errorf("%w: %w", ErrRuntimeNotReady, err)
+	}
+	if dataVolume != nil && executionResult.Observation.WritableVolumes[dataVolume.MountPath] != dataVolume.Name {
+		return result, fmt.Errorf("container data volume %s is not mounted at %s: %w", dataVolume.Name, dataVolume.MountPath, fs.ErrInvalid)
 	}
 	readiness, err := s.containers.WaitReady(ctx, ownership, executionResult.Container.ID, containers.ReadinessProbe{
 		Port: execution.Port, Path: execution.HealthPath, Timeout: time.Duration(execution.HealthTimeoutMS) * time.Millisecond,
@@ -849,6 +943,14 @@ func (s *Service) Delete(ctx context.Context, projectID, containerID uuid.UUID, 
 	} else if _, err = s.publisher.RemoveResource(ctx, projectID.String(), containerID.String()); err != nil {
 		return fmt.Errorf("remove container route: %w", err)
 	}
+	if result.Execution.VolumeName != "" {
+		dataVolume := containers.DataVolume{
+			Name: result.Execution.VolumeName, MountPath: result.Execution.VolumeMountPath, Directory: result.Execution.VolumeDirectory,
+		}
+		if err = s.containers.RemoveDataVolume(ctx, s.ownership(result), dataVolume); err != nil {
+			return err
+		}
+	}
 	if err = s.store.DeleteContainer(ctx, projectID, containerID); err != nil {
 		return err
 	}
@@ -901,6 +1003,20 @@ func (s *Service) finishLifecycle(ctx context.Context, result *Result) error {
 		}
 	}
 	return s.advance(ctx, result, operations.Progress{Phase: operations.Finalizing, Outcome: operations.Succeeded})
+}
+
+func dataVolumeMountPath(request Request) string {
+	if request.DataVolume == nil {
+		return ""
+	}
+	return request.DataVolume.MountPath
+}
+
+func dataVolumeDirectory(request Request) string {
+	if request.DataVolume == nil {
+		return ""
+	}
+	return request.DataVolume.Directory
 }
 
 func publishedTarget(observation containers.Observation, port uint16) (string, error) {

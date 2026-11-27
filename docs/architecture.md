@@ -45,8 +45,8 @@ Cloudlet 在一台 Linux 服务器上管理计算资源。本地开发在成员�
 | internal/workerpublish | 无状态 Worker 的产物、预检、容量准入、候选执行与路由切换 |
 | internal/durableobjects | SQLite 命名空间、类绑定和存储挂载路径 |
 | runtimes/workers | TypeScript Worker 构建命令与示例入口 |
-| internal/containers | Docker Engine 镜像摘要准备、容器生命周期、项目隔离 bridge 网络管理、回环端口或内部网络端点观测、HTTP 就绪探测与宿主配额支持报告 |
-| internal/containerpublish | 容器创建、停止、再次启动与删除，容量准入、真实启动、HTTP 就绪与项目域名路由激活 |
+| internal/containers | Docker Engine 镜像摘要准备、容器生命周期、项目隔离 bridge 网络与可写数据卷管理、回环端口或内部网络端点观测、HTTP 就绪探测与宿主配额支持报告 |
+| internal/containerpublish | 容器创建、停止、再次启动与删除，数据卷声明与持久化、容量准入、真实启动、HTTP 就绪与项目域名路由激活 |
 | internal/browser | 复用容器管理的 Playwright 会话 |
 | pkg/client | CLI 与其他客户端共享的 API 客户端 |
 | internal/mcpserver | MCP 项目查询、Worker 发布与操作查询，复用管理 API 会话权限 |
@@ -71,7 +71,7 @@ PostgreSQL 当前保存账号、登录会话、项目、操作记录、项目凭
 | /api/v1/projects | GET、POST | 列出当前用户可见项目，创建项目并授予创建者 owner 角色 |
 | /api/v1/projects/{projectID} | GET | 读取当前用户可访问的项目 |
 | /api/v1/projects/{projectID}/capacity | GET、PATCH | 项目成员读取项目额度、活动预留占用与剩余量；所有者调整项目额度 |
-| /api/v1/projects/{projectID}/containers | POST | 所有者或开发者从不可变镜像摘要创建容器，就绪后激活项目域名 |
+| /api/v1/projects/{projectID}/containers | POST | 所有者或开发者从不可变镜像摘要和可写数据卷声明创建容器，就绪后激活项目域名 |
 | /api/v1/projects/{projectID}/containers/{containerID} | GET、DELETE | 项目成员查询容器；所有者或开发者删除容器并释放资源 |
 | /api/v1/projects/{projectID}/containers/{containerID}/stop | POST | 所有者或开发者撤销路由、停止容器并释放容量 |
 | /api/v1/projects/{projectID}/containers/{containerID}/restart | POST | 所有者或开发者从最近配置再次启动容器并恢复路由 |
@@ -83,6 +83,8 @@ PostgreSQL 当前保存账号、登录会话、项目、操作记录、项目凭
 | /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID} | GET | 项目成员查询指定版本及其产物摘要 |
 | /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/artifact | GET | 项目成员下载原始 ZIP 并读取内容摘要 |
 | /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/publish | POST | 所有者绑定域名、激活首个就绪版本并获取 Gateway 地址 |
+| /api/v1/projects/{projectID}/sites/{siteName}/publication | GET | 项目成员读取当前发布版本和修订值 |
+| /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/activate | POST | 所有者按当前修订值切换活动版本 |
 | /api/v1/projects/{projectID}/postgres-bindings | POST | 所有者验证并登记 PostgreSQL 绑定 |
 | /api/v1/projects/{projectID}/postgres-bindings/{name} | GET | 项目成员查询 PostgreSQL 绑定元数据和验证时间 |
 | /api/v1/projects/{projectID}/s3-bindings | POST | 所有者验证并登记 S3 绑定 |
@@ -96,6 +98,8 @@ PostgreSQL 当前保存账号、登录会话、项目、操作记录、项目凭
 | /mcp | MCP Streamable HTTP | 使用当前会话查询项目、发布 Worker 并查询项目操作 |
 
 PostgreSQL 绑定按项目和名称存储。登记时引用本项目不可变的 Secret 版本。只有实际验证成功才保存元数据和验证时间。凭据值使用含有 `username` 与 `password` 的 JSON 对象。登记时连接指定数据库并执行 Ping，默认校验服务器证书与主机名。开发环境可使用回环地址连接本地无 TLS PostgreSQL。
+
+项目所有者创建应用容器时可用 `postgres_binding` 引用同项目绑定。执行记录保存绑定名称和当时授权的 Secret 版本，停止后再次启动使用同一版本。应用通过 `CLOUDLET_POSTGRES_URL_FILE` 指向的只读文件读取连接 URI。管理 API、执行记录和容器环境变量只包含来源或文件路径。业务端点需要从容器网络可达，TLS 使用镜像的系统信任根验证主机名和证书。
 
 S3 绑定按项目和名称存储。登记时引用本项目不可变的 Secret 版本。只有实际验证成功才保存元数据和验证时间。凭据值使用含有 `access_key_id`、`secret_access_key` 和可选 `session_token` 的 JSON 对象。登记时使用 AWS SDK 对指定桶执行 `HeadBucket`，成功表示所提供的凭据可以访问桶元数据。端点默认需要 HTTPS，开发环境允许回环 HTTP。
 
@@ -116,6 +120,8 @@ Gateway 使用配置中的 `host` 匹配请求域名，匹配时忽略大小写�
 静态站点以项目和名称确定身份。所有者使用 `Content-Type: application/zip` 上传，服务保存原始 ZIP，再展开并登记版本。上传体上限为 64 MiB，展开上限为 256 MiB，ZIP 中央目录在完整解析前检查 10,000 个成员的上限。解包前拒绝超过 255 字节的路径分量。成功响应返回版本标识、SHA-256 摘要、`ready` 状态和用于查询的 `Location`。`ready` 表示文件已准备就绪。
 
 首次发布时，所有者提交一个不带端口的域名。服务先核对版本归属和入口文件，再在同一 PostgreSQL 事务中绑定域名根路由、记录激活版本并递增路由快照版本。快照生效后返回规范域名、版本标识和 Gateway 的 HTTP 地址。发布会保留该项目其他路由。启动配置保留的域名、其他项目已占用的域名和已有根路由均返回 409。相同版本和域名的请求可重试，首次发布接口拒绝切换已有发布的版本或域名。重启时从数据库恢复代理路由和静态站点路由。
+
+项目成员可通过发布查询读取活动版本、域名和修订值。所有者切换版本时提交 `expected_revision`。目标属于同一站点且入口文件就绪才可切换。切换保留域名、路由标识和历史版本，并在同一事务中更新活动引用、修订值与路由快照。对已生效版本的重复请求不推进修订值。若当前版本已经变更，使用旧修订值切换到其他版本会返回 409，客户端应先重新查询。
 
 下载接口先验证项目成员权限和站点版本归属，再按版本摘要打开原始 ZIP 并流式返回。响应提供附件文件名、文件长度和 `Content-Digest`，并声明 `Cache-Control: private, no-store`。
 
@@ -145,15 +151,17 @@ API 与 Gateway 使用 HTTP 头读取超时和空闲连接超时。收到 SIGTER
 
 ## 容器生命周期
 
-`internal/containerpublish` 通过管理 API 创建 HTTP 容器。请求声明项目内名称、不可变镜像摘要、容器端口、公开域名、CPU 与内存，可选非 root 用户、命令、环境变量与就绪路径。镜像引用必须包含 `sha256` 摘要；标签引用、无效端口、无效域名、root 身份和越界就绪配置在写入状态前返回 400。
+`internal/containerpublish` 通过管理 API 创建 HTTP 容器。请求声明项目内名称、不可变镜像摘要、容器端口、公开域名、CPU 与内存，可选非 root 用户、命令、环境变量、就绪路径和一个可写数据卷。数据卷声明包含容器内绝对挂载路径和平台初始化的单段目录；卷名由实例、项目和容器名称确定性生成，不接受客户端指定。镜像引用必须包含 `sha256` 摘要；标签引用、无效端口、无效域名、root 身份、越界就绪配置或无效数据卷在写入状态前返回 400。
 
-服务在登记幂等 Operation 后保存不可变执行配置，按摘要准备镜像，登记项目初始配额并预留主机与项目容量。容量不足时不创建容器。预留成功后创建并启动真实容器，按 Docker 实际发布的回环端点和声明截止时间执行 HTTP 就绪探测。200 至 399 的最终状态视为就绪；超时、容器退出或端口未发布时不注册路由。就绪后在同一事务中登记活动执行、Docker 容器标识与项目根路由，递增路由快照版本，再由共享 Gateway 发布器应用快照。快照生效后 Operation 才进入成功终态。
+服务在登记幂等 Operation 后保存不可变执行配置，按摘要准备镜像，创建或核对声明卷，登记项目初始配额并预留主机与项目容量。容量不足时不创建容器。预留成功后创建并启动真实容器，按 Docker 实际发布的回环端点和声明截止时间执行 HTTP 就绪探测。200 至 399 的最终状态视为就绪；超时、容器退出或端口未发布时不注册路由。就绪后在同一事务中登记活动执行、Docker 容器标识与项目根路由，递增路由快照版本，再由共享 Gateway 发布器应用快照。快照生效后 Operation 才进入成功终态。
 
 项目成员可以查询容器配置、最近执行与 Operation。确定失败时先停止并删除已创建容器，确认清理后释放容量，再记录失败原因与终态；清理或释放失败时保留容量和待处理执行。重复的幂等请求复用原 Operation，预登记阶段发生的名称或域名冲突也保留失败结果，已提交活动执行后的快照同步失败可以通过重复原请求完成。容器名称、域名和路由冲突返回 409。
 
 停止先撤销该容器的项目路由并应用 Gateway 快照，使新请求不再进入容器；随后停止并删除真实 Docker 容器，确认清理后释放容量，并把执行和容器记录为 `stopped`。再次启动从最近保存的执行配置创建新的执行序号，重新完成镜像准备、容量准入、真实启动和 HTTP 就绪探测，再注册域名路由。删除在停止流程后移除执行记录和逻辑容器，查询返回 404，公开域名不再转发。三个操作都使用 Operation 与幂等键，重复请求返回已确认结果；查看者返回 403，非成员返回 404，未完成创建返回 409。停止或删除失败时保留容器、路由或容量中尚未确认清理的部分，同一幂等键可以继续重试。
 
-当前支持容器的创建、停止、再次启动与删除。创建请求不接受数据卷声明，容器使用镜像可写层，数据卷持久化与删除由 #41 交付；修改镜像或配置产生新执行、活动版本切换和旧执行排空尚未接入。
+可写数据卷由 `internal/containers` 创建和校验。卷携带环境、项目、资源和 `io.cloudlet.volume=writable` 归属标签；同一卷只允许一个运行中的执行，`container_executions` 的运行时唯一索引进一步约束独占写入。停止保留卷；再次启动核对并挂载同一卷，初始化目录不会删除已有数据；删除在容器停止后删除卷并确认不存在。创建失败且卷由本次创建时清理新卷，已有卷在失败重试中保留。数据卷声明与已有容器配置不一致时返回 409。
+
+当前支持容器的创建、停止、再次启动、删除和一个声明式可写数据卷。只读卷挂载由 #119 交付，项目级卷隔离和跨项目访问限制由 #48 继续验证，控制器重启接管和异常退出恢复由 #50 等后续任务接入；修改镜像或配置产生新执行、活动版本切换和旧执行排空尚未接入。
 
 ## 执行环境
 

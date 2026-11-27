@@ -3,7 +3,6 @@ package controlplane
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"io/fs"
 	"net"
@@ -28,11 +27,7 @@ func (h *handler) PublishStaticSiteVersion(c *gin.Context, projectID, siteName, 
 		c.JSON(http.StatusForbidden, apigen.Error{Message: "只有项目所有者可以发布站点版本"})
 		return
 	}
-	if !h.siteStorageAvailable(c) {
-		return
-	}
-	if h.siteRoutes == nil {
-		c.JSON(http.StatusServiceUnavailable, apigen.Error{Message: "站点发布未配置"})
+	if !h.staticSiteActivationAvailable(c) {
 		return
 	}
 	id, err := uuid.Parse(versionID)
@@ -52,9 +47,8 @@ func (h *handler) PublishStaticSiteVersion(c *gin.Context, projectID, siteName, 
 		c.JSON(http.StatusBadRequest, apigen.Error{Message: "站点发布请求格式无效"})
 		return
 	}
-	_, port, err := net.SplitHostPort(h.config.GatewayAddress)
-	if err != nil {
-		h.failure(c, fmt.Errorf("parse Gateway address for site publication: %w", err))
+	port, ok := h.staticSiteGatewayPort(c)
+	if !ok {
 		return
 	}
 	version, hostname, err := h.sites.Publish(c.Request.Context(), h.siteRoutes, projectID, siteName, id, body.Hostname)
@@ -68,12 +62,7 @@ func (h *handler) PublishStaticSiteVersion(c *gin.Context, projectID, siteName, 
 	case errors.Is(err, routes.ErrStaticSiteNotReady):
 		c.JSON(http.StatusConflict, apigen.Error{Message: "站点版本文件尚未就绪"})
 	case err == nil:
-		host := hostname
-		if port != "80" {
-			host = net.JoinHostPort(hostname, port)
-		}
-		publicURL := url.URL{Scheme: "http", Host: host, Path: "/"}
-		c.JSON(http.StatusOK, apigen.StaticSitePublication{SiteId: version.SiteID, VersionId: version.ID, Hostname: hostname, Url: publicURL.String()})
+		c.JSON(http.StatusOK, apigen.StaticSitePublication{SiteId: version.SiteID, VersionId: version.ID, Hostname: hostname, Url: staticSiteGatewayURL(hostname, port)})
 	default:
 		if _, syncErr := errors.AsType[*routes.SyncError](err); syncErr {
 			h.logger.ErrorContext(c.Request.Context(), "apply static site route", "error", err)
@@ -86,4 +75,13 @@ func (h *handler) PublishStaticSiteVersion(c *gin.Context, projectID, siteName, 
 		}
 		h.failure(c, err)
 	}
+}
+
+func staticSiteGatewayURL(hostname, port string) string {
+	host := hostname
+	if port != "80" {
+		host = net.JoinHostPort(hostname, port)
+	}
+	publicURL := url.URL{Scheme: "http", Host: host, Path: "/"}
+	return publicURL.String()
 }

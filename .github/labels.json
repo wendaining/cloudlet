@@ -15,10 +15,9 @@
   { "name": "priority:p0", "color": "B60205", "description": "阻塞使用或存在紧急风险" },
   { "name": "priority:p1", "color": "D93F0B", "description": "当前开发目标所需的任务" },
   { "name": "priority:p2", "color": "FBCA04", "description": "正常安排的任务" },
-  { "name": "status:triage", "color": "EDEDED", "description": "等待维护者确认范围、验收条件和负责人" },
-  { "name": "status:ready", "color": "0E8A16", "description": "范围、验收条件和负责人已确认" },
+  { "name": "status:triage", "color": "EDEDED", "description": "等待确认范围与验收条件" },
+  { "name": "status:ready", "color": "0E8A16", "description": "允许领取并交给 Agent 实施" },
   { "name": "status:in-progress", "color": "0052CC", "description": "负责人正在实施" },
   { "name": "status:blocked", "color": "B60205", "description": "存在需要说明的阻塞条件" },
-  { "name": "agent:ready", "color": "D4C5F9", "description": "维护者已确认任务可以交给 Agent 执行" },
   { "name": "agent:assisted", "color": "D4C5F9", "description": "PR 包含 Agent 参与的更改" }
 ]

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"regexp"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/wendaining/cloudlet/internal/config"
@@ -77,9 +78,6 @@ func (p *Publisher) DrainProxy(ctx context.Context, host, target string) error {
 func (p *Publisher) ActivateStaticSite(ctx context.Context, projectID string, version database.StaticSiteVersion, hostname string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if p.openSite == nil {
-		return fmt.Errorf("activate static site version %s: site handler is unavailable", version.ID)
-	}
 	if err := config.ValidateRouteHost(hostname); err != nil {
 		return fmt.Errorf("activate static site: %w: %w", fs.ErrInvalid, err)
 	}
@@ -88,6 +86,40 @@ func (p *Publisher) ActivateStaticSite(ctx context.Context, projectID string, ve
 	}
 	if p.ReservedHost(hostname) {
 		return fmt.Errorf("activate static site host %q: reserved by startup configuration: %w", hostname, database.ErrRouteConflict)
+	}
+	if err := p.verifyStaticSiteFiles(version); err != nil {
+		return err
+	}
+	snapshot, err := p.store.ActivateStaticSiteVersion(ctx, projectID, version.SiteID, version.ID, hostname)
+	if err != nil {
+		return err
+	}
+	if _, err := p.syncLocked(ctx, snapshot); err != nil {
+		return &SyncError{Version: snapshot, Err: err}
+	}
+	return nil
+}
+
+// SwitchStaticSite updates the active version of an existing site route and applies the committed snapshot.
+func (p *Publisher) SwitchStaticSite(ctx context.Context, projectID string, version database.StaticSiteVersion, expectedRevision time.Time) (database.StaticSitePublication, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if err := p.verifyStaticSiteFiles(version); err != nil {
+		return database.StaticSitePublication{}, err
+	}
+	publication, snapshot, err := p.store.SwitchStaticSiteVersion(ctx, projectID, version.SiteID, version.ID, expectedRevision)
+	if err != nil {
+		return database.StaticSitePublication{}, err
+	}
+	if _, err := p.syncLocked(ctx, snapshot); err != nil {
+		return database.StaticSitePublication{}, &SyncError{Version: snapshot, Err: err}
+	}
+	return publication, nil
+}
+
+func (p *Publisher) verifyStaticSiteFiles(version database.StaticSiteVersion) error {
+	if p.openSite == nil {
+		return fmt.Errorf("activate static site version %s: site handler is unavailable", version.ID)
 	}
 	handler, err := p.openSite(version)
 	if err != nil {
@@ -98,13 +130,6 @@ func (p *Publisher) ActivateStaticSite(ctx context.Context, projectID string, ve
 	}
 	if handler == nil {
 		return fmt.Errorf("verify files for static site version %s: missing handler", version.ID)
-	}
-	snapshot, err := p.store.ActivateStaticSiteVersion(ctx, projectID, version.SiteID, version.ID, hostname)
-	if err != nil {
-		return err
-	}
-	if _, err := p.syncLocked(ctx, snapshot); err != nil {
-		return &SyncError{Version: snapshot, Err: err}
 	}
 	return nil
 }

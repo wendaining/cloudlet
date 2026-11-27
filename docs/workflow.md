@@ -6,27 +6,24 @@
 
 创建 Issue 时填写问题报告、功能提案或工程任务表单。每个任务包含目标、实现范围和可以检查的验收条件。存在前置依赖时，写明关联编号。
 
-新任务由 wendaining 负责分诊。分诊完成时指定实际实施者，并确认类型、模块和优先级。每个任务可以指定一位或多位负责人，协作成员通过关联任务或 PR 参与。
+新任务由 wendaining 负责分诊。分诊时确认目标、验收条件、类型、模块和优先级。负责人可以在分诊或领取时登记。每个任务可以指定一位或多位负责人，协作成员通过关联任务或 PR 参与。
 
 | 标签 | 使用规则 |
 | --- | --- |
 | type:feature、type:bug、type:task、type:docs | 每个任务选择一个类型 |
 | area:api、area:gateway、area:workers、area:durable-objects、area:containers、area:browser、area:cli、area:web、area:automation | 至少选择一个相关模块 |
 | priority:p0、priority:p1、priority:p2 | 选择一个优先级，新任务默认为 p2 |
-| status:triage | 正在确认范围、验收条件与负责人 |
-| status:ready | 已具备实施条件 |
+| status:triage | 正在确认范围与验收条件 |
+| status:ready | 允许领取并交给 Agent 实施 |
 | status:in-progress | 正在实施 |
 | status:blocked | 已记录阻塞条件 |
-| agent:ready | 维护者已确认可交给 Agent 执行 |
 | agent:assisted | PR 包含 Agent 参与的更改 |
 
-同类 type、priority、status 标签互斥。添加新标签时，Issue coordination 移除同类旧标签。Issue 关闭后移除 status 与 agent:ready 标签。
+同类 type、priority、status 标签互斥。添加新标签时，Issue coordination 移除同类旧标签。Issue 关闭后移除 status 标签。
 
-将任务的前置依赖登记在 GitHub Issue 的依赖关系中。前置 Issue 标记为已完成并关闭时，Issue coordination 检查本仓库中依赖它的任务。有负责人、标签齐全的开放任务在所有已登记前置均标记为已完成后，从 status:blocked 更新为 status:ready。没有已登记前置的阻塞由维护者处理。维护者仍需确认是否添加 agent:ready。
+维护者在 GitHub Issue 中登记前置依赖。Agent 只有在维护者明确授权具体关系变更后才可增删依赖。Agent 在领取前复查阻塞，确认关联 PR 合并后检查直接下游。状态更新和任务领取遵循 [Issue 协作 Skill](../.agents/skills/cloudlet-issue-workflow/SKILL.md)。
 
-如前置任务在工作流上线前已全部完成，可在 Actions 的 Issue coordination 中选择 Run workflow，并填写待复查任务的 Issue 编号。
-
-ready、in-progress 和 agent:ready 要求开放 Issue、一个 type、至少一个 area 和一个 priority。检查失败会使对应 Actions 任务失败，维护者需要修正 Issue 元数据。
+ready 和 in-progress 要求开放 Issue、一个 type、至少一个 area 和一个 priority。Issue coordination 检查这些元数据。
 
 ## 分支与小增量
 
@@ -42,7 +39,7 @@ PR 模板建议提供关联任务、最终更改、实际验证结果、风险�
 
 建议使用 Closes #编号关联任务，PR 指向 master，关联 Issue 的负责人与 PR 负责人保持一致。依赖更新 PR 是否关联任务由维护者按实际情况决定。
 
-PR policy 检查 PR 标题、关联任务、负责人、类型、模块、优先级、状态和 Agent 标记。检查不通过时维护者需要修正 PR 或关联任务。
+PR policy 检查 PR 标题、关联任务、负责人、类型、模块、优先级和状态。检查不通过时维护者需要修正 PR 或关联任务。关联 Issue 的状态变化不会触发 PR policy。已有 PR 的任务出现阻塞时，负责人应通知审查者，并在合并前复核任务状态。需要刷新检查结果时重新运行 PR policy。
 
 代码审查者检查行为、边界、测试证据和文档。至少一位其他协作者批准。
 
@@ -55,14 +52,30 @@ CODEOWNERS 将默认审查责任交给 wendaining。由 wendaining 提交的更�
 | Workflow | 触发与职责 |
 | --- | --- |
 | CI | master 更新与 PR 变化时，按改动范围执行检查 |
-| Issue coordination | 新建、重新打开、标记、分配和关闭任务时维护标签与分诊 |
-| Agent handoff | 维护者手动选择 Issue，生成 Agent 任务资料 |
+| Issue coordination | 维护标签与分诊，也可手动复查指定 Issue 的标签与前置依赖 |
+| Agent handoff | 手动选择 ready 或 in-progress 的 Issue，生成 Agent 任务资料 |
 | Delivery | 由 Release 调用，发布版本对应的容器镜像 |
 | Release | 版本标签触发完整验证，发布镜像、二进制文件和校验和 |
 
 CI 检查使用只读权限。Issue 自动化只修改 Issue 元数据。镜像与版本发布任务分别获得所需的 packages 与 contents 写入权限。Actions 固定为完整 commit，Dependabot 每周提出依赖更新。
 
+没有 Agent 会话时，可在 Actions 的 Issue coordination 中选择 Run workflow，填写待复查的 Issue 编号。该入口使用只读权限，运行摘要列出当前状态、标签问题和未完成的前置依赖。任务范围、验收条件和人工阻塞需要结合 Issue 记录确认。
+
 依赖更新 PR 遵循相同审查要求。维护者按实际情况为更新建立工程任务，再将 PR 关联到任务。
+
+## 退役旧版 Agent 就绪标签
+
+维护者在合并 #224 前通知协调人员和 Agent 暂停自主领取，直到完成旧任务回退。合并后先确认旧标签仍存在，再用下面的只读查询生成并保存迁移清单。旧标签已删除时，以保存的清单继续核对。
+
+```sh
+gh api repos/wendaining/cloudlet/labels/agent%3Aready --jq .name &&
+  gh api --paginate 'repos/wendaining/cloudlet/issues?state=open&labels=status%3Aready&per_page=100' \
+    --jq '.[] | select(.pull_request == null and all(.labels[]; .name != "agent:ready")) | .html_url'
+```
+
+1. 逐项核对清单。只将当前开放、标记为 `status:ready` 且缺少旧 `agent:ready` 的 Issue 改为 `status:triage`。运行 `node scripts/github.mjs issue-status 编号 ready triage`，由命令复读确认结果。若任务已有开放 PR、正在实施或状态已发生变化，由负责人先核对实际情况。旧标签仍在的任务保留当前状态。
+2. 对回退的 Issue 手动运行 Issue coordination，检查报告中的标签和前置。维护者核对范围、验收条件和其他阻塞。完成回退前不恢复自主领取，也不将已回退项重新标记为 ready。
+3. 按清单核对回退结果，确认例外已处理后，由维护者在仓库标签页面删除 `agent:ready`，并确认标签已消失。此后可恢复自主领取。完成复查且符合新规则的任务由维护者设为 `status:ready`。
 
 ## 维护仓库设置
 

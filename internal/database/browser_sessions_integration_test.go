@@ -211,6 +211,111 @@ func TestBrowserSessionHTTP(t *testing.T) {
 	}
 	t.Log("console retains 100 messages, truncates long entries, captures uncaught errors and rejects another project")
 
+	openPage := func() uuid.UUID {
+		t.Helper()
+		result, err := ownerAPI.OpenBrowserPageWithResponse(ctx, owner.ID, session.Id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.StatusCode() != http.StatusCreated || result.JSON201 == nil ||
+			result.JSON201.Id == uuid.Nil || result.JSON201.Url != "about:blank" ||
+			result.HTTPResponse.Header.Get("Location") != endpoint+"/pages/"+result.JSON201.Id.String() {
+			t.Fatalf("open page = %d %s", result.StatusCode(), result.Body)
+		}
+		return result.JSON201.Id
+	}
+	firstTab, secondTab := openPage(), openPage()
+	if firstTab == secondTab {
+		t.Fatal("pages share an identifier")
+	}
+	navigatePage := func(id uuid.UUID, target string, want int) {
+		t.Helper()
+		result, err := ownerAPI.NavigateBrowserSessionWithResponse(ctx, owner.ID, session.Id,
+			apigen.NavigateBrowserSessionJSONRequestBody{PageId: &id, Url: target})
+		if err != nil || result.StatusCode() != want {
+			t.Fatalf("navigate named page = %v (%v), want %d", result, err, want)
+		}
+		if want == http.StatusOK && (result.JSON200 == nil || result.JSON200.Url != target) {
+			t.Fatalf("unexpected named-page navigation: %s", result.Body)
+		}
+	}
+	describePage := func(api *apigen.ClientWithResponses, id uuid.UUID, want int) *apigen.BrowserPage {
+		t.Helper()
+		result, err := api.GetBrowserPageWithResponse(ctx, owner.ID, session.Id, id)
+		if err != nil || result.StatusCode() != want {
+			t.Fatalf("read named page = %v (%v), want %d", result, err, want)
+		}
+		return result.JSON200
+	}
+	navigatePage(firstTab, fixture+"?tab=first", http.StatusOK)
+	navigatePage(secondTab, fixture+"?tab=second", http.StatusOK)
+	for _, tab := range []struct {
+		id    uuid.UUID
+		query string
+	}{{firstTab, "?tab=first"}, {secondTab, "?tab=second"}} {
+		got := describePage(ownerAPI, tab.id, http.StatusOK)
+		if got == nil || got.Id != tab.id || got.Url != fixture+tab.query || got.Title != "Cloudlet Browser Run" {
+			t.Fatalf("wrong independent page state: %+v", got)
+		}
+	}
+	describePage(otherAPI, firstTab, http.StatusNotFound)
+	closed, err := ownerAPI.CloseBrowserPageWithResponse(ctx, owner.ID, session.Id, firstTab)
+	if err != nil || closed.StatusCode() != http.StatusNoContent {
+		t.Fatalf("close page = %v (%v)", closed, err)
+	}
+	describePage(ownerAPI, firstTab, http.StatusNotFound)
+	navigatePage(firstTab, fixture, http.StatusNotFound)
+	navigatePage(secondTab, fixture+"?tab=after-close", http.StatusOK)
+	t.Log("two Chromium pages have independent IDs and addresses; closed ID HTTP 404; remaining page still navigates; other project HTTP 404")
+	navigatePage(secondTab, fixture+"?long-title", http.StatusOK)
+	longTitle := describePage(ownerAPI, secondTab, http.StatusOK)
+	if longTitle == nil || longTitle.Title != strings.Repeat("x", 512) || !longTitle.TitleTruncated || longTitle.UrlTruncated {
+		t.Fatalf("unexpected bounded page title: %+v", longTitle)
+	}
+	extraLogs := readConsole(ownerAPI, owner.ID, session.Id, http.StatusOK)
+	var loggedExtraPage bool
+	for _, entry := range extraLogs.Entries {
+		loggedExtraPage = loggedExtraPage || entry.Message == "extra page console"
+	}
+	if !loggedExtraPage {
+		t.Fatal("extra page console warning is missing from session history")
+	}
+	t.Log("page detail remains available for a 70 KiB title, and its console is in session history")
+	navigate(ownerAPI, owner.ID, fixture+"?visible-text", http.StatusOK)
+	readText := func(api *apigen.ClientWithResponses, project string, selector *string, want int) *apigen.BrowserPageText {
+		t.Helper()
+		result, err := api.GetBrowserPageTextWithResponse(ctx, project, session.Id, &apigen.GetBrowserPageTextParams{Selector: selector})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.StatusCode() != want {
+			t.Fatalf("text = %d %s, want %d", result.StatusCode(), result.Body, want)
+		}
+		return result.JSON200
+	}
+	readText(otherAPI, owner.ID, nil, http.StatusNotFound)
+	selector := "#visible"
+	scoped := readText(ownerAPI, owner.ID, &selector, http.StatusOK)
+	if scoped == nil || scoped.Title != "Cloudlet Browser Run" || scoped.Text != "Visible marker" || scoped.TextTruncated {
+		t.Fatalf("incorrect scoped page text: %+v", scoped)
+	}
+	whole := readText(ownerAPI, owner.ID, nil, http.StatusOK)
+	if whole == nil || !strings.HasPrefix(whole.Text, "Visible marker") || strings.Contains(whole.Text, "Hidden marker") ||
+		!whole.TextTruncated || len(whole.Text) != 4096 {
+		t.Fatalf("unexpected visible body or truncation: %+v", whole)
+	}
+	selector = "#hidden"
+	readText(ownerAPI, owner.ID, &selector, http.StatusConflict)
+	selector = "["
+	readText(ownerAPI, owner.ID, &selector, http.StatusBadRequest)
+	t.Log("real Chromium returned the page title, omitted hidden text, bounded the response at 4096 units and rejected another project")
+	navigate(ownerAPI, owner.ID, fixture+"?hidden-body", http.StatusOK)
+	hidden := readText(ownerAPI, owner.ID, nil, http.StatusOK)
+	if hidden == nil || hidden.Title != "Hidden Body" || hidden.Text != "" || hidden.TextTruncated {
+		t.Fatalf("hidden body leaked text: %+v", hidden)
+	}
+	t.Log("CSS-hidden body contributes no text")
+	navigate(ownerAPI, owner.ID, fixture, http.StatusOK)
 	captured := capture(ownerAPI, owner.ID, http.StatusCreated)
 	screenshot := captured.JSON201
 	if screenshot == nil || screenshot.Id == uuid.Nil || screenshot.CreatedAt.IsZero() {
@@ -252,7 +357,7 @@ func TestBrowserSessionHTTP(t *testing.T) {
 	}
 	t.Logf("screenshot HTTP 201; download HTTP 200, %d bytes, PNG 1280x720, SHA-256 %s; cross-project download HTTP 404", screenshot.SizeBytes, hash)
 	verifyScreenshotModes(t, store, ownerAPI, owner.ID, session.Id, fixture)
-	verifyBrowserDownloads(t, ctx, store, ownerAPI, otherAPI, owner.ID, session.Id, fixture)
+	downloaded := verifyBrowserDownloads(t, ctx, store, ownerAPI, otherAPI, owner.ID, session.Id, fixture)
 	second, err := ownerAPI.CreateBrowserSessionWithResponse(ctx, owner.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -309,6 +414,7 @@ func TestBrowserSessionHTTP(t *testing.T) {
 	if err != nil || usage.HostUsed.Instances != 0 || usage.ProjectUsed.Instances != 0 {
 		t.Fatalf("expired session still holds capacity: %+v (%v)", usage, err)
 	}
+	verifyBrowserUploadProjectBoundary(t, ctx, otherAPI, other.ID, session.Id, screenshot.Id)
 	replacement, err := ownerAPI.CreateBrowserSessionWithResponse(ctx, owner.ID)
 	if err != nil || replacement.StatusCode() != http.StatusCreated || replacement.JSON201 == nil {
 		t.Fatalf("create second real session: %v (%v)", replacement, err)
@@ -354,6 +460,14 @@ func TestBrowserSessionHTTP(t *testing.T) {
 		t.Fatalf("previous session console leaked into new session: %+v", isolated)
 	}
 	t.Log("a second real Chromium session has no logs from the first")
+	verifyBrowserPageWait(t, ctx, ownerAPI, otherAPI, owner.ID, replacement.JSON201.Id, fixture)
+	verifyBrowserUpload(t, ctx, ownerAPI, owner.ID, replacement.JSON201.Id, session.Id, screenshot, downloaded, fixture)
+	if err := expire(replacement.JSON201.Id); err != nil {
+		t.Fatal(err)
+	}
+	t.Run("replay acceptance example", func(t *testing.T) {
+		verifyBrowserAcceptanceExample(t, ctx, server.URL, owner.ID, fixture, emails[0], password)
+	})
 }
 
 func browserRuntimeImage(t *testing.T, ctx context.Context) (string, string) {
@@ -450,6 +564,18 @@ func chromiumPage(t *testing.T, ctx context.Context, docker *client.Client) stri
 		ReadHeaderTimeout: time.Second,
 		Handler: http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 			writer.Header().Set("Content-Type", "text/html; charset=utf-8")
+			if request.URL.Query().Has("long-title") {
+				fmt.Fprint(writer, "<!doctype html><title>"+strings.Repeat("x", 70<<10)+"</title><script>console.warn('extra page console')</script><p>Still open</p>")
+				return
+			}
+			if request.URL.Query().Has("hidden-body") {
+				fmt.Fprint(writer, "<!doctype html><title>Hidden Body</title><body style='display:none'>Hidden body marker</body>")
+				return
+			}
+			if request.URL.Query().Has("visible-text") {
+				fmt.Fprint(writer, "<!doctype html><title>Cloudlet Browser Run</title><p id=visible>Visible marker</p><p id=hidden hidden>Hidden marker</p><p>"+strings.Repeat("x", 5000)+"</p>")
+				return
+			}
 			if request.URL.Query().Has("screenshot-too-large") {
 				fmt.Fprint(writer, `<!doctype html><title>Over pixel limit</title><div style="height:6000px"></div>`)
 				return

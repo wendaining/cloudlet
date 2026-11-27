@@ -395,6 +395,109 @@ paths:
           $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/browser-sessions/{sessionID}/pages:
+    parameters:
+      - $ref: '#/components/parameters/BrowserProjectID'
+      - $ref: '#/components/parameters/BrowserSessionID'
+    post:
+      operationId: openBrowserPage
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '201':
+          description: 已打开的额外页面
+          headers:
+            Location:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserPage'
+  /api/v1/projects/{projectID}/browser-sessions/{sessionID}/pages/{pageID}:
+    parameters:
+      - $ref: '#/components/parameters/BrowserProjectID'
+      - $ref: '#/components/parameters/BrowserSessionID'
+      - name: pageID
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      operationId: getBrowserPage
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 页面当前地址与标题
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserPage'
+    delete:
+      operationId: closeBrowserPage
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '204':
+          description: 额外页面已关闭
+  /api/v1/projects/{projectID}/browser-sessions/{sessionID}/wait:
+    parameters:
+      - $ref: '#/components/parameters/BrowserProjectID'
+      - $ref: '#/components/parameters/BrowserSessionID'
+    post:
+      operationId: waitForBrowserPage
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WaitForBrowserPageRequest'
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '204':
+          description: 默认页面已满足等待条件
+        '504':
+          description: 在截止时间内未满足等待条件
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/projects/{projectID}/browser-sessions/{sessionID}/text:
+    parameters:
+      - $ref: '#/components/parameters/BrowserProjectID'
+      - $ref: '#/components/parameters/BrowserSessionID'
+    get:
+      operationId: getBrowserPageText
+      security:
+        - SessionCookie: []
+      parameters:
+        - name: selector
+          in: query
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 1024
+          description: 可选 CSS 选择器，唯一限定文本范围
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 页面标题及限定范围的可见文本
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BrowserPageText'
   /api/v1/projects/{projectID}/browser-sessions/{sessionID}/form:
     parameters:
       - $ref: '#/components/parameters/BrowserProjectID'
@@ -560,6 +663,26 @@ paths:
           $ref: '#/components/responses/Error'
         '503':
           $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/browser-sessions/{sessionID}/uploads:
+    parameters:
+      - $ref: '#/components/parameters/BrowserProjectID'
+      - $ref: '#/components/parameters/BrowserSessionID'
+    post:
+      operationId: attachBrowserArtifact
+      description: 将同项目内的截图或浏览器下载产物放入默认页面的文件输入。
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AttachBrowserArtifactRequest'
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '204':
+          description: 文件已放入输入控件，可通过点击命令提交表单
   /api/v1/projects/{projectID}/browser-sessions/{sessionID}/downloads:
     parameters:
       - $ref: '#/components/parameters/BrowserProjectID'
@@ -774,6 +897,71 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/StaticSitePublication'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          $ref: '#/components/responses/Error'
+        '503':
+          $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/sites/{siteName}/publication:
+    parameters:
+      - $ref: '#/components/parameters/SiteProjectID'
+      - $ref: '#/components/parameters/SiteName'
+    get:
+      operationId: getStaticSitePublication
+      description: 项目成员读取当前发布版本、固定域名和切换所需的修订值。
+      security:
+        - SessionCookie: []
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 当前活动版本和修订值
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaticSiteActivePublication'
+        '401':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '503':
+          $ref: '#/components/responses/Error'
+  /api/v1/projects/{projectID}/sites/{siteName}/versions/{versionID}/activate:
+    parameters:
+      - $ref: '#/components/parameters/SiteProjectID'
+      - $ref: '#/components/parameters/SiteName'
+      - name: versionID
+        in: path
+        required: true
+        schema:
+          type: string
+    post:
+      operationId: activateStaticSiteVersion
+      description: 项目所有者使用当前修订值在现有域名切换版本。目标已经生效时，重复调用不修改路由。
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StaticSiteActivationRequest'
+      responses:
+        default:
+          $ref: '#/components/responses/Error'
+        '200':
+          description: 当前活动版本和修订值
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaticSiteActivePublication'
         '400':
           $ref: '#/components/responses/Error'
         '401':
@@ -1069,7 +1257,7 @@ paths:
           type: string
     post:
       operationId: createContainer
-      description: 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用。同一幂等键复用操作。
+      description: 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用，引用 PostgreSQL 绑定时仅所有者可以调用。同一幂等键复用操作。
       security:
         - SessionCookie: []
       parameters:
@@ -1897,6 +2085,30 @@ components:
         created_at:
           type: string
           format: date-time
+    AttachBrowserArtifactRequest:
+      type: object
+      additionalProperties: false
+      required: [ artifact_kind, source_session_id, artifact_id, selector ]
+      properties:
+        artifact_kind:
+          type: string
+          enum: [ screenshot, download ]
+        source_session_id:
+          type: string
+          format: uuid
+        artifact_id:
+          type: string
+          format: uuid
+        selector:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          description: 唯一定位文件输入的 CSS 选择器
+        timeout_ms:
+          type: integer
+          minimum: 1
+          maximum: 30000
+          default: 10000
     CaptureBrowserDownloadRequest:
       type: object
       required: [ selector ]
@@ -1938,6 +2150,59 @@ components:
       type: string
       enum: [ starting, ready, failed, closed ]
       x-enum-varnames: [ BrowserSessionStatusStarting, BrowserSessionStatusReady, BrowserSessionStatusFailed, BrowserSessionStatusClosed ]
+    BrowserPage:
+      type: object
+      required: [ id, url, title, url_truncated, title_truncated ]
+      properties:
+        id:
+          type: string
+          format: uuid
+        url:
+          type: string
+          maxLength: 4096
+          description: 当前地址，最多 4096 个 UTF-8 字节
+        url_truncated:
+          type: boolean
+        title:
+          type: string
+          maxLength: 512
+          description: 当前标题，最多 512 个 UTF-16 单元
+        title_truncated:
+          type: boolean
+    WaitForBrowserPageRequest:
+      type: object
+      additionalProperties: false
+      required: [ condition ]
+      properties:
+        condition:
+          type: string
+          enum: [ ready, text ]
+          x-enum-varnames: [ BrowserWaitReady, BrowserWaitText ]
+          description: ready 等待页面加载完成，text 等待默认页面正文包含指定可见文本
+        text:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          description: 仅在 condition 为 text 时必填，区分大小写
+        timeout_ms:
+          type: integer
+          minimum: 1
+          maximum: 30000
+          default: 10000
+    BrowserPageText:
+      type: object
+      required: [ title, title_truncated, text, text_truncated ]
+      properties:
+        title:
+          type: string
+          maxLength: 512
+        title_truncated:
+          type: boolean
+        text:
+          type: string
+          maxLength: 4096
+        text_truncated:
+          type: boolean
     BrowserFormActionRequest:
       type: object
       additionalProperties: false
@@ -2001,6 +2266,10 @@ components:
         url:
           type: string
           maxLength: 4096
+        page_id:
+          type: string
+          format: uuid
+          description: 额外页面标识，省略时导航默认页面
     BrowserNavigation:
       type: object
       required: [ url, title ]
@@ -2034,6 +2303,33 @@ components:
         url:
           type: string
           format: uri
+    StaticSiteActivationRequest:
+      type: object
+      additionalProperties: false
+      required: [ expected_revision ]
+      properties:
+        expected_revision:
+          type: string
+          format: date-time
+          description: 最近一次从发布查询或切换响应取得的修订值。
+    StaticSiteActivePublication:
+      type: object
+      required: [ site_id, version_id, hostname, url, revision ]
+      properties:
+        site_id:
+          type: string
+          format: uuid
+        version_id:
+          type: string
+          format: uuid
+        hostname:
+          type: string
+        url:
+          type: string
+          format: uri
+        revision:
+          type: string
+          format: date-time
     StaticSiteSummary:
       type: object
       required: [ id, name, created_at ]
@@ -2169,6 +2465,12 @@ components:
           items:
             type: string
           description: KEY=value 形式的环境变量。请求体总大小最多 64 KiB。
+        postgres_binding:
+          type: string
+          minLength: 1
+          maxLength: 63
+          pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+          description: 项目内已授权的 PostgreSQL 绑定名称。
         health_check_path:
           type: string
           maxLength: 2048
@@ -2181,6 +2483,37 @@ components:
           maximum: 60000
           default: 15000
           description: 就绪探测的总截止时间。接受 200 至 399 的最终 HTTP 状态。
+        data_volume:
+          $ref: "#/components/schemas/CreateDataVolumeRequest"
+    CreateDataVolumeRequest:
+      type: object
+      additionalProperties: false
+      required:
+        - mount_path
+        - directory
+      properties:
+        mount_path:
+          type: string
+          maxLength: 4096
+          pattern: '^/'
+          description: 数据卷在容器内的绝对挂载路径，不能是根路径。
+        directory:
+          type: string
+          maxLength: 255
+          description: 平台在卷内初始化并交给运行用户所有的单段目录名。实际可写路径为 mount_path/directory。
+    ContainerDataVolume:
+      type: object
+      required:
+        - name
+        - mount_path
+        - directory
+      properties:
+        name:
+          type: string
+        mount_path:
+          type: string
+        directory:
+          type: string
     Container:
       type: object
       required:
@@ -2257,6 +2590,8 @@ components:
           type: array
           items:
             type: string
+        postgres_binding:
+          $ref: "#/components/schemas/ContainerPostgresBinding"
         health_check_path:
           type: string
         health_check_timeout_ms:
@@ -2281,9 +2616,20 @@ components:
         generation:
           type: integer
           format: int64
+        data_volume:
+          $ref: "#/components/schemas/ContainerDataVolume"
         created_at:
           type: string
           format: date-time
+    ContainerPostgresBinding:
+      type: object
+      required: [name, secret_version_id]
+      properties:
+        name:
+          type: string
+        secret_version_id:
+          type: string
+          format: uuid
     DeployWorkerRequest:
       type: object
       additionalProperties: false

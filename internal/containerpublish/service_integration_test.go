@@ -6,12 +6,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -35,6 +37,14 @@ import (
 )
 
 func TestContainerPublicationHTTP(t *testing.T) {
+	testContainerPublicationHTTP(t, false)
+}
+
+func TestContainerPostgresBindingHTTP(t *testing.T) {
+	testContainerPublicationHTTP(t, true)
+}
+
+func testContainerPublicationHTTP(t *testing.T, postgresBinding bool) {
 	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Minute)
 	defer cancel()
 
@@ -102,6 +112,19 @@ func TestContainerPublicationHTTP(t *testing.T) {
 				t.Error(err)
 			}
 		}
+		var volumes []string
+		if err := store.DB.Model(&database.ContainerExecution{}).Where("volume_name <> ''").Pluck("volume_name", &volumes).Error; err != nil {
+			t.Error(err)
+			return
+		}
+		for _, volume := range volumes {
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			_, err := docker.VolumeRemove(cleanupCtx, volume, client.VolumeRemoveOptions{Force: true})
+			cleanupCancel()
+			if err != nil && !cerrdefs.IsNotFound(err) {
+				t.Error(err)
+			}
+		}
 	})
 
 	front, err := gateway.NewHandler(config.Config{
@@ -120,7 +143,7 @@ func TestContainerPublicationHTTP(t *testing.T) {
 		HostBudget:   config.ResourceBudget{CPUMillis: 4000, MemoryBytes: 4 << 30, Instances: 4},
 		ProjectQuota: config.ResourceBudget{CPUMillis: 4000, MemoryBytes: 4 << 30, Instances: 4},
 	}
-	service, err := containerpublish.NewService(ctx, store, docker, publisher, configuration, "container-test")
+	service, err := containerpublish.NewService(ctx, store, docker, publisher, configuration, "container-test", make([]byte, 32))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +152,7 @@ func TestContainerPublicationHTTP(t *testing.T) {
 			t.Error(err)
 		}
 	})
-	if duplicate, err := containerpublish.NewService(ctx, store, docker, publisher, configuration, "container-test"); err == nil {
+	if duplicate, err := containerpublish.NewService(ctx, store, docker, publisher, configuration, "container-test", make([]byte, 32)); err == nil {
 		duplicate.Close()
 		t.Fatal("second container controller accepted")
 	}
@@ -174,7 +197,7 @@ func TestContainerPublicationHTTP(t *testing.T) {
 	owner, ownerUser := login("container-owner@cloudlet.local")
 	viewer, viewerUser := login("container-viewer@cloudlet.local")
 	developer, developerUser := login("container-developer@cloudlet.local")
-	outsider, _ := login("container-outsider@cloudlet.local")
+	outsider, outsiderUser := login("container-outsider@cloudlet.local")
 	project, err := store.CreateProject(ctx, ownerUser.ID, "Container integration")
 	if err != nil {
 		t.Fatal(err)
@@ -234,13 +257,150 @@ func TestContainerPublicationHTTP(t *testing.T) {
 	itemPath := func(projectID string, id uuid.UUID) string {
 		return collectionPath(projectID) + "/" + id.String()
 	}
+	runInContainer := func(id, command string) string {
+		t.Helper()
+		output, err := exec.CommandContext(ctx, "docker", "exec", id, "sh", "-c", command).CombinedOutput()
+		if err != nil {
+			t.Fatalf("docker exec %s: %v\n%s", id, err, output)
+		}
+		return strings.TrimSpace(string(output))
+	}
+	volumeExists := func(name string) bool {
+		t.Helper()
+		if _, err := docker.VolumeInspect(ctx, name, client.VolumeInspectOptions{}); err == nil {
+			return true
+		} else if !cerrdefs.IsNotFound(err) {
+			t.Fatal(err)
+		}
+		return false
+	}
+
+	path := collectionPath(project.ID)
+	if postgresBinding {
+		business, businessHost, ca := businessPostgres(t, ctx, images.Postgres)
+		secretKey := make([]byte, 32)
+		credentials, err := json.Marshal(map[string]string{"username": businessUser, "password": businessPassword})
+		if err != nil {
+			t.Fatal(err)
+		}
+		seedBinding := func(projectID, name string) uuid.UUID {
+			t.Helper()
+			secret, err := store.CreateProjectSecretVersion(ctx, projectID, "APP_DB", string(credentials), secretKey)
+			if err != nil {
+				t.Fatal(err)
+			}
+			version := uuid.MustParse(secret.ID)
+			found, err := store.CreatePostgresBinding(ctx, database.PostgresBinding{
+				ProjectID: projectID, Name: name, Host: businessHost, Port: 5432,
+				Database: businessDatabase, SecretVersionID: version, VerifiedAt: time.Now(),
+			})
+			if err != nil || !found {
+				t.Fatalf("seed real database binding: %t %v", found, err)
+			}
+			return version
+		}
+		foreignProject, err := store.CreateProject(ctx, outsiderUser.ID, "Foreign database binding")
+		if err != nil {
+			t.Fatal(err)
+		}
+		foreignBinding := "foreign-db"
+		seedBinding(foreignProject.ID, foreignBinding)
+		name := "business-db"
+		version := seedBinding(project.ID, name)
+		app := containerpublish.Request{
+			Name: "business-app", Image: images.Postgres, Port: 8080, Hostname: "business-app.localhost",
+			CPUMillis: 500, MemoryBytes: 128 << 20,
+			Command: []string{"/bin/sh", "-ec", businessAppCommand},
+			Env:     []string{"FIXTURE_CA=" + ca}, PostgresBinding: &name,
+		}
+		unauthorized := app
+		unauthorized.PostgresBinding = &foreignBinding
+		request(owner, http.MethodPost, path, "foreign-db-present", unauthorized, http.StatusNotFound)
+		request(developer, http.MethodPost, path, "developer-bind", app, http.StatusForbidden)
+		reservedEnv := app
+		reservedEnv.Env = []string{"CLOUDLET_POSTGRES_URL_FILE=/somewhere"}
+		request(owner, http.MethodPost, path, "env-file-override", reservedEnv, http.StatusBadRequest)
+		assertBusinessResponse := func(want string) {
+			t.Helper()
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, public.URL, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Host = app.Hostname
+			response, err := public.Client().Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			body, err := io.ReadAll(response.Body)
+			if err != nil || response.StatusCode != http.StatusOK || string(body) != want {
+				t.Fatalf("business app: HTTP %d, body %q, want %q, error %v", response.StatusCode, body, want, err)
+			}
+		}
+		assertBinding := func(data []byte) apigen.Container {
+			t.Helper()
+			value := decode(data)
+			if value.PostgresBinding == nil || value.PostgresBinding.Name != name || value.PostgresBinding.SecretVersionId != version {
+				t.Fatal("response did not retain the authorized binding and Secret version")
+			}
+			if bytes.Contains(data, []byte(businessPassword)) || bytes.Contains(data, []byte("postgres://")) {
+				t.Fatal("container response includes connection credentials")
+			}
+			return value
+		}
+		_, data := request(owner, http.MethodPost, path, "create-business-app", app, http.StatusCreated)
+		bound := assertBinding(data)
+		_, data = request(viewer, http.MethodGet, itemPath(project.ID, bound.Id), "", nil, http.StatusOK)
+		assertBinding(data)
+		assertBusinessRows(t, ctx, business, 1)
+		assertBusinessResponse("1")
+		var onPlatform bool
+		if err := store.SQL.QueryRowContext(ctx, "SELECT to_regclass('issue172_business_rows') IS NOT NULL").Scan(&onPlatform); err != nil || onPlatform {
+			t.Fatalf("business table in platform database = %t: %v", onPlatform, err)
+		}
+		var storedEnvironment string
+		if err := store.SQL.QueryRowContext(ctx, "SELECT env FROM container_executions WHERE id = $1", bound.ExecutionId).Scan(&storedEnvironment); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(storedEnvironment, businessPassword) || strings.Contains(storedEnvironment, "postgres://") {
+			t.Fatal("platform stored credentials with the execution environment")
+		}
+		inspected, err := docker.ContainerInspect(ctx, bound.DockerContainerId, client.ContainerInspectOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Contains(inspected.Container.Config.Env, "CLOUDLET_POSTGRES_URL_FILE=/cloudlet-postgres-url") {
+			t.Fatal("container is missing the credential file reference")
+		}
+		if strings.Contains(strings.Join(inspected.Container.Config.Env, " "), businessPassword) {
+			t.Fatal("Docker configuration contains the plaintext password")
+		}
+		request(developer, http.MethodPost, itemPath(project.ID, bound.Id)+"/stop", "stop-business", nil, http.StatusOK)
+		newSecret, err := store.CreateProjectSecretVersion(ctx, project.ID, "APP_DB", `{"username":"application","password":"unusable-new-password"}`, secretKey)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.DB.WithContext(ctx).Model(&database.PostgresBinding{}).Where("project_id = ? AND name = ?", project.ID, name).
+			Update("secret_version_id", newSecret.ID).Error; err != nil {
+			t.Fatal(err)
+		}
+		_, data = request(developer, http.MethodPost, itemPath(project.ID, bound.Id)+"/restart", "restart-business", nil, http.StatusOK)
+		restartedBinding := assertBinding(data)
+		if restartedBinding.ExecutionId == bound.ExecutionId || restartedBinding.Generation != bound.Generation+1 {
+			t.Fatal("restart did not create a new execution of the saved binding")
+		}
+		assertBusinessRows(t, ctx, business, 2)
+		assertBusinessResponse("2")
+		request(owner, http.MethodDelete, itemPath(project.ID, bound.Id), "delete-business", nil, http.StatusNoContent)
+		return
+	}
 
 	valid := containerpublish.Request{
 		Name: "web", Image: images.ContainerHTTP, Port: 8080, Hostname: "container.localhost",
 		CPUMillis: 500, MemoryBytes: 128 << 20, User: "101:101",
-		Env: []string{"CLOUDLET_CONTAINER_TEST=1"},
+		Env:        []string{"CLOUDLET_CONTAINER_TEST=1"},
+		DataVolume: &containerpublish.DataVolumeRequest{MountPath: "/data", Directory: "state"},
 	}
-	path := collectionPath(project.ID)
 	request(viewer, http.MethodPost, path, "viewer", valid, http.StatusForbidden)
 	request(outsider, http.MethodPost, path, "outsider", valid, http.StatusNotFound)
 	request(&http.Client{Timeout: 10 * time.Second}, http.MethodPost, path, "anonymous", valid, http.StatusUnauthorized)
@@ -282,6 +442,17 @@ func TestContainerPublicationHTTP(t *testing.T) {
 	if created.Env == nil || !slices.Equal(*created.Env, []string{"CLOUDLET_CONTAINER_TEST=1"}) {
 		t.Fatalf("container environment: %+v", created.Env)
 	}
+	if created.DataVolume == nil || created.DataVolume.Name == "" || created.DataVolume.MountPath != "/data" || created.DataVolume.Directory != "state" {
+		t.Fatalf("container data volume: %+v", created.DataVolume)
+	}
+	volume, err := docker.VolumeInspect(ctx, created.DataVolume.Name, client.VolumeInspectOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if volume.Volume.Labels[containers.LabelProject] != project.ID || volume.Volume.Labels[containers.LabelResource] != created.Id.String() || volume.Volume.Labels[containers.LabelVolume] != "writable" {
+		t.Fatalf("data volume labels: %+v", volume.Volume.Labels)
+	}
+	runInContainer(created.DockerContainerId, "printf cloudlet-volume > /data/state/note.txt")
 
 	inspect, err := docker.ContainerInspect(ctx, created.DockerContainerId, client.ContainerInspectOptions{})
 	if err != nil {
@@ -354,6 +525,15 @@ func TestContainerPublicationHTTP(t *testing.T) {
 		return response.StatusCode
 	}
 
+	adapter, err := containers.New(ctx, docker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherOwnership := containers.Ownership{Environment: "container-test", Project: uuid.NewString(), Resource: created.Id.String(), Generation: 1}
+	if _, err := adapter.EnsureDataVolume(ctx, otherOwnership, containers.DataVolume{Name: created.DataVolume.Name, MountPath: "/data", Directory: "state"}); !errors.Is(err, containers.ErrNotOwned) {
+		t.Fatalf("another ownership accepted the data volume: %v", err)
+	}
+
 	_, replay := request(developer, http.MethodPost, path, "web-key", valid, http.StatusOK)
 	replayed := decode(replay)
 	if replayed.Id != created.Id || replayed.DockerContainerId != created.DockerContainerId {
@@ -409,6 +589,9 @@ func TestContainerPublicationHTTP(t *testing.T) {
 	if _, err := docker.ContainerInspect(ctx, created.DockerContainerId, client.ContainerInspectOptions{}); !cerrdefs.IsNotFound(err) {
 		t.Fatalf("stopped container still exists: %v", err)
 	}
+	if !volumeExists(created.DataVolume.Name) {
+		t.Fatal("stopping the container removed its data volume")
+	}
 	usage, err = capacityStore.ProjectUsage(ctx, uuid.MustParse(project.ID))
 	if err != nil {
 		t.Fatal(err)
@@ -420,6 +603,9 @@ func TestContainerPublicationHTTP(t *testing.T) {
 	if decode(data).State != "stopped" {
 		t.Fatal("idempotent stop did not return the stopped state")
 	}
+	differentVolume := valid
+	differentVolume.DataVolume = &containerpublish.DataVolumeRequest{MountPath: "/other", Directory: "state"}
+	request(owner, http.MethodPost, path, "web-volume-change", differentVolume, http.StatusConflict)
 	_, data = request(viewer, http.MethodGet, itemPath(project.ID, created.Id), "", nil, http.StatusOK)
 	if decode(data).State != "stopped" {
 		t.Fatal("stopped container is not readable")
@@ -433,6 +619,12 @@ func TestContainerPublicationHTTP(t *testing.T) {
 	}
 	if restarted.DockerContainerId == "" || restarted.DockerContainerId == created.DockerContainerId {
 		t.Fatalf("restart Docker container = %q, want a new container", restarted.DockerContainerId)
+	}
+	if restarted.DataVolume == nil || restarted.DataVolume.Name != created.DataVolume.Name {
+		t.Fatalf("restarted data volume = %+v, want %s", restarted.DataVolume, created.DataVolume.Name)
+	}
+	if got := runInContainer(restarted.DockerContainerId, "cat /data/state/note.txt"); got != "cloudlet-volume" {
+		t.Fatalf("persisted volume content = %q", got)
 	}
 	getPublic("container.localhost")
 	request(owner, http.MethodPost, restartPath, "web-restart-active", nil, http.StatusConflict)
@@ -464,6 +656,9 @@ func TestContainerPublicationHTTP(t *testing.T) {
 	}
 	if _, err := docker.ContainerInspect(ctx, restarted.DockerContainerId, client.ContainerInspectOptions{}); !cerrdefs.IsNotFound(err) {
 		t.Fatalf("deleted container still exists: %v", err)
+	}
+	if volumeExists(created.DataVolume.Name) {
+		t.Fatal("deleting the container retained its data volume")
 	}
 	usage, err = capacityStore.ProjectUsage(ctx, uuid.MustParse(project.ID))
 	if err != nil {
@@ -497,6 +692,9 @@ func TestContainerPublicationHTTP(t *testing.T) {
 	if _, err := docker.ContainerInspect(ctx, brokenResult.DockerContainerId, client.ContainerInspectOptions{}); !cerrdefs.IsNotFound(err) {
 		t.Fatalf("failed container still exists: %v", err)
 	}
+	if brokenResult.DataVolume == nil || volumeExists(brokenResult.DataVolume.Name) {
+		t.Fatalf("failed container retained its data volume: %+v", brokenResult.DataVolume)
+	}
 	usage, err = capacityStore.ProjectUsage(ctx, uuid.MustParse(failureProject.ID))
 	if err != nil {
 		t.Fatal(err)
@@ -511,6 +709,9 @@ func TestContainerPublicationHTTP(t *testing.T) {
 	tooBigResult := decode(data)
 	if tooBigResult.State != "failed" || tooBigResult.OperationOutcome != "failed" || tooBigResult.DockerContainerId != "" {
 		t.Fatalf("over-quota container: %+v", tooBigResult)
+	}
+	if tooBigResult.DataVolume == nil || volumeExists(tooBigResult.DataVolume.Name) {
+		t.Fatalf("over-quota container retained its data volume: %+v", tooBigResult.DataVolume)
 	}
 
 	if _, err := publisher.PublishProject(ctx, failureProject.ID, []routes.Route{{Resource: "site", Host: "taken.localhost", Target: "http://127.0.0.1:1"}}); err != nil {

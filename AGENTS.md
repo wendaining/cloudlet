@@ -6,7 +6,7 @@ Cloudlet 是 Go 模块化单体项目。任务范围与验收条件以关联 Iss
 
 阅读 [CONTRIBUTING.md](CONTRIBUTING.md)、[技术栈](docs/technology-stack.md)、[架构说明](docs/architecture.md) 和 [Agent 工作流程](docs/agents.md)。检查当前文件与工作区状态，保留用户的现有更改。
 
-任务开始前确认 Issue 具备 type、area、priority 标签，处于 ready 或 in-progress 状态。Agent 任务还需要 agent:ready 标签。
+领取任务前和确认关联 PR 合并后，按 [Issue 协作 Skill](.agents/skills/cloudlet-issue-workflow/SKILL.md) 检查依赖和状态。任务开始前确认 Issue 具备 type、area、priority 标签，处于 ready 或 in-progress 状态。
 
 ## 实施要求
 
