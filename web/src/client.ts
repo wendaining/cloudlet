@@ -124,3 +124,43 @@ export async function upsertProjectMember(
   if (!data) throw new Error(`成员保存失败，状态码 ${status}`);
   return data;
 }
+
+export type BrowserNavigation = components['schemas']['BrowserNavigation'];
+
+export class BrowserNavigationError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+export async function createBrowserSession(projectID: string) {
+  const { data, error, response } = await client.POST(
+    '/api/v1/projects/{projectID}/browser-sessions',
+    { params: { path: { projectID } } },
+  );
+  const status = response.status;
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error('创建浏览器会话失败，状态码 ' + status);
+  return data;
+}
+
+export async function navigateBrowserSession(
+  projectID: string,
+  sessionID: string,
+  url: string,
+) {
+  const { data, error, response } = await client.POST(
+    '/api/v1/projects/{projectID}/browser-sessions/{sessionID}/navigate',
+    { params: { path: { projectID, sessionID } }, body: { url } },
+  );
+  if (!data) {
+    throw new BrowserNavigationError(
+      response.status,
+      error?.message ?? '浏览器导航失败，状态码 ' + response.status,
+    );
+  }
+  return data;
+}

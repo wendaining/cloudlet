@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { project, session } from './client';
 import { ProjectMembers } from './ProjectMembers';
 import styles from './app.module.css';
+import { BrowserSession } from './BrowserSession';
 import { OperationList } from './OperationList';
 
 export function ProjectDetail() {
@@ -67,6 +68,13 @@ export function ProjectDetail() {
           </Descriptions.Item>
         </Descriptions>
       </Card>
+      {account.data ? (
+        <BrowserSession
+          key={account.data.user.id + ':' + projectID}
+          accountID={account.data.user.id}
+          projectID={projectID}
+        />
+      ) : null}
       <ProjectMembers
         projectID={query.data.id}
         accountID={account.data?.user.id}
