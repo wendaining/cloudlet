@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       issue_number:
-        description: 已添加 agent:ready 的 Issue 编号
+        description: 处于 ready 或 in-progress 状态的 Issue 编号
         required: true
         type: string
 
