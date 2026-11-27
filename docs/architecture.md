@@ -49,7 +49,7 @@ Cloudlet 在一台 Linux 服务器上管理计算资源。本地开发在成员�
 | internal/containerpublish | 容器创建、停止、再次启动与删除，数据卷声明与持久化、容量准入、真实启动、HTTP 就绪与项目域名路由激活 |
 | internal/browser | 复用容器管理的 Playwright 会话 |
 | pkg/client | CLI 与其他客户端共享的 API 客户端 |
-| internal/mcpserver | MCP 项目查询、Worker 发布与操作查询，复用管理 API 会话权限 |
+| internal/mcpserver | MCP 项目查询、Worker 发布、Browser Run 会话创建与导航及操作查询，复用管理 API 会话权限 |
 
 PostgreSQL 当前保存账号、登录会话、项目、操作记录、项目凭据、项目路由、容量预留、静态站点版本、浏览器会话、容器与执行记录以及 Worker 部署与执行记录。首个无状态 Worker 可以通过管理 API 发布并访问。具有 Durable Object 绑定的 Worker 可以通过同一管理 API 首次发布，PostgreSQL 记录命名空间、持久化数据卷和唯一执行所有者。
 
@@ -95,7 +95,7 @@ PostgreSQL 当前保存账号、登录会话、项目、操作记录、项目凭
 | /api/v1/projects/{projectID}/workers/{name}/deployments | POST | 所有者或开发者发布首个无状态 Worker，或准备候选版本，按 Idempotency-Key 复用操作 |
 | /api/v1/projects/{projectID}/worker-deployments/{deploymentID} | GET | 项目成员查询版本、产物摘要、执行与 Operation 结果 |
 | /api/v1/projects/{projectID}/worker-deployments/{deploymentID}/activate | POST | 所有者或开发者切换到就绪版本，同一版本重复提交返回原激活 Operation |
-| /mcp | MCP Streamable HTTP | 使用当前会话查询项目、发布 Worker 并查询项目操作 |
+| /mcp | MCP Streamable HTTP | 使用当前会话查询项目、发布 Worker、创建并导航 Browser Run 会话及查询项目操作 |
 
 PostgreSQL 绑定按项目和名称存储。登记时引用本项目不可变的 Secret 版本。只有实际验证成功才保存元数据和验证时间。凭据值使用含有 `username` 与 `password` 的 JSON 对象。登记时连接指定数据库并执行 Ping，默认校验服务器证书与主机名。开发环境可使用回环地址连接本地无 TLS PostgreSQL。
 
