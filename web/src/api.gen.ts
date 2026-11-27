@@ -743,7 +743,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用。同一幂等键复用操作。 */
+        /** @description 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用，引用 PostgreSQL 绑定时仅所有者可以调用。同一幂等键复用操作。 */
         post: operations["createContainer"];
         delete?: never;
         options?: never;
@@ -1273,6 +1273,8 @@ export interface components {
             command?: string[];
             /** @description KEY=value 形式的环境变量。请求体总大小最多 64 KiB。 */
             env?: string[];
+            /** @description 项目内已授权的 PostgreSQL 绑定名称。 */
+            postgres_binding?: string;
             /**
              * @description 就绪探测的绝对请求路径。
              * @default /
@@ -1323,6 +1325,7 @@ export interface components {
             user: string;
             command?: string[];
             env?: string[];
+            postgres_binding?: components["schemas"]["ContainerPostgresBinding"];
             health_check_path: string;
             /** Format: int64 */
             health_check_timeout_ms: number;
@@ -1340,6 +1343,11 @@ export interface components {
             data_volume?: components["schemas"]["ContainerDataVolume"];
             /** Format: date-time */
             created_at: string;
+        };
+        ContainerPostgresBinding: {
+            name: string;
+            /** Format: uuid */
+            secret_version_id: string;
         };
         DeployWorkerRequest: {
             /** @description 已打包的单文件 JavaScript ES Module，UTF-8 编码后最多 1048576 字节。入口固定为 index.mjs。 */

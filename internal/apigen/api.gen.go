@@ -294,25 +294,26 @@ type Container struct {
 	ExecutionId       openapi_types.UUID   `json:"execution_id"`
 
 	// ExecutionState 实际执行状态，取值为 pending、running、stopped 或 failed。
-	ExecutionState       string             `json:"execution_state"`
-	Failure              string             `json:"failure"`
-	Generation           int64              `json:"generation"`
-	HealthCheckPath      string             `json:"health_check_path"`
-	HealthCheckTimeoutMs int64              `json:"health_check_timeout_ms"`
-	Hostname             string             `json:"hostname"`
-	Id                   openapi_types.UUID `json:"id"`
-	Image                string             `json:"image"`
-	ImageDigest          string             `json:"image_digest"`
-	MemoryBytes          int64              `json:"memory_bytes"`
-	Name                 string             `json:"name"`
-	OpenFiles            int64              `json:"open_files"`
-	OperationId          openapi_types.UUID `json:"operation_id"`
-	OperationOutcome     string             `json:"operation_outcome"`
-	OperationPhase       string             `json:"operation_phase"`
-	PathPrefix           string             `json:"path_prefix"`
-	Pids                 int64              `json:"pids"`
-	Port                 int                `json:"port"`
-	ProjectId            openapi_types.UUID `json:"project_id"`
+	ExecutionState       string                    `json:"execution_state"`
+	Failure              string                    `json:"failure"`
+	Generation           int64                     `json:"generation"`
+	HealthCheckPath      string                    `json:"health_check_path"`
+	HealthCheckTimeoutMs int64                     `json:"health_check_timeout_ms"`
+	Hostname             string                    `json:"hostname"`
+	Id                   openapi_types.UUID        `json:"id"`
+	Image                string                    `json:"image"`
+	ImageDigest          string                    `json:"image_digest"`
+	MemoryBytes          int64                     `json:"memory_bytes"`
+	Name                 string                    `json:"name"`
+	OpenFiles            int64                     `json:"open_files"`
+	OperationId          openapi_types.UUID        `json:"operation_id"`
+	OperationOutcome     string                    `json:"operation_outcome"`
+	OperationPhase       string                    `json:"operation_phase"`
+	PathPrefix           string                    `json:"path_prefix"`
+	Pids                 int64                     `json:"pids"`
+	Port                 int                       `json:"port"`
+	PostgresBinding      *ContainerPostgresBinding `json:"postgres_binding,omitempty"`
+	ProjectId            openapi_types.UUID        `json:"project_id"`
 
 	// State 容器目标状态，取值为 pending、active、stopped 或 failed。
 	State  string `json:"state"`
@@ -325,6 +326,12 @@ type ContainerDataVolume struct {
 	Directory string `json:"directory"`
 	MountPath string `json:"mount_path"`
 	Name      string `json:"name"`
+}
+
+// ContainerPostgresBinding defines model for ContainerPostgresBinding.
+type ContainerPostgresBinding struct {
+	Name            string             `json:"name"`
+	SecretVersionId openapi_types.UUID `json:"secret_version_id"`
 }
 
 // CreateContainerRequest defines model for CreateContainerRequest.
@@ -359,6 +366,9 @@ type CreateContainerRequest struct {
 
 	// Port 容器内 HTTP 服务监听的 TCP 端口。
 	Port int `json:"port"`
+
+	// PostgresBinding 项目内已授权的 PostgreSQL 绑定名称。
+	PostgresBinding *string `json:"postgres_binding,omitempty"`
 
 	// User 非 root 运行身份，格式为 user 或 user:group。省略时使用 1000:1000。
 	User *string `json:"user,omitempty"`
@@ -1083,13 +1093,13 @@ type ClientInterface interface {
 	// CreateContainerWithBody performs a POST /api/v1/projects/{projectID}/containers (the `CreateContainer` operationId) request,
 	// with any type of body and a specified content type.
 	//
-	// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用。同一幂等键复用操作。.
+	// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用，引用 PostgreSQL 绑定时仅所有者可以调用。同一幂等键复用操作。.
 	CreateContainerWithBody(ctx context.Context, projectID string, params *CreateContainerParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// CreateContainer performs a POST /api/v1/projects/{projectID}/containers (the `CreateContainer` operationId) request.
 	// Takes a body of the `application/json` content type.
 	//
-	// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用。同一幂等键复用操作。.
+	// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用，引用 PostgreSQL 绑定时仅所有者可以调用。同一幂等键复用操作。.
 	CreateContainer(ctx context.Context, projectID string, params *CreateContainerParams, body CreateContainerJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// DeleteContainer performs a DELETE /api/v1/projects/{projectID}/containers/{containerID} (the `DeleteContainer` operationId) request.
@@ -1816,7 +1826,7 @@ func (c *Client) UpdateProjectCapacity(ctx context.Context, projectID string, bo
 // CreateContainerWithBody performs a POST /api/v1/projects/{projectID}/containers (the `CreateContainer` operationId) request,
 // with any type of body and a specified content type.
 //
-// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用。同一幂等键复用操作。.
+// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用，引用 PostgreSQL 绑定时仅所有者可以调用。同一幂等键复用操作。.
 func (c *Client) CreateContainerWithBody(ctx context.Context, projectID string, params *CreateContainerParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewCreateContainerRequestWithBody(c.Server, projectID, params, contentType, body)
 	if err != nil {
@@ -1832,7 +1842,7 @@ func (c *Client) CreateContainerWithBody(ctx context.Context, projectID string, 
 // CreateContainer performs a POST /api/v1/projects/{projectID}/containers (the `CreateContainer` operationId) request.
 // Takes a body of the `application/json` content type.
 //
-// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用。同一幂等键复用操作。.
+// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用，引用 PostgreSQL 绑定时仅所有者可以调用。同一幂等键复用操作。.
 func (c *Client) CreateContainer(ctx context.Context, projectID string, params *CreateContainerParams, body CreateContainerJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewCreateContainerRequest(c.Server, projectID, params, body)
 	if err != nil {
@@ -5307,7 +5317,7 @@ type ClientWithResponsesInterface interface {
 	// CreateContainerWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/containers (the `CreateContainer` operationId) request,
 	// with any type of body and a specified content type.
 	//
-	// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用。同一幂等键复用操作。.
+	// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用，引用 PostgreSQL 绑定时仅所有者可以调用。同一幂等键复用操作。.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	CreateContainerWithBodyWithResponse(ctx context.Context, projectID string, params *CreateContainerParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateContainerResponse, error)
@@ -5315,7 +5325,7 @@ type ClientWithResponsesInterface interface {
 	// CreateContainerWithResponse performs a POST /api/v1/projects/{projectID}/containers (the `CreateContainer` operationId) request.
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
-	// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用。同一幂等键复用操作。.
+	// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用，引用 PostgreSQL 绑定时仅所有者可以调用。同一幂等键复用操作。.
 	CreateContainerWithResponse(ctx context.Context, projectID string, params *CreateContainerParams, body CreateContainerJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateContainerResponse, error)
 
 	// DeleteContainerWithResponse performs a DELETE /api/v1/projects/{projectID}/containers/{containerID} (the `DeleteContainer` operationId) request.
@@ -9881,7 +9891,7 @@ func (c *ClientWithResponses) UpdateProjectCapacityWithResponse(ctx context.Cont
 // CreateContainerWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/containers (the `CreateContainer` operationId) request,
 // with any type of body and a specified content type.
 //
-// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用。同一幂等键复用操作。.
+// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用，引用 PostgreSQL 绑定时仅所有者可以调用。同一幂等键复用操作。.
 //
 // Returns a wrapper object for the known response body format(s).
 func (c *ClientWithResponses) CreateContainerWithBodyWithResponse(ctx context.Context, projectID string, params *CreateContainerParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateContainerResponse, error) {
@@ -9895,7 +9905,7 @@ func (c *ClientWithResponses) CreateContainerWithBodyWithResponse(ctx context.Co
 // CreateContainerWithResponse performs a POST /api/v1/projects/{projectID}/containers (the `CreateContainer` operationId) request.
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
-// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用。同一幂等键复用操作。.
+// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用，引用 PostgreSQL 绑定时仅所有者可以调用。同一幂等键复用操作。.
 func (c *ClientWithResponses) CreateContainerWithResponse(ctx context.Context, projectID string, params *CreateContainerParams, body CreateContainerJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateContainerResponse, error) {
 	rsp, err := c.CreateContainer(ctx, projectID, params, body, reqEditors...)
 	if err != nil {

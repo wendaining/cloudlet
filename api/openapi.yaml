@@ -1257,7 +1257,7 @@ paths:
           type: string
     post:
       operationId: createContainer
-      description: 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用。同一幂等键复用操作。
+      description: 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用，引用 PostgreSQL 绑定时仅所有者可以调用。同一幂等键复用操作。
       security:
         - SessionCookie: []
       parameters:
@@ -2465,6 +2465,12 @@ components:
           items:
             type: string
           description: KEY=value 形式的环境变量。请求体总大小最多 64 KiB。
+        postgres_binding:
+          type: string
+          minLength: 1
+          maxLength: 63
+          pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+          description: 项目内已授权的 PostgreSQL 绑定名称。
         health_check_path:
           type: string
           maxLength: 2048
@@ -2584,6 +2590,8 @@ components:
           type: array
           items:
             type: string
+        postgres_binding:
+          $ref: "#/components/schemas/ContainerPostgresBinding"
         health_check_path:
           type: string
         health_check_timeout_ms:
@@ -2613,6 +2621,15 @@ components:
         created_at:
           type: string
           format: date-time
+    ContainerPostgresBinding:
+      type: object
+      required: [name, secret_version_id]
+      properties:
+        name:
+          type: string
+        secret_version_id:
+          type: string
+          format: uuid
     DeployWorkerRequest:
       type: object
       additionalProperties: false

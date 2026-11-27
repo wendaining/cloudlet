@@ -63,6 +63,9 @@ type ContainerExecution struct {
 	State             string    `gorm:"column:state"`
 	Failure           string    `gorm:"column:failure"`
 	CreatedAt         time.Time `gorm:"column:created_at"`
+
+	PostgresBindingName     *string    `gorm:"column:postgres_binding_name"`
+	PostgresSecretVersionID *uuid.UUID `gorm:"column:postgres_secret_version_id"`
 }
 
 func (ContainerExecution) TableName() string { return "container_executions" }

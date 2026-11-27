@@ -3,6 +3,7 @@
 package containerpublish
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -94,6 +95,8 @@ type Request struct {
 	HealthCheckTimeoutMS int64              `json:"health_check_timeout_ms,omitempty"`
 	DataVolume           *DataVolumeRequest `json:"data_volume,omitempty"`
 
+	PostgresBinding *string `json:"postgres_binding,omitempty"`
+
 	imageDigest string
 	volumeName  string
 }
@@ -106,6 +109,23 @@ func ValidateRequest(request Request) (Request, error) {
 	}
 	if len(request.Command) > 64 || len(request.Env) > 128 {
 		return Request{}, fmt.Errorf("container command or environment exceeds its item limit: %w", fs.ErrInvalid)
+	}
+	if request.PostgresBinding != nil {
+		credentialPath := "/" + postgresURLPath
+		if request.DataVolume != nil && (request.DataVolume.MountPath == credentialPath ||
+			strings.HasPrefix(request.DataVolume.MountPath, credentialPath+"/")) {
+			return Request{}, fmt.Errorf("container data volume cannot use the PostgreSQL credential file path: %w", fs.ErrInvalid)
+		}
+		name := *request.PostgresBinding
+		if len(name) > 63 || !namePattern.MatchString(name) {
+			return Request{}, fmt.Errorf("invalid PostgreSQL binding name: %w", fs.ErrInvalid)
+		}
+		for _, entry := range request.Env {
+			key, _, _ := strings.Cut(entry, "=")
+			if key == postgresURLFileEnv {
+				return Request{}, fmt.Errorf("environment key %s is reserved for the PostgreSQL binding: %w", key, fs.ErrInvalid)
+			}
+		}
 	}
 	if len(request.User) > 128 {
 		return Request{}, fmt.Errorf("container user exceeds 128 bytes: %w", fs.ErrInvalid)
@@ -197,6 +217,7 @@ type Service struct {
 	publisher      *routes.Publisher
 	configuration  config.ContainerRuntime
 	instance       string
+	secretKey      []byte
 	controller     *sql.Conn
 	controlContext context.Context
 	stopController context.CancelCauseFunc
@@ -207,9 +228,12 @@ type Service struct {
 // NewService verifies every configured dependency before enabling container
 // creation. A PostgreSQL session lock allows only one container controller for
 // the host.
-func NewService(ctx context.Context, store *database.Store, docker *client.Client, publisher *routes.Publisher, configuration config.ContainerRuntime, instance string) (service *Service, err error) {
+func NewService(ctx context.Context, store *database.Store, docker *client.Client, publisher *routes.Publisher, configuration config.ContainerRuntime, instance string, secretKey []byte) (service *Service, err error) {
 	if store == nil || docker == nil || publisher == nil {
 		return nil, fmt.Errorf("container creation requires database, Docker and route publisher: %w", fs.ErrInvalid)
+	}
+	if len(secretKey) != 0 && len(secretKey) != 32 {
+		return nil, fmt.Errorf("container project secret key must be 32 bytes: %w", fs.ErrInvalid)
 	}
 	if err := configuration.Validate(); err != nil {
 		return nil, err
@@ -224,7 +248,7 @@ func NewService(ctx context.Context, store *database.Store, docker *client.Clien
 	if err != nil {
 		return nil, err
 	}
-	s := &Service{store: store, containers: runtime, configuration: configuration, instance: instance, publisher: publisher}
+	s := &Service{store: store, containers: runtime, configuration: configuration, instance: instance, publisher: publisher, secretKey: bytes.Clone(secretKey)}
 	defer func() {
 		if err != nil {
 			err = errors.Join(err, s.Close())
@@ -352,6 +376,10 @@ func (s *Service) Create(ctx context.Context, projectID uuid.UUID, key string, r
 	if err := s.Ready(ctx); err != nil {
 		return result, false, fmt.Errorf("verify container controller ownership: %w", err)
 	}
+	binding, err := s.resolvePostgresBinding(ctx, projectID, prepared.PostgresBinding, nil)
+	if err != nil {
+		return result, false, err
+	}
 	encoded, err := json.Marshal(prepared)
 	if err != nil {
 		return result, false, err
@@ -429,6 +457,7 @@ func (s *Service) Create(ctx context.Context, projectID uuid.UUID, key string, r
 		Hostname: prepared.Hostname, PathPrefix: "/", CPUMillis: prepared.CPUMillis,
 		MemoryBytes: prepared.MemoryBytes, PIDs: containerPIDs, OpenFiles: containerOpenFiles,
 		UserName: prepared.User, Command: prepared.Command, Env: prepared.Env,
+		PostgresBindingName: binding.name, PostgresSecretVersionID: binding.secretVersionID,
 		HealthPath: prepared.HealthCheckPath, HealthTimeoutMS: prepared.HealthCheckTimeoutMS,
 		VolumeName:      prepared.volumeName,
 		VolumeMountPath: dataVolumeMountPath(prepared),
@@ -476,7 +505,7 @@ func (s *Service) Create(ctx context.Context, projectID uuid.UUID, key string, r
 	reserved = true
 	executionResult, err := s.executions.Start(ctx, executions.StartRequest{ExecutionID: result.Execution.ID, ProjectID: projectID, Spec: containers.Spec{
 		Ownership: ownership, Image: image.Reference, User: prepared.User,
-		Command: prepared.Command, Env: prepared.Env, Port: prepared.Port,
+		Command: prepared.Command, Env: binding.environment(prepared.Env), Files: binding.files, Port: prepared.Port,
 		Access: containers.AccessPublished, DataVolume: dataVolume,
 		Limits: containers.Limits{CPUMillis: prepared.CPUMillis, MemoryBytes: prepared.MemoryBytes, PIDs: containerPIDs, OpenFiles: containerOpenFiles},
 	}})
@@ -715,6 +744,10 @@ func (s *Service) Restart(ctx context.Context, projectID, containerID uuid.UUID,
 			return result, priorErr
 		}
 	}
+	binding, err := s.resolvePostgresBinding(ctx, projectID, execution.PostgresBindingName, execution.PostgresSecretVersionID)
+	if err != nil {
+		return result, err
+	}
 	if result.Operation.Phase == operations.Received {
 		if err = s.advance(ctx, &result, operations.Progress{Phase: operations.Preparing, Outcome: operations.InProgress}); err != nil {
 			return result, err
@@ -727,6 +760,7 @@ func (s *Service) Restart(ctx context.Context, projectID, containerID uuid.UUID,
 		CPUMillis: execution.CPUMillis, MemoryBytes: execution.MemoryBytes,
 		PIDs: execution.PIDs, OpenFiles: execution.OpenFiles, UserName: execution.UserName,
 		Command: append([]string(nil), execution.Command...), Env: append([]string(nil), execution.Env...),
+		PostgresBindingName: binding.name, PostgresSecretVersionID: binding.secretVersionID,
 		HealthPath: execution.HealthPath, HealthTimeoutMS: execution.HealthTimeoutMS,
 		VolumeName: execution.VolumeName, VolumeMountPath: execution.VolumeMountPath, VolumeDirectory: execution.VolumeDirectory,
 	}
@@ -800,7 +834,7 @@ func (s *Service) Restart(ctx context.Context, projectID, containerID uuid.UUID,
 	reserved = true
 	executionResult, err := s.executions.Start(ctx, executions.StartRequest{ExecutionID: result.Execution.ID, ProjectID: projectID, Spec: containers.Spec{
 		Ownership: ownership, Image: image.Reference, User: execution.UserName,
-		Command: execution.Command, Env: execution.Env, Port: execution.Port,
+		Command: execution.Command, Env: binding.environment(execution.Env), Files: binding.files, Port: execution.Port,
 		Access: containers.AccessPublished, DataVolume: dataVolume,
 		Limits: containers.Limits{CPUMillis: execution.CPUMillis, MemoryBytes: execution.MemoryBytes, PIDs: execution.PIDs, OpenFiles: execution.OpenFiles},
 	}})
