@@ -2650,6 +2650,14 @@ components:
           type: string
           maxLength: 253
           description: 无端口的公开域名。
+        environment:
+          type: object
+          maxProperties: 64
+          description: 普通文本绑定。名称最多 128 个 ASCII 字符，值可为空，最多 4096 个 UTF-8 字节。所有值合计最多 65536 个字节。
+          propertyNames:
+            pattern: '^[A-Za-z_][A-Za-z0-9_]{0,127}$'
+          additionalProperties:
+            type: string
         compatibility_flags:
           type: array
           maxItems: 64
