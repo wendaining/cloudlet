@@ -35,6 +35,7 @@ import (
 	"github.com/wendaining/cloudlet/internal/apigen"
 	"github.com/wendaining/cloudlet/internal/capacity"
 	"github.com/wendaining/cloudlet/internal/config"
+	"github.com/wendaining/cloudlet/internal/containers"
 	"github.com/wendaining/cloudlet/internal/controlplane"
 	"github.com/wendaining/cloudlet/internal/database"
 	"github.com/wendaining/cloudlet/internal/gateway"
@@ -89,6 +90,21 @@ func TestWorkerPublicationHTTP(t *testing.T) {
 		}
 	})
 	t.Cleanup(func() {
+		var volumes []database.WorkerDurableStorage
+		if err := store.DB.Find(&volumes).Error; err != nil {
+			t.Error(err)
+			return
+		}
+		for _, volume := range volumes {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			_, err := docker.VolumeRemove(cleanupCtx, volume.VolumeName, client.VolumeRemoveOptions{})
+			cancel()
+			if err != nil && !cerrdefs.IsNotFound(err) {
+				t.Error(err)
+			}
+		}
+	})
+	t.Cleanup(func() {
 		var executions []database.WorkerExecution
 		if err := store.DB.Find(&executions).Error; err != nil {
 			t.Error(err)
@@ -106,7 +122,7 @@ func TestWorkerPublicationHTTP(t *testing.T) {
 			}
 		}
 	})
-	configuration := config.WorkerRuntime{Directory: t.TempDir(), HostID: "publication-" + uuid.NewString(), HostBudget: config.ResourceBudget{CPUMillis: 5000, MemoryBytes: 4 << 30, Instances: 5}, ProjectQuota: config.ResourceBudget{CPUMillis: 3000, MemoryBytes: 1 << 30, Instances: 3}}
+	configuration := config.WorkerRuntime{Directory: t.TempDir(), HostID: "publication-" + uuid.NewString(), HostBudget: config.ResourceBudget{CPUMillis: 8000, MemoryBytes: 4 << 30, Instances: 8}, ProjectQuota: config.ResourceBudget{CPUMillis: 3000, MemoryBytes: 1 << 30, Instances: 3}}
 	newFront := func() *gateway.Handler {
 		front, err := gateway.NewHandler(config.Config{APIAddress: "127.0.0.1:0", GatewayAddress: "127.0.0.1:0"}, slog.Default())
 		if err != nil {
@@ -330,7 +346,7 @@ func TestWorkerPublicationHTTP(t *testing.T) {
 		t.Fatal(err)
 	}
 	pending.ID, pending.OperationID, pending.State, pending.Hostname = uuid.New(), pendingOperation.ID, "pending", "pending.localhost"
-	if _, _, err := store.CreateWorkerDeployment(ctx, "pending", pending); err != nil {
+	if _, _, err := store.CreateWorkerDeployment(ctx, "pending", pending, false); err != nil {
 		t.Fatal(err)
 	}
 	location, _ := requestWithLocation(owner, http.MethodPost, deployPath(project.ID, "pending"), "second-pending", pendingRequest, http.StatusConflict)
@@ -545,7 +561,7 @@ AND d.state = 'pending' AND o.phase = 'preparing' AND e.container_id <> ''`, pro
 	getPublic()
 	third := valid
 	third.Hostname = "third.localhost"
-	decode(request(developer, http.MethodPost, deployPath(project.ID, "third"), "third", third, http.StatusCreated))
+	thirdDeployment := decode(request(developer, http.MethodPost, deployPath(project.ID, "third"), "third", third, http.StatusCreated))
 	fourth := valid
 	fourth.Hostname = "fourth.localhost"
 	quotaFailure := decode(request(owner, http.MethodPost, deployPath(project.ID, "fourth"), "fourth", fourth, http.StatusTooManyRequests))
@@ -563,6 +579,381 @@ AND d.state = 'pending' AND o.phase = 'preparing' AND e.container_id <> ''`, pro
 	if usage.ProjectUsed.CPUMillis != 3000 || usage.ProjectUsed.Instances != 3 {
 		t.Fatalf("failed publication leaked capacity: %+v", usage)
 	}
+	t.Run("validate compatibility flags with pinned workerd", func(t *testing.T) {
+		input := workerpublish.Request{
+			Module: `import { Buffer } from "node:buffer";
+export default { fetch() { return new Response(Buffer.from("636f6d706174", "hex").toString()) } };`,
+			CompatibilityDate:  valid.CompatibilityDate,
+			Hostname:           "compatibility.localhost",
+			CompatibilityFlags: []string{"nodejs_compat", "cloudlet_unknown_compat_flag"},
+		}
+		path := deployPath(otherProject.ID, "compatibility")
+		rejected := decode(request(outsider, http.MethodPost, path, "unsupported-flag", input, http.StatusUnprocessableEntity))
+		if rejected.State != "failed" || rejected.OperationOutcome != "failed" || !strings.Contains(rejected.Failure, "cloudlet_unknown_compat_flag") {
+			t.Fatalf("unsupported workerd flag was not rejected: %+v", rejected)
+		}
+		input.CompatibilityFlags = []string{"nodejs_compat"}
+		good := decode(request(outsider, http.MethodPost, path, "supported-flag", input, http.StatusCreated))
+		stored := decode(request(outsider, http.MethodGet, metadataPath(otherProject.ID, good.Id), "", nil, http.StatusOK))
+		if good.OperationOutcome != "succeeded" || len(good.CompatibilityFlags) != 1 || good.CompatibilityFlags[0] != "nodejs_compat" ||
+			len(stored.CompatibilityFlags) != 1 || stored.CompatibilityFlags[0] != "nodejs_compat" || stored.ConfigDigest != good.ConfigDigest {
+			t.Fatalf("compatibility flag manifest: %+v %+v", good, stored)
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, public.URL, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Host = input.Hostname
+		response, err := outsider.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer response.Body.Close()
+		body, err := io.ReadAll(response.Body)
+		if err != nil || response.StatusCode != http.StatusOK || string(body) != "compat" {
+			t.Fatalf("Worker node:buffer response: HTTP %d %q %v", response.StatusCode, body, err)
+		}
+		input.CompatibilityFlags = nil
+		request(outsider, http.MethodPost, path, "supported-flag", input, http.StatusConflict)
+		t.Logf("workerd validated nodejs_compat for deployment %s, config %s", good.Id, good.ConfigDigest)
+	})
+	t.Run("publish and restart a Worker with Durable Objects", func(t *testing.T) {
+		const hostname = "objects.localhost"
+		module := `import { DurableObject } from "cloudflare:workers";
+export class ObjectStore extends DurableObject {
+  constructor(ctx, env) {
+    super(ctx, env);
+    this.sql = ctx.storage.sql;
+    this.sql.exec("CREATE TABLE IF NOT EXISTS data (value TEXT PRIMARY KEY)");
+  }
+  set(value, commit) {
+    try {
+      this.ctx.storage.transactionSync(() => {
+        this.sql.exec("DELETE FROM data");
+        this.sql.exec("INSERT INTO data VALUES (?)", value);
+        if (!commit) throw new Error("rollback");
+      });
+    } catch (err) {
+      if (commit || err.message !== "rollback") throw err;
+    }
+  }
+  get() {
+    return this.sql.exec("SELECT value FROM data").toArray()[0]?.value ?? null;
+  }
+}
+export default {
+  async fetch(request, env) {
+    const name = new URL(request.url).pathname.slice(1);
+    if (!name) return new Response("ready");
+    const id = env.STORE.idFromName(name);
+    const object = env.STORE.get(id);
+    if (request.method === "PUT") await object.set(await request.text(), true);
+    if (request.method === "PATCH") await object.set(await request.text(), false);
+    return Response.json({ id: id.toString(), value: await object.get() });
+  }
+};`
+		declared := []workerpublish.DurableObjectBinding{{ClassName: "ObjectStore", Bindings: []string{"STORE"}}}
+		input := workerpublish.Request{Module: module, CompatibilityDate: valid.CompatibilityDate, Hostname: hostname, DurableObjects: declared}
+		path := deployPath(otherProject.ID, "objects")
+		missingClass := input
+		missingClass.DurableObjects = []workerpublish.DurableObjectBinding{{ClassName: "Missing", Bindings: []string{"STORE"}}}
+		invalid := decode(request(outsider, http.MethodPost, path, "missing-class", missingClass, http.StatusUnprocessableEntity))
+		if invalid.OperationOutcome != "failed" || !strings.Contains(invalid.Failure, "Missing Durable Object class export: Missing") {
+			t.Fatalf("missing class preflight result: %+v", invalid)
+		}
+		badBinding := input
+		badBinding.DurableObjects = []workerpublish.DurableObjectBinding{{ClassName: "ObjectStore", Bindings: []string{"STORE", "STORE"}}}
+		request(outsider, http.MethodPost, path, "invalid-binding", badBinding, http.StatusBadRequest)
+		published := decode(request(outsider, http.MethodPost, path, "with-objects", input, http.StatusCreated))
+		if published.State != "active" || published.OperationOutcome != "succeeded" {
+			t.Fatalf("publish Durable Objects: %+v", published)
+		}
+		request(outsider, http.MethodPost, path, "second-writer", input, http.StatusConflict)
+		var ownership database.WorkerDurableStorage
+		if err := store.DB.Where("worker_id = ?", published.WorkerId).Take(&ownership).Error; err != nil {
+			t.Fatal(err)
+		}
+		var namespace database.WorkerDurableNamespace
+		if err := store.DB.Where("worker_id = ?", published.WorkerId).Take(&namespace).Error; err != nil {
+			t.Fatal(err)
+		}
+		if ownership.ProjectID.String() != otherProject.ID || ownership.OwnerExecutionID == nil || *ownership.OwnerExecutionID != published.ExecutionId ||
+			namespace.ProjectID != ownership.ProjectID || namespace.WorkerID != ownership.WorkerID || namespace.ClassName != "ObjectStore" || namespace.ID == uuid.Nil {
+			t.Fatalf("Durable Object registration: %+v %+v", ownership, namespace)
+		}
+		// Exercise the storage guard directly. The first-publication API rejects
+		// another deployment before it reaches the storage claim.
+		competingOperation, _, err := operationStore.Register(ctx, operations.Registration{
+			ProjectID: ownership.ProjectID, Action: "worker.deploy:objects", IdempotencyKey: "competing-claim",
+			RequestFingerprint: "competing-claim",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		competingDeployment, competingExecution, err := store.WorkerDeployment(ctx, ownership.ProjectID, published.Id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		competingDeployment.ID, competingDeployment.OperationID, competingDeployment.State = uuid.New(), competingOperation.ID, "pending"
+		competingExecution.ID, competingExecution.DeploymentID = uuid.New(), competingDeployment.ID
+		competingExecution.Generation++
+		competingExecution.ContainerID, competingExecution.State = "", "pending"
+		if err := store.DB.Create(&competingDeployment).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := store.DB.Create(&competingExecution).Error; err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.ClaimWorkerDurableStorage(ctx, competingExecution, nil); !errors.Is(err, database.ErrWorkerStorageOwned) {
+			t.Fatalf("competing execution claimed a writable volume: %v", err)
+		}
+		if err := store.DB.Where("worker_id = ?", published.WorkerId).Take(&ownership).Error; err != nil {
+			t.Fatal(err)
+		}
+		if ownership.OwnerExecutionID == nil || *ownership.OwnerExecutionID != published.ExecutionId {
+			t.Fatalf("competing claim changed the storage owner: %+v", ownership)
+		}
+		worker, err := docker.ContainerInspect(ctx, published.ContainerId, client.ContainerInspectOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if worker.Container.Config.User != "1000:1000" || len(worker.Container.Mounts) != 1 || worker.Container.Mounts[0].Name != ownership.VolumeName || !worker.Container.Mounts[0].RW {
+			t.Fatalf("unexpected mounted storage: %+v", worker.Container.Mounts)
+		}
+		type objectValue struct {
+			ID    string
+			Value *string
+		}
+		call := func(endpoint, method, name, value string) objectValue {
+			t.Helper()
+			req, err := http.NewRequestWithContext(ctx, method, endpoint+"/"+name, strings.NewReader(value))
+			if err != nil {
+				t.Fatal(err)
+			}
+			req.Host = hostname
+			response, err := outsider.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			body, err := io.ReadAll(response.Body)
+			if err != nil || response.StatusCode != http.StatusOK {
+				t.Fatalf("Durable Object %s returned HTTP %d: %s (%v)", name, response.StatusCode, body, err)
+			}
+			var result objectValue
+			if err := json.Unmarshal(body, &result); err != nil || result.ID == "" {
+				t.Fatalf("decode object %s: %s (%v)", name, body, err)
+			}
+			return result
+		}
+		assertValue := func(object objectValue, id, value string) {
+			t.Helper()
+			if object.ID != id || object.Value == nil || *object.Value != value {
+				t.Fatalf("object ID and committed value: %+v, want %s and %s", object, id, value)
+			}
+		}
+		alpha := call(public.URL, http.MethodPut, "alpha", "first")
+		if empty := call(public.URL, http.MethodGet, "beta", ""); empty.ID == alpha.ID || empty.Value != nil {
+			t.Fatalf("object IDs share state: %+v %+v", alpha, empty)
+		}
+		beta := call(public.URL, http.MethodPut, "beta", "second")
+		assertValue(call(public.URL, http.MethodPatch, "alpha", "rolled back"), alpha.ID, "first")
+		if _, err := docker.ContainerRestart(ctx, published.ContainerId, client.ContainerRestartOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		restarted, err := docker.ContainerInspect(ctx, published.ContainerId, client.ContainerInspectOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !restarted.Container.State.Running || restarted.Container.State.StartedAt == worker.Container.State.StartedAt {
+			t.Fatalf("Docker did not restart the Worker: %+v", restarted.Container.State)
+		}
+		executor, err := containers.New(ctx, docker)
+		if err != nil {
+			t.Fatal(err)
+		}
+		readiness, err := executor.WaitReady(ctx, containers.Ownership{
+			Environment: "publication", Project: otherProject.ID, Resource: published.WorkerId.String(), Generation: uint64(published.Generation),
+		}, published.ContainerId, containers.ReadinessProbe{
+			Port: workers.HTTPPort, Path: "/", Timeout: 10 * time.Second, Interval: 50 * time.Millisecond, Statuses: []int{http.StatusOK},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		endpoint := strings.TrimSuffix(readiness.Endpoint, "/")
+		assertValue(call(endpoint, http.MethodGet, "alpha", ""), alpha.ID, "first")
+		assertValue(call(endpoint, http.MethodGet, "beta", ""), beta.ID, "second")
+		t.Logf("Durable Object namespace %s preserved separate SQLite values and rejected rolled-back writes after restarting container %s", namespace.ID, published.ContainerId)
+	})
+	t.Run("activate ready version without interrupting requests", func(t *testing.T) {
+		activationProject, err := store.CreateProject(ctx, outsiderUser.ID, "Worker activation")
+		if err != nil {
+			t.Fatal(err)
+		}
+		const hostname = "activation.localhost"
+		oldCode := `export default {
+  fetch(request) {
+    if (new URL(request.url).pathname !== "/stream") return new Response("A");
+    const encoder = new TextEncoder();
+    return new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode("A-start"));
+      },
+      async pull(controller) {
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        controller.enqueue(encoder.encode("A-finish"));
+        controller.close();
+      }
+    }));
+  }
+};`
+		otherPath := deployPath(activationProject.ID, "activation")
+		old := decode(request(outsider, http.MethodPost, otherPath, "version-a", workerpublish.Request{
+			Module: oldCode, CompatibilityDate: valid.CompatibilityDate, Hostname: hostname,
+		}, http.StatusCreated))
+		candidateRequest := workerpublish.Request{
+			Module: `export default { fetch() { return new Response("B") } };`, CompatibilityDate: valid.CompatibilityDate, Hostname: hostname, Stage: true,
+		}
+		wrongHost := candidateRequest
+		wrongHost.Hostname = "another.localhost"
+		request(outsider, http.MethodPost, otherPath, "wrong-host", wrongHost, http.StatusConflict)
+		candidate := decode(request(outsider, http.MethodPost, otherPath, "version-b", candidateRequest, http.StatusCreated))
+		if candidate.State != "ready" || candidate.WorkerId != old.WorkerId || candidate.Generation != old.Generation+1 || candidate.OperationOutcome != "succeeded" {
+			t.Fatalf("candidate: %+v", candidate)
+		}
+		replayed := decode(request(outsider, http.MethodPost, otherPath, "version-b", candidateRequest, http.StatusOK))
+		if replayed.Id != candidate.Id || replayed.OperationId != candidate.OperationId || replayed.State != "ready" {
+			t.Fatalf("repeated candidate publication: %+v", replayed)
+		}
+		request(outsider, http.MethodPost, otherPath, "another-candidate", candidateRequest, http.StatusConflict)
+		activationPath := metadataPath(activationProject.ID, candidate.Id) + "/activate"
+		if err := store.UpsertProjectMember(ctx, activationProject.ID, viewerUser.ID, "viewer"); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.UpsertProjectMember(ctx, activationProject.ID, developerUser.ID, "developer"); err != nil {
+			t.Fatal(err)
+		}
+		request(viewer, http.MethodPost, activationPath, "", nil, http.StatusForbidden)
+		request(owner, http.MethodPost, activationPath, "", nil, http.StatusNotFound)
+		request(outsider, http.MethodPost, metadataPath(activationProject.ID, old.Id)+"/activate", "", nil, http.StatusConflict)
+
+		streamCtx, cancelStream := context.WithCancel(ctx)
+		defer cancelStream()
+		publicRequest := func(path string) (*http.Response, error) {
+			req, err := http.NewRequestWithContext(streamCtx, http.MethodGet, public.URL+path, nil)
+			if err != nil {
+				return nil, err
+			}
+			req.Host = hostname
+			return outsider.Do(req)
+		}
+		publicBody := func() (string, error) {
+			response, err := publicRequest("/")
+			if err != nil {
+				return "", err
+			}
+			defer response.Body.Close()
+			if response.StatusCode != http.StatusOK {
+				return "", fmt.Errorf("public version returned HTTP %d", response.StatusCode)
+			}
+			data, err := io.ReadAll(response.Body)
+			return string(data), err
+		}
+		if body, err := publicBody(); err != nil || body != "A" {
+			t.Fatalf("candidate changed public traffic before activation: %q %v", body, err)
+		}
+		stream, err := publicRequest("/stream")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer stream.Body.Close()
+		prefix := make([]byte, len("A-start"))
+		if _, err := io.ReadFull(stream.Body, prefix); err != nil || string(prefix) != "A-start" {
+			t.Fatalf("old request did not start: %q %v", prefix, err)
+		}
+		activationClient, err := sharedclient.New(api.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		developerSession := &http.Request{Header: make(http.Header)}
+		for _, cookie := range developer.Jar.Cookies(apiURL) {
+			developerSession.AddCookie(cookie)
+		}
+		if err := activationClient.SetSessionCookie(developerSession.Header.Get("Cookie")); err != nil {
+			t.Fatal(err)
+		}
+		type activationResult struct {
+			op  apigen.Operation
+			err error
+		}
+		done := make(chan activationResult, 1)
+		go func() {
+			op, err := activationClient.ActivateWorkerDeployment(streamCtx, activationProject.ID, candidate.Id.String())
+			done <- activationResult{op: op, err: err}
+		}()
+		deadline := time.NewTimer(10 * time.Second)
+		defer deadline.Stop()
+		tick := time.NewTicker(30 * time.Millisecond)
+		defer tick.Stop()
+	visible:
+		for {
+			select {
+			case result := <-done:
+				t.Fatalf("activation finished while an old request was in flight: %+v", result)
+			case <-deadline.C:
+				t.Fatal("new version did not receive traffic during drain")
+			case <-tick.C:
+				body, err := publicBody()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if body == "B" {
+					break visible
+				}
+				if body != "A" {
+					t.Fatalf("unexpected public response %q", body)
+				}
+			}
+		}
+		if suffix, err := io.ReadAll(stream.Body); err != nil || string(suffix) != "A-finish" {
+			t.Fatalf("old request did not finish on A: %q %v", suffix, err)
+		}
+		var activated apigen.Operation
+		select {
+		case result := <-done:
+			if result.err != nil || result.op.Outcome != "succeeded" || result.op.Action != "worker.activate" {
+				t.Fatalf("activation result: %+v", result)
+			}
+			activated = result.op
+		case <-ctx.Done():
+			t.Fatal(ctx.Err())
+		}
+		version, _, err := store.RouteSnapshot(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		duplicate, err := activationClient.ActivateWorkerDeployment(ctx, activationProject.ID, candidate.Id.String())
+		if err != nil || duplicate != activated {
+			t.Fatalf("duplicate activation changed its operation: %+v %v", duplicate, err)
+		}
+		repeatedVersion, _, err := store.RouteSnapshot(ctx)
+		if err != nil || repeatedVersion != version {
+			t.Fatalf("duplicate activation rewrote Gateway snapshot: %d to %d, %v", version, repeatedVersion, err)
+		}
+		measured, err := reservations.Usage(ctx, configuration.HostID, uuid.MustParse(activationProject.ID))
+		if err != nil || measured.ProjectUsed.Instances != 1 {
+			t.Fatalf("retired execution capacity: %+v %v", measured, err)
+		}
+		retired := decode(request(outsider, http.MethodGet, metadataPath(activationProject.ID, old.Id), "", nil, http.StatusOK))
+		active := decode(request(outsider, http.MethodGet, metadataPath(activationProject.ID, candidate.Id), "", nil, http.StatusOK))
+		if retired.State != "retired" || retired.ExecutionState != "stopped" || active.State != "active" || active.Hostname != retired.Hostname {
+			t.Fatalf("versions after switch: %+v %+v", retired, active)
+		}
+		if _, err := docker.ContainerInspect(ctx, old.ContainerId, client.ContainerInspectOptions{}); !cerrdefs.IsNotFound(err) {
+			t.Fatalf("retired Worker container was not removed: %v", err)
+		}
+		t.Logf("same-domain switch %s: version %s to %s, operation %s, old stream completed", hostname, retired.Id, active.Id, activated.Id)
+	})
 	t.Run("stream a Worker response and cancel through the Gateway", func(t *testing.T) {
 		module, err := os.ReadFile(filepath.Join("testdata", "streaming.mjs"))
 		if err != nil {
@@ -638,6 +1029,9 @@ AND d.state = 'pending' AND o.phase = 'preparing' AND e.container_id <> ''`, pro
 		}
 		t.Logf("Gateway delivered first chunk in %v before the 5s tail. workerd logs:\n%s", elapsed, text)
 	})
+	if err := store.DB.Exec("UPDATE capacity_project_quotas SET cpu_millis = 4000, instances = 4 WHERE project_id = ?", otherProject.ID).Error; err != nil {
+		t.Fatal(err)
+	}
 	t.Run("publish and track a Worker through MCP", func(t *testing.T) {
 		session := func(browser *http.Client) *mcp.ClientSession {
 			t.Helper()
@@ -778,6 +1172,62 @@ AND d.state = 'pending' AND o.phase = 'preparing' AND e.container_id <> ''`, pro
 	if metadata.ContainerId != initial.ContainerId || metadata.OperationOutcome != "succeeded" {
 		t.Fatalf("restart lost deployment: %+v", metadata)
 	}
+	t.Run("record a real Worker execution exit", func(t *testing.T) {
+		path := metadataPath(project.ID, thirdDeployment.Id)
+		healthy := decode(request(viewer, http.MethodGet, path, "", nil, http.StatusOK))
+		if healthy.ExecutionState != "running" || healthy.LastExit != nil {
+			t.Fatalf("newly active Worker has exit metadata: %+v", healthy)
+		}
+		if _, err := docker.ContainerStop(ctx, thirdDeployment.ContainerId, client.ContainerStopOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		stopped, err := docker.ContainerInspect(ctx, thirdDeployment.ContainerId, client.ContainerInspectOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		state := stopped.Container.State
+		expectedTime, err := time.Parse(time.RFC3339Nano, state.FinishedAt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		exitReason := "normal_exit"
+		if state.ExitCode != 0 {
+			exitReason = "nonzero_exit"
+		}
+		exited := decode(request(viewer, http.MethodGet, path, "", nil, http.StatusOK))
+		record := exited.LastExit
+		if exited.State != "active" || exited.ExecutionState != "stopped" || exited.OperationOutcome != "succeeded" ||
+			record == nil || record.Reason != exitReason || record.ExitCode == nil || *record.ExitCode != state.ExitCode ||
+			record.FinishedAt == nil || !record.FinishedAt.Equal(expectedTime.Truncate(time.Microsecond)) || record.ObservedAt.IsZero() {
+			t.Fatalf("Worker exit data differs from Docker: %+v, Docker %+v", record, state)
+		}
+		_, stored, err := store.WorkerDeployment(ctx, uuid.MustParse(project.ID), thirdDeployment.Id)
+		if err != nil || stored.LastExit.Code == nil || *stored.LastExit.Code != state.ExitCode ||
+			stored.LastExit.ObservedAt == nil || !stored.LastExit.ObservedAt.Equal(record.ObservedAt) || stored.State != "stopped" {
+			t.Fatalf("persistent Worker exit: %+v %v", stored, err)
+		}
+		repeated := decode(request(viewer, http.MethodGet, path, "", nil, http.StatusOK))
+		if repeated.LastExit == nil || !repeated.LastExit.ObservedAt.Equal(record.ObservedAt) {
+			t.Fatalf("repeated observation rewrote the exit time: %+v", repeated.LastExit)
+		}
+		if _, err := docker.ContainerStart(ctx, thirdDeployment.ContainerId, client.ContainerStartOptions{}); err != nil {
+			t.Fatal(err)
+		}
+		running := decode(request(viewer, http.MethodGet, path, "", nil, http.StatusOK))
+		if running.ExecutionState != "running" || running.LastExit == nil || running.LastExit.Reason != exitReason {
+			t.Fatalf("restarted execution lost its previous exit: %+v", running)
+		}
+		if _, err := docker.ContainerRemove(ctx, retried.ContainerId, client.ContainerRemoveOptions{Force: true}); err != nil {
+			t.Fatal(err)
+		}
+		missing := decode(request(owner, http.MethodGet, metadataPath(project.ID, retried.Id), "", nil, http.StatusOK))
+		if missing.ExecutionState != "stopped" || missing.LastExit == nil || missing.LastExit.Reason != "container_missing" ||
+			missing.LastExit.ExitCode != nil || missing.LastExit.FinishedAt != nil {
+			t.Fatalf("missing execution should have no fabricated exit code or finish time: %+v", missing)
+		}
+		t.Logf("Worker %s execution %s reported Docker exit %d (%s)", thirdDeployment.WorkerId, exited.ExecutionId, state.ExitCode, record.Reason)
+	})
+	getPublic()
 	t.Logf("deployment=%s Worker=%s operation=%s digest=%s", initial.Id, initial.WorkerId, initial.OperationId, initial.ArtifactDigest)
 	var operationCount int64
 	if err := store.DB.Table("operations").Count(&operationCount).Error; err != nil {

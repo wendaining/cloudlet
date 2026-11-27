@@ -21,7 +21,7 @@ import (
 	"github.com/wendaining/cloudlet/internal/database"
 )
 
-func verifyBrowserDownloads(t *testing.T, ctx context.Context, store *database.Store, owner, other *apigen.ClientWithResponses, project string, id uuid.UUID, fixture string) {
+func verifyBrowserDownloads(t *testing.T, ctx context.Context, store *database.Store, owner, other *apigen.ClientWithResponses, project string, id uuid.UUID, fixture string) *apigen.BrowserDownload {
 	t.Helper()
 	original, err := url.Parse(fixture)
 	if err != nil {
@@ -127,4 +127,5 @@ func verifyBrowserDownloads(t *testing.T, ctx context.Context, store *database.S
 	}
 	capture("#small", http.StatusCreated)
 	t.Log("real browser download bytes and SHA-256 match, cross-project returned 404; oversize chunked transfer was cancelled and not registered; a later download succeeded")
+	return small
 }

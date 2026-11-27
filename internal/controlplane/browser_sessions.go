@@ -102,7 +102,7 @@ func (h *handler) NavigateBrowserSession(c *gin.Context, projectID string, sessi
 		c.JSON(http.StatusBadRequest, apigen.Error{Message: "导航请求格式无效"})
 		return
 	}
-	page, err := h.browser.Navigate(c.Request.Context(), uuid.MustParse(project), sessionID, body.Url)
+	page, err := h.browser.Navigate(c.Request.Context(), uuid.MustParse(project), sessionID, body.Url, body.PageId)
 	if err != nil {
 		h.browserFailure(c, err)
 		return
@@ -132,6 +132,8 @@ func (h *handler) browserFailure(c *gin.Context, err error) {
 		c.JSON(http.StatusConflict, apigen.Error{Message: browser.ErrSessionUnavailable.Error()})
 	case errors.Is(err, browser.ErrInvalidURL):
 		c.JSON(http.StatusBadRequest, apigen.Error{Message: browser.ErrInvalidURL.Error()})
+	case errors.Is(err, browser.ErrPageNotFound):
+		c.JSON(http.StatusNotFound, apigen.Error{Message: browser.ErrPageNotFound.Error()})
 	case errors.Is(err, browser.ErrNavigationTimeout):
 		c.JSON(http.StatusGatewayTimeout, apigen.Error{Message: browser.ErrNavigationTimeout.Error()})
 	case errors.Is(err, browser.ErrNavigation):

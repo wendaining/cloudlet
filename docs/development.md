@@ -47,7 +47,7 @@ make dev 检查配置与端口，使用 compose.yaml 和 compose.dev.yaml 启动
 
 开发入口在实例配置中启用 Worker 首发，产物保存到 `.local/实例名称/workers`。主机预算与项目初始配额均配置为 4000 CPU 毫核、四 GiB 内存与四个实例。已有项目配额保持原值。每个 Worker 执行申请 1000 CPU 毫核、256 MiB 内存与一个实例。发布方法见 [Worker 发布](workers.md)。
 
-开发入口同时启用容器创建，与 Worker 共享同一主机预算和项目初始配额。创建请求使用不可变镜像摘要，容器就绪后通过 Gateway 访问所声明的域名。创建、停止、再次启动、删除、限制和失败清理见 [容器生命周期与公开访问](containers.md)。
+开发入口同时启用容器创建，与 Worker 共享同一主机预算和项目初始配额。创建请求使用不可变镜像摘要，容器就绪后通过 Gateway 访问所声明的域名。创建、停止、再次启动、删除、可写数据卷、限制和失败清理见 [容器生命周期与公开访问](containers.md)。
 
 开发账号使用 CLOUDLET_DEV_EMAIL 与 CLOUDLET_DEV_PASSWORD，走正常登录流程。后续启动保留数据库中已有的账号与密码。生产环境禁止执行开发账号初始化。
 
@@ -110,6 +110,7 @@ Ctrl+C、SIGTERM 和 make dev-stop 停止本实例的应用进程、执行容器
 | io.cloudlet.project | 项目标识 |
 | io.cloudlet.resource | 资源标识，由对应模块设置 |
 | io.cloudlet.generation | 执行序号 |
+| io.cloudlet.volume | 可写数据卷类型 |
 
 后端进程退出时，执行容器继续运行。完整停止由独立开发控制器根据标签执行。Worker、DO 与浏览器的元数据恢复和会话重新接管随各自模块完成，验收要求见实施清单。
 
@@ -146,3 +147,21 @@ make dev
 验证管理进程重启接管时，先创建会话、导航并记录 Docker 容器标识。只重启 Go 管理进程，随后对原会话执行截图，核对仍为原页面并确认容器 ID 与启动时间一致。关闭的会话与管理进程停止期间已到期的会话重新连接时应返回 409；查询会话元数据应显示终态。
 
 验收浏览器下载时，在本地页面放置一个文件下载链接。导航后向会话地址的 `/downloads` 发送 POST，JSON 提供链接的 CSS selector。用项目登录会话访问返回的 download_url，比较文件原始字节和 SHA-256。超过 8 MiB 的下载应返回 422，原有产物可继续访问。
+
+### 重放浏览器验收示例
+
+启用上面的 Browser Run 配置并启动开发环境，在管理界面创建一个测试项目。
+从该项目页面的地址复制项目 UUID，在仓库根目录执行：
+
+```sh
+project_id='<测试项目 UUID>'
+bridge_ip=$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}')
+node --env-file=.env.local scripts/browser-acceptance.mjs "$project_id" "$bridge_ip"
+```
+
+脚本在本机 Docker 网桥地址启动临时测试页，使用开发账号调用管理 API，点击按钮，
+保存整页截图并核对摘要和字节数，查询控制台消息，最后关闭会话。它会打印结果目录和产物信息。
+
+打开结果目录中的 screenshot.png，核对按钮显示 `Click verified` 且图片包含页尾
+`Full-page footer`。打开同一目录中的 console.json，查找 `Cloudlet Browser acceptance click`。
+验收记录应包含提交号、系统与 Docker 版本、截图摘要以及看到的按钮、页尾和控制台消息。
