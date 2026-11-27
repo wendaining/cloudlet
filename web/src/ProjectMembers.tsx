@@ -7,6 +7,7 @@ import {
   type ProjectMember,
   type ProjectMemberRole,
 } from './client';
+import { isProjectOwner } from './Projects.rules';
 import styles from './app.module.css';
 
 type MemberFormValues = {
@@ -48,12 +49,7 @@ export function ProjectMembers({
       });
     },
   });
-  const canManage = Boolean(
-    accountID &&
-    members.data?.some(
-      (member) => member.user_id === accountID && member.role === 'owner',
-    ),
-  );
+  const canManage = isProjectOwner(members.data, accountID);
   const saveBelongsToAccount = save.variables?.accountID === accountID;
 
   const columns: TableProps<ProjectMember>['columns'] = [

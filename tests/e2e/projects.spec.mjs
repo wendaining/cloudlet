@@ -3,6 +3,7 @@ import { loadConfig } from '../../scripts/development/config.mjs';
 import { capture } from '../../scripts/development/process.mjs';
 
 const projectName = `E2E 项目 ${process.pid}-${Date.now()}`;
+const renamedProjectName = `${projectName} 已重命名`;
 const memberEmail = `member-${process.pid}-${Date.now()}@cloudlet.local`;
 const memberPassword = 'member-integration-password';
 
@@ -89,10 +90,30 @@ test(
   await expect(
     memberPage.getByRole('button', { name: '保存成员' }),
   ).toHaveCount(0);
+  await expect(
+    memberPage.getByRole('button', { name: '编辑名称' }),
+  ).toHaveCount(0);
   await memberContext.close();
 
+  await page.getByRole('button', { name: '编辑名称' }).click();
+  await page.getByRole('textbox', { name: '项目名称' }).fill('   ');
+  await page.getByRole('button', { name: '保存名称' }).click();
+  await expect(page.getByText('项目名称不能是空白')).toBeVisible();
+  await page.getByRole('textbox', { name: '项目名称' }).fill(renamedProjectName);
+  await page.getByRole('button', { name: '保存名称' }).click();
+  await expect(page.getByText('项目名称已更新')).toBeVisible();
+  await expect(
+    page.getByText(renamedProjectName, { exact: true }).first(),
+  ).toBeVisible();
+  await page.reload();
+  await expect(
+    page.getByText(renamedProjectName, { exact: true }).first(),
+  ).toBeVisible();
+
   await page.getByRole('link', { name: '返回项目列表' }).click();
-  await expect(page.getByRole('link', { name: projectName })).toBeVisible();
+  await expect(
+    page.getByRole('link', { name: renamedProjectName }),
+  ).toBeVisible();
   await page.goBack();
   await page.goBack();
   await page.goBack();
@@ -104,15 +125,20 @@ test(
   await page.getByRole('button', { name: '登录', exact: true }).click();
   await expect(page.getByRole('heading', { name: '环境概览' })).toBeVisible();
   await page.getByRole('button', { name: '进入项目控制台' }).click();
-  await page.getByRole('link', { name: projectName }).click();
+  await page.getByRole('link', { name: renamedProjectName }).click();
   await expect(
     page.getByRole('row', { name: new RegExp(memberEmail) }),
   ).toContainText('观察者');
   await expect(
     page.getByRole('button', { name: '保存成员' }),
   ).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: '编辑名称' }),
+  ).toHaveCount(0);
   await page.getByRole('link', { name: '返回项目列表' }).click();
-  await expect(page.getByRole('link', { name: projectName })).toBeVisible();
+  await expect(
+    page.getByRole('link', { name: renamedProjectName }),
+  ).toBeVisible();
   await page.screenshot({ path: info.outputPath('projects.png'), fullPage: true });
   expect(pageErrors).toEqual([]);
   },

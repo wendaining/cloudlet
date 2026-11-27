@@ -73,3 +73,12 @@
   width: 240px;
   height: 100px;
 }
+
+.renameForm {
+  margin-top: 16px;
+  max-width: 420px;
+}
+
+.renameActions {
+  margin-top: 16px;
+}

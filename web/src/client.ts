@@ -7,6 +7,8 @@ export type LoginRequest = components['schemas']['LoginRequest'];
 export type Project = components['schemas']['Project'];
 export type CreateProjectRequest =
   components['schemas']['CreateProjectRequest'];
+export type RenameProjectRequest =
+  components['schemas']['RenameProjectRequest'];
 export type ProjectMember = components['schemas']['ProjectMember'];
 export type ProjectMemberRole = components['schemas']['ProjectMemberRole'];
 export type UpsertProjectMemberRequest =
@@ -92,6 +94,20 @@ export async function project(id: string) {
   if (response.status === 404) return null;
   if (error) throw new Error(error.message);
   if (!data) throw new Error(`项目查询失败，状态码 ${status}`);
+  return data;
+}
+
+export async function renameProject(id: string, body: RenameProjectRequest) {
+  const { data, error, response } = await client.PATCH(
+    '/api/v1/projects/{projectID}',
+    {
+      params: { path: { projectID: id } },
+      body,
+    },
+  );
+  const status = response.status;
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error(`重命名项目失败，状态码 ${status}`);
   return data;
 }
 
