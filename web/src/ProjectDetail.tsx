@@ -5,6 +5,7 @@ import { project, session } from './client';
 import { ProjectMembers } from './ProjectMembers';
 import styles from './app.module.css';
 import { OperationList } from './OperationList';
+import { StaticSiteList } from './StaticSiteList';
 
 export function ProjectDetail() {
   const { projectID } = useParams<{ projectID: string }>();
@@ -57,6 +58,7 @@ export function ProjectDetail() {
       <Card
         title={query.data.name}
         extra={<Link to="/projects">返回项目列表</Link>}
+        className={styles.section}
       >
         <Descriptions column={1}>
           <Descriptions.Item label="项目标识">
@@ -67,6 +69,12 @@ export function ProjectDetail() {
           </Descriptions.Item>
         </Descriptions>
       </Card>
+      <StaticSiteList
+        projectID={query.data.id}
+        accountID={account.data?.user.id}
+        sessionPending={account.isPending}
+        sessionError={account.error}
+      />
       <ProjectMembers
         projectID={query.data.id}
         accountID={account.data?.user.id}
