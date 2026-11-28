@@ -17,7 +17,7 @@ func TestPrepareCompatibilityFlags(t *testing.T) {
 		t.Fatalf("canonical flags = %v, input = %v", prepared.CompatibilityFlags, flags)
 	}
 	field := []byte(`compatibilityFlags = ["allow_custom_ports", "nodejs_compat"]`)
-	if !bytes.Contains(prepared.Config, field) || !bytes.Contains(preflightConfig(prepared.CompatibilityDate, prepared.CompatibilityFlags), field) {
+	if !bytes.Contains(prepared.Config, field) || !bytes.Contains(preflightConfig(prepared.CompatibilityDate, prepared.CompatibilityFlags, nil), field) {
 		t.Fatalf("serve and preflight configs must both declare %s", field)
 	}
 	original, err := PrepareModule([]byte("export default {};"), "2026-10-12")
