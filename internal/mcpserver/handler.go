@@ -97,6 +97,7 @@ func NewHandler(apiEndpoint string) (http.Handler, error) {
 			return nil, mapOperation(operation), nil
 		})
 	registerWorkerTools(server, apiEndpoint)
+	registerBrowserTools(server, apiEndpoint)
 	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server { return server }, &mcp.StreamableHTTPOptions{
 		Stateless: true, JSONResponse: true,
 	})
