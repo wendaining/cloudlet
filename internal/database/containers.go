@@ -365,6 +365,150 @@ func (s *Store) MarkContainerRestartFailed(ctx context.Context, projectID, conta
 	}, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 }
 
+// ContainerTakeover pairs an active container with the execution that a
+// controller must reconcile with Docker at startup.
+type ContainerTakeover struct {
+	Container   Container
+	Execution   ContainerExecution
+	RouteTarget string
+}
+
+// ActiveContainerExecutions lists the running container executions whose
+// capacity this host reserved for the given environment. The reservation
+// binding scopes takeover to one controller, so another instance's containers
+// are never adopted or failed.
+func (s *Store) ActiveContainerExecutions(ctx context.Context, hostID, environment string) ([]ContainerTakeover, error) {
+	if hostID == "" || environment == "" {
+		return nil, fmt.Errorf("list active container executions: host and environment are required: %w", fs.ErrInvalid)
+	}
+	type activeExecution struct {
+		ProjectID   uuid.UUID `gorm:"column:project_id"`
+		ContainerID uuid.UUID `gorm:"column:container_id"`
+		RouteTarget string    `gorm:"column:route_target"`
+	}
+	var rows []activeExecution
+	err := s.DB.WithContext(ctx).Raw(`
+		SELECT e.project_id, e.container_id,
+		       COALESCE((SELECT pr.target FROM project_routes pr
+		                 WHERE pr.project_id = e.project_id AND pr.resource = c.id::text
+		                 ORDER BY pr.path_prefix LIMIT 1), '') AS route_target
+		FROM capacity_reservations r
+		JOIN container_executions e ON e.id = r.execution_id AND e.project_id = r.project_id
+		JOIN containers c ON c.id = e.container_id AND c.project_id = e.project_id
+		WHERE r.state = 'active' AND r.host_id = ? AND r.container_environment = ?
+		  AND c.state = 'active' AND c.active_execution_id = e.id AND e.state = 'running'
+		ORDER BY e.created_at, e.id`, hostID, environment).Scan(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("list active container executions: %w", err)
+	}
+	takeovers := make([]ContainerTakeover, 0, len(rows))
+	for _, row := range rows {
+		container, execution, err := s.ContainerResult(ctx, row.ProjectID, row.ContainerID)
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			// The container changed state after the listing query. Another
+			// writer is not expected while this controller holds the session
+			// lock, so skip the stale row instead of adopting it.
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("read container %s for takeover: %w", row.ContainerID, err)
+		}
+		takeovers = append(takeovers, ContainerTakeover{Container: container, Execution: execution, RouteTarget: row.RouteTarget})
+	}
+	return takeovers, nil
+}
+
+// UpdateContainerExecutionRuntime records the Docker container and actual
+// endpoint observed for an active execution, updates the target of its project
+// route, and increments the route snapshot version in one transaction. A
+// missing route is recreated with the execution's host and path prefix after
+// checking that no other project owns the host.
+func (s *Store) UpdateContainerExecutionRuntime(ctx context.Context, container Container, execution ContainerExecution, dockerContainerID, target string) (int64, error) {
+	if container.ProjectID == uuid.Nil || container.ID == uuid.Nil || execution.ID == uuid.Nil || dockerContainerID == "" || target == "" {
+		return 0, fmt.Errorf("update container runtime: identifiers, Docker container and target are required: %w", fs.ErrInvalid)
+	}
+	var version int64
+	err := s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Raw("SELECT version FROM route_snapshot WHERE id = 1 FOR UPDATE").Row().Scan(&version); err != nil {
+			return fmt.Errorf("lock route snapshot version: %w", err)
+		}
+		result := tx.Model(&ContainerExecution{}).
+			Where("project_id = ? AND container_id = ? AND id = ? AND state = 'running'", container.ProjectID, container.ID, execution.ID).
+			Updates(map[string]any{"docker_container_id": dockerContainerID, "target": target})
+		if result.Error != nil {
+			return fmt.Errorf("record container execution %s runtime: %w", execution.ID, result.Error)
+		}
+		if result.RowsAffected != 1 {
+			return fmt.Errorf("container execution %s is not running", execution.ID)
+		}
+		route := tx.Model(&ProjectRoute{}).
+			Where("project_id = ? AND resource = ?", container.ProjectID.String(), container.ID.String()).
+			Updates(map[string]any{"target": target, "updated_at": gorm.Expr("CURRENT_TIMESTAMP")})
+		if route.Error != nil {
+			return fmt.Errorf("update container route target: %w", route.Error)
+		}
+		if route.RowsAffected == 0 {
+			var conflict bool
+			if err := tx.Raw("SELECT EXISTS (SELECT 1 FROM project_routes WHERE host = ? AND (project_id <> ? OR path_prefix = '/'))", execution.Hostname, container.ProjectID).Row().Scan(&conflict); err != nil {
+				return fmt.Errorf("check container host %q: %w", execution.Hostname, err)
+			}
+			if conflict {
+				return ErrRouteConflict
+			}
+			restored := ProjectRoute{
+				ID:         uuid.NewString(),
+				ProjectID:  container.ProjectID.String(),
+				Resource:   container.ID.String(),
+				Host:       execution.Hostname,
+				PathPrefix: execution.PathPrefix,
+				Target:     target,
+			}
+			if err := tx.Create(&restored).Error; err != nil {
+				return routeWriteError("restore container route", err)
+			}
+		}
+		return tx.Raw("UPDATE route_snapshot SET version = version + 1 WHERE id = 1 RETURNING version").Row().Scan(&version)
+	}, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+	return version, err
+}
+
+// FailContainerTakeover records a container that could not be adopted after its
+// route and capacity were cleaned up. The container returns to failed so a
+// later restart can create a new execution from the saved configuration.
+func (s *Store) FailContainerTakeover(ctx context.Context, projectID, containerID, executionID uuid.UUID, cause error) error {
+	if projectID == uuid.Nil || containerID == uuid.Nil || executionID == uuid.Nil {
+		return fmt.Errorf("fail container takeover: identifiers are required: %w", fs.ErrInvalid)
+	}
+	if cause == nil {
+		return fmt.Errorf("fail container takeover: cause is required: %w", fs.ErrInvalid)
+	}
+	message := cause.Error()
+	if message == "" {
+		message = "container takeover failed"
+	}
+	return s.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&ContainerExecution{}).
+			Where("project_id = ? AND container_id = ? AND id = ?", projectID, containerID, executionID).
+			Updates(map[string]any{"state": "failed", "failure": message, "target": ""})
+		if result.Error != nil {
+			return fmt.Errorf("fail container execution %s: %w", executionID, result.Error)
+		}
+		if result.RowsAffected != 1 {
+			return fmt.Errorf("container execution %s does not exist", executionID)
+		}
+		result = tx.Model(&Container{}).
+			Where("project_id = ? AND id = ? AND active_execution_id = ?", projectID, containerID, executionID).
+			Updates(map[string]any{"active_execution_id": nil, "state": "failed", "failure": message})
+		if result.Error != nil {
+			return fmt.Errorf("fail container %s: %w", containerID, result.Error)
+		}
+		if result.RowsAffected != 1 {
+			return fmt.Errorf("container %s is no longer active", containerID)
+		}
+		return nil
+	}, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
+}
+
 // DeleteContainer removes the logical container and all execution records after
 // the route and Docker container are gone. Operations remain as audit records.
 func (s *Store) DeleteContainer(ctx context.Context, projectID, containerID uuid.UUID) error {
