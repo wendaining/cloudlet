@@ -167,7 +167,13 @@ export function ProjectDetail() {
               }}
             >
               <Form.Item name="name" label="项目名称" rules={projectsRules}>
-                <Input aria-label="项目名称" maxLength={100} showCount />
+                <Input
+                  aria-label="项目名称"
+                  showCount={{
+                    formatter: ({ value }) =>
+                      `${Array.from(value).length} / 100`,
+                  }}
+                />
               </Form.Item>
               {renameBelongsToContext && rename.isError ? (
                 <Alert
