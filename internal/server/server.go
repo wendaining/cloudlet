@@ -111,7 +111,9 @@ func Run(ctx context.Context, cfg config.Config, logger *slog.Logger) (runErr er
 			defer func() { runErr = errors.Join(runErr, publication.Close()) }()
 		}
 		if cfg.Containers != nil {
-			startupCtx, cancel := context.WithTimeout(ctx, time.Minute)
+			// Startup adopts stopped executions and may wait for each recorded
+			// readiness deadline before the service accepts requests.
+			startupCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 			containersService, err = containerpublish.NewService(startupCtx, store, docker, publisher, *cfg.Containers, cfg.Instance, cfg.SecretKey)
 			cancel()
 			if err != nil {

@@ -49,7 +49,7 @@ Cloudlet 在一台 Linux 服务器上管理计算资源。本地开发在成员�
 | internal/containerpublish | 容器创建、停止、再次启动与删除，数据卷声明与持久化、容量准入、真实启动、HTTP 就绪与项目域名路由激活 |
 | internal/browser | 复用容器管理的 Playwright 会话 |
 | pkg/client | CLI 与其他客户端共享的 API 客户端 |
-| internal/mcpserver | MCP 项目查询、Worker 发布与操作查询，复用管理 API 会话权限 |
+| internal/mcpserver | MCP 项目查询、Worker 发布、Browser Run 会话创建与导航及操作查询，复用管理 API 会话权限 |
 
 PostgreSQL 当前保存账号、登录会话、项目、操作记录、项目凭据、项目路由、容量预留、静态站点版本、浏览器会话、容器与执行记录以及 Worker 部署与执行记录。首个无状态 Worker 可以通过管理 API 发布并访问。具有 Durable Object 绑定的 Worker 可以通过同一管理 API 首次发布，PostgreSQL 记录命名空间、持久化数据卷和唯一执行所有者。
 
@@ -95,7 +95,7 @@ PostgreSQL 当前保存账号、登录会话、项目、操作记录、项目凭
 | /api/v1/projects/{projectID}/workers/{name}/deployments | POST | 所有者或开发者发布首个无状态 Worker，或准备候选版本，按 Idempotency-Key 复用操作 |
 | /api/v1/projects/{projectID}/worker-deployments/{deploymentID} | GET | 项目成员查询版本、产物摘要、执行与 Operation 结果 |
 | /api/v1/projects/{projectID}/worker-deployments/{deploymentID}/activate | POST | 所有者或开发者切换到就绪版本，同一版本重复提交返回原激活 Operation |
-| /mcp | MCP Streamable HTTP | 使用当前会话查询项目、发布 Worker 并查询项目操作 |
+| /mcp | MCP Streamable HTTP | 使用当前会话查询项目、发布 Worker、创建并导航 Browser Run 会话及查询项目操作 |
 
 PostgreSQL 绑定按项目和名称存储。登记时引用本项目不可变的 Secret 版本。只有实际验证成功才保存元数据和验证时间。凭据值使用含有 `username` 与 `password` 的 JSON 对象。登记时连接指定数据库并执行 Ping，默认校验服务器证书与主机名。开发环境可使用回环地址连接本地无 TLS PostgreSQL。
 
@@ -163,7 +163,9 @@ API 与 Gateway 使用 HTTP 头读取超时和空闲连接超时。收到 SIGTER
 
 可写数据卷由 `internal/containers` 创建和校验。卷携带环境、项目、资源和 `io.cloudlet.volume=writable` 归属标签；同一卷只允许一个运行中的执行，`container_executions` 的运行时唯一索引进一步约束独占写入。停止保留卷；再次启动核对并挂载同一卷，初始化目录不会删除已有数据；删除在容器停止后删除卷并确认不存在。创建失败且卷由本次创建时清理新卷，已有卷在失败重试中保留。数据卷声明与已有容器配置不一致时返回 409。
 
-当前支持容器的创建、停止、再次启动、删除和一个声明式可写数据卷。只读卷挂载由 #119 交付，项目级卷隔离和跨项目访问限制由 #48 继续验证，控制器重启接管和异常退出恢复由 #50 等后续任务接入；修改镜像或配置产生新执行、活动版本切换和旧执行排空尚未接入。
+控制器启动时按活动执行、容量预留归属和 Docker 标签接管运行中的容器。运行中的容器按镜像、资源上限、文件摘要和数据卷核对后保持原执行标识；实际回环端点变化时更新执行目标、路由目标与快照。容器被外部停止时启动一次并完成就绪检查后恢复路由；就绪失败时撤销路由、释放容量并记录失败；容器不存在时撤销路由、释放容量并记录失败，不创建副本。启动命令失败、观测失败或配置不一致时终止启动并保留容量。
+
+当前支持容器的创建、停止、再次启动、删除、一个声明式可写数据卷和控制器重启接管。只读卷挂载由 #119 交付，项目级卷隔离和跨项目访问限制由 #48 继续验证，异常退出恢复、Docker 事件和缺少元数据的遗留容器清理由 #120、#121 等后续任务接入；修改镜像或配置产生新执行、活动版本切换和旧执行排空尚未接入。
 
 ## 执行环境
 

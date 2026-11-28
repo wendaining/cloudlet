@@ -13,6 +13,10 @@ export type ProjectMember = components['schemas']['ProjectMember'];
 export type ProjectMemberRole = components['schemas']['ProjectMemberRole'];
 export type UpsertProjectMemberRequest =
   components['schemas']['UpsertProjectMemberRequest'];
+export type StaticSiteSummary = components['schemas']['StaticSiteSummary'];
+export type StaticSitePage = components['schemas']['StaticSitePage'];
+export type StaticSiteActivePublication =
+  components['schemas']['StaticSiteActivePublication'];
 const client = createClient<paths>();
 
 export async function session() {
@@ -138,6 +142,44 @@ export async function upsertProjectMember(
   const status = response.status;
   if (error) throw new Error(error.message);
   if (!data) throw new Error(`成员保存失败，状态码 ${status}`);
+  return data;
+}
+
+export async function projectSites(id: string, cursor?: string) {
+  const { data, error, response } = await client.GET(
+    '/api/v1/projects/{projectID}/sites',
+    {
+      params: {
+        path: { projectID: id },
+        query: {
+          limit: 100,
+          ...(cursor ? { cursor } : {}),
+        },
+      },
+    },
+  );
+  const status = response.status;
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error(`静态站点列表查询失败，状态码 ${status}`);
+  return data;
+}
+
+export async function staticSitePublication(
+  projectID: string,
+  siteName: string,
+) {
+  const { data, error, response } = await client.GET(
+    '/api/v1/projects/{projectID}/sites/{siteName}/publication',
+    {
+      params: {
+        path: { projectID, siteName },
+      },
+    },
+  );
+  const status = response.status;
+  if (status === 404) return null;
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error(`站点发布信息查询失败，状态码 ${status}`);
   return data;
 }
 

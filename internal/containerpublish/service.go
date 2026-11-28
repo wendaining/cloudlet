@@ -236,7 +236,8 @@ type Service struct {
 
 // NewService verifies every configured dependency before enabling container
 // creation. A PostgreSQL session lock allows only one container controller for
-// the host.
+// the host. Before returning, it restores the Gateway snapshot and adopts the
+// active containers of this host.
 func NewService(ctx context.Context, store *database.Store, docker *client.Client, publisher *routes.Publisher, configuration config.ContainerRuntime, instance string, secretKey []byte) (service *Service, err error) {
 	if store == nil || docker == nil || publisher == nil {
 		return nil, fmt.Errorf("container creation requires database, Docker and route publisher: %w", fs.ErrInvalid)
@@ -290,6 +291,9 @@ func NewService(ctx context.Context, store *database.Store, docker *client.Clien
 		return nil, err
 	}
 	if _, err = s.publisher.Sync(ctx); err != nil {
+		return nil, err
+	}
+	if err = s.Restore(ctx); err != nil {
 		return nil, err
 	}
 	s.controlContext, s.stopController = context.WithCancelCause(context.Background())
