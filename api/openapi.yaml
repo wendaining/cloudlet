@@ -1257,7 +1257,7 @@ paths:
           type: string
     post:
       operationId: createContainer
-      description: 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用，引用 PostgreSQL 绑定时仅所有者可以调用。同一幂等键复用操作。
+      description: 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用，引用 PostgreSQL 或 S3 绑定时仅所有者可以调用。同一幂等键复用操作。
       security:
         - SessionCookie: []
       parameters:
@@ -2465,6 +2465,12 @@ components:
           items:
             type: string
           description: KEY=value 形式的环境变量。请求体总大小最多 64 KiB。
+        s3_binding:
+          type: string
+          minLength: 1
+          maxLength: 63
+          pattern: '^[a-z0-9]+(-[a-z0-9]+)*$'
+          description: 项目内已授权的 S3 绑定名称。凭据必须由存储服务限制到该绑定的桶。
         postgres_binding:
           type: string
           minLength: 1
@@ -2590,6 +2596,8 @@ components:
           type: array
           items:
             type: string
+        s3_binding:
+          $ref: "#/components/schemas/ContainerS3Binding"
         postgres_binding:
           $ref: "#/components/schemas/ContainerPostgresBinding"
         health_check_path:
@@ -2621,6 +2629,15 @@ components:
         created_at:
           type: string
           format: date-time
+    ContainerS3Binding:
+      type: object
+      required: [name, secret_version_id]
+      properties:
+        name:
+          type: string
+        secret_version_id:
+          type: string
+          format: uuid
     ContainerPostgresBinding:
       type: object
       required: [name, secret_version_id]

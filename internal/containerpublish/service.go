@@ -96,6 +96,7 @@ type Request struct {
 	DataVolume           *DataVolumeRequest `json:"data_volume,omitempty"`
 
 	PostgresBinding *string `json:"postgres_binding,omitempty"`
+	S3Binding       *string `json:"s3_binding,omitempty"`
 
 	imageDigest string
 	volumeName  string
@@ -110,20 +111,28 @@ func ValidateRequest(request Request) (Request, error) {
 	if len(request.Command) > 64 || len(request.Env) > 128 {
 		return Request{}, fmt.Errorf("container command or environment exceeds its item limit: %w", fs.ErrInvalid)
 	}
-	if request.PostgresBinding != nil {
-		credentialPath := "/" + postgresURLPath
+	for _, binding := range []struct {
+		name                    *string
+		kind, file, environment string
+	}{
+		{request.PostgresBinding, "PostgreSQL", postgresURLPath, postgresURLFileEnv},
+		{request.S3Binding, "S3", s3ConfigPath, s3ConfigFileEnv},
+	} {
+		if binding.name == nil {
+			continue
+		}
+		credentialPath := "/" + binding.file
 		if request.DataVolume != nil && (request.DataVolume.MountPath == credentialPath ||
 			strings.HasPrefix(request.DataVolume.MountPath, credentialPath+"/")) {
-			return Request{}, fmt.Errorf("container data volume cannot use the PostgreSQL credential file path: %w", fs.ErrInvalid)
+			return Request{}, fmt.Errorf("container data volume cannot use the %s credential file path: %w", binding.kind, fs.ErrInvalid)
 		}
-		name := *request.PostgresBinding
-		if len(name) > 63 || !namePattern.MatchString(name) {
-			return Request{}, fmt.Errorf("invalid PostgreSQL binding name: %w", fs.ErrInvalid)
+		if len(*binding.name) > 63 || !namePattern.MatchString(*binding.name) {
+			return Request{}, fmt.Errorf("invalid %s binding name: %w", binding.kind, fs.ErrInvalid)
 		}
 		for _, entry := range request.Env {
 			key, _, _ := strings.Cut(entry, "=")
-			if key == postgresURLFileEnv {
-				return Request{}, fmt.Errorf("environment key %s is reserved for the PostgreSQL binding: %w", key, fs.ErrInvalid)
+			if key == binding.environment {
+				return Request{}, fmt.Errorf("environment key %s is reserved for the %s binding: %w", key, binding.kind, fs.ErrInvalid)
 			}
 		}
 	}
@@ -380,6 +389,10 @@ func (s *Service) Create(ctx context.Context, projectID uuid.UUID, key string, r
 	if err != nil {
 		return result, false, err
 	}
+	s3, err := s.resolveS3Binding(ctx, projectID, prepared.S3Binding, nil)
+	if err != nil {
+		return result, false, err
+	}
 	encoded, err := json.Marshal(prepared)
 	if err != nil {
 		return result, false, err
@@ -458,6 +471,7 @@ func (s *Service) Create(ctx context.Context, projectID uuid.UUID, key string, r
 		MemoryBytes: prepared.MemoryBytes, PIDs: containerPIDs, OpenFiles: containerOpenFiles,
 		UserName: prepared.User, Command: prepared.Command, Env: prepared.Env,
 		PostgresBindingName: binding.name, PostgresSecretVersionID: binding.secretVersionID,
+		S3BindingName: s3.name, S3SecretVersionID: s3.secretVersionID,
 		HealthPath: prepared.HealthCheckPath, HealthTimeoutMS: prepared.HealthCheckTimeoutMS,
 		VolumeName:      prepared.volumeName,
 		VolumeMountPath: dataVolumeMountPath(prepared),
@@ -505,7 +519,7 @@ func (s *Service) Create(ctx context.Context, projectID uuid.UUID, key string, r
 	reserved = true
 	executionResult, err := s.executions.Start(ctx, executions.StartRequest{ExecutionID: result.Execution.ID, ProjectID: projectID, Spec: containers.Spec{
 		Ownership: ownership, Image: image.Reference, User: prepared.User,
-		Command: prepared.Command, Env: binding.environment(prepared.Env), Files: binding.files, Port: prepared.Port,
+		Command: prepared.Command, Env: s3.environment(binding.environment(prepared.Env)), Files: append(binding.files, s3.files...), Port: prepared.Port,
 		Access: containers.AccessPublished, DataVolume: dataVolume,
 		Limits: containers.Limits{CPUMillis: prepared.CPUMillis, MemoryBytes: prepared.MemoryBytes, PIDs: containerPIDs, OpenFiles: containerOpenFiles},
 	}})
@@ -748,6 +762,10 @@ func (s *Service) Restart(ctx context.Context, projectID, containerID uuid.UUID,
 	if err != nil {
 		return result, err
 	}
+	s3, err := s.resolveS3Binding(ctx, projectID, execution.S3BindingName, execution.S3SecretVersionID)
+	if err != nil {
+		return result, err
+	}
 	if result.Operation.Phase == operations.Received {
 		if err = s.advance(ctx, &result, operations.Progress{Phase: operations.Preparing, Outcome: operations.InProgress}); err != nil {
 			return result, err
@@ -761,6 +779,7 @@ func (s *Service) Restart(ctx context.Context, projectID, containerID uuid.UUID,
 		PIDs: execution.PIDs, OpenFiles: execution.OpenFiles, UserName: execution.UserName,
 		Command: append([]string(nil), execution.Command...), Env: append([]string(nil), execution.Env...),
 		PostgresBindingName: binding.name, PostgresSecretVersionID: binding.secretVersionID,
+		S3BindingName: s3.name, S3SecretVersionID: s3.secretVersionID,
 		HealthPath: execution.HealthPath, HealthTimeoutMS: execution.HealthTimeoutMS,
 		VolumeName: execution.VolumeName, VolumeMountPath: execution.VolumeMountPath, VolumeDirectory: execution.VolumeDirectory,
 	}
@@ -834,7 +853,7 @@ func (s *Service) Restart(ctx context.Context, projectID, containerID uuid.UUID,
 	reserved = true
 	executionResult, err := s.executions.Start(ctx, executions.StartRequest{ExecutionID: result.Execution.ID, ProjectID: projectID, Spec: containers.Spec{
 		Ownership: ownership, Image: image.Reference, User: execution.UserName,
-		Command: execution.Command, Env: binding.environment(execution.Env), Files: binding.files, Port: execution.Port,
+		Command: execution.Command, Env: s3.environment(binding.environment(execution.Env)), Files: append(binding.files, s3.files...), Port: execution.Port,
 		Access: containers.AccessPublished, DataVolume: dataVolume,
 		Limits: containers.Limits{CPUMillis: execution.CPUMillis, MemoryBytes: execution.MemoryBytes, PIDs: execution.PIDs, OpenFiles: execution.OpenFiles},
 	}})

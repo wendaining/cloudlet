@@ -743,7 +743,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用，引用 PostgreSQL 绑定时仅所有者可以调用。同一幂等键复用操作。 */
+        /** @description 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用，引用 PostgreSQL 或 S3 绑定时仅所有者可以调用。同一幂等键复用操作。 */
         post: operations["createContainer"];
         delete?: never;
         options?: never;
@@ -1273,6 +1273,8 @@ export interface components {
             command?: string[];
             /** @description KEY=value 形式的环境变量。请求体总大小最多 64 KiB。 */
             env?: string[];
+            /** @description 项目内已授权的 S3 绑定名称。凭据必须由存储服务限制到该绑定的桶。 */
+            s3_binding?: string;
             /** @description 项目内已授权的 PostgreSQL 绑定名称。 */
             postgres_binding?: string;
             /**
@@ -1325,6 +1327,7 @@ export interface components {
             user: string;
             command?: string[];
             env?: string[];
+            s3_binding?: components["schemas"]["ContainerS3Binding"];
             postgres_binding?: components["schemas"]["ContainerPostgresBinding"];
             health_check_path: string;
             /** Format: int64 */
@@ -1343,6 +1346,11 @@ export interface components {
             data_volume?: components["schemas"]["ContainerDataVolume"];
             /** Format: date-time */
             created_at: string;
+        };
+        ContainerS3Binding: {
+            name: string;
+            /** Format: uuid */
+            secret_version_id: string;
         };
         ContainerPostgresBinding: {
             name: string;
