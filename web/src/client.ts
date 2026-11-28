@@ -140,6 +140,20 @@ export class BrowserNavigationError extends Error {
   }
 }
 
+export async function getBrowserSession(projectID: string, sessionID: string) {
+  const { data, error, response } = await client.GET(
+    '/api/v1/projects/{projectID}/browser-sessions/{sessionID}',
+    { params: { path: { projectID, sessionID } } },
+  );
+  if (!data) {
+    throw new BrowserNavigationError(
+      response.status,
+      error?.message ?? '获取浏览器会话失败，状态码 ' + response.status,
+    );
+  }
+  return data;
+}
+
 export async function createBrowserSession(projectID: string) {
   const { data, error, response } = await client.POST(
     '/api/v1/projects/{projectID}/browser-sessions',
