@@ -6,10 +6,8 @@ const projectName = `E2E 项目 ${process.pid}-${Date.now()}`;
 const memberEmail = `member-${process.pid}-${Date.now()}@cloudlet.local`;
 const memberPassword = 'member-integration-password';
 
-test(
-  '所有者管理项目成员且非所有者只读',
-  { timeout: 120_000 },
-  async ({ page, browser }, info) => {
+test('所有者管理项目成员且非所有者只读', async ({ page, browser }, info) => {
+  test.setTimeout(120_000);
     const config = await loadConfig();
     const pageErrors = [];
     page.on('pageerror', (error) => pageErrors.push(error.message));
