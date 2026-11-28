@@ -21,6 +21,7 @@ import {
 import projectsRules, { isProjectOwner } from './Projects.rules';
 import { ProjectMembers } from './ProjectMembers';
 import styles from './app.module.css';
+import { BrowserSession } from './BrowserSession';
 import { OperationList } from './OperationList';
 import { StaticSiteList } from './StaticSiteList';
 
@@ -216,6 +217,13 @@ export function ProjectDetail() {
           />
         ) : null}
       </Card>
+      {account.data ? (
+        <BrowserSession
+          key={account.data.user.id + ':' + projectID}
+          accountID={account.data.user.id}
+          projectID={projectID}
+        />
+      ) : null}
       <StaticSiteList
         projectID={query.data.id}
         accountID={account.data?.user.id}

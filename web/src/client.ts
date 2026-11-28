@@ -145,6 +145,60 @@ export async function upsertProjectMember(
   return data;
 }
 
+export type BrowserNavigation = components['schemas']['BrowserNavigation'];
+
+export class BrowserNavigationError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+export async function getBrowserSession(projectID: string, sessionID: string) {
+  const { data, error, response } = await client.GET(
+    '/api/v1/projects/{projectID}/browser-sessions/{sessionID}',
+    { params: { path: { projectID, sessionID } } },
+  );
+  if (!data) {
+    throw new BrowserNavigationError(
+      response.status,
+      error?.message ?? '获取浏览器会话失败，状态码 ' + response.status,
+    );
+  }
+  return data;
+}
+
+export async function createBrowserSession(projectID: string) {
+  const { data, error, response } = await client.POST(
+    '/api/v1/projects/{projectID}/browser-sessions',
+    { params: { path: { projectID } } },
+  );
+  const status = response.status;
+  if (error) throw new Error(error.message);
+  if (!data) throw new Error('创建浏览器会话失败，状态码 ' + status);
+  return data;
+}
+
+export async function navigateBrowserSession(
+  projectID: string,
+  sessionID: string,
+  url: string,
+) {
+  const { data, error, response } = await client.POST(
+    '/api/v1/projects/{projectID}/browser-sessions/{sessionID}/navigate',
+    { params: { path: { projectID, sessionID } }, body: { url } },
+  );
+  if (!data) {
+    throw new BrowserNavigationError(
+      response.status,
+      error?.message ?? '浏览器导航失败，状态码 ' + response.status,
+    );
+  }
+  return data;
+}
+
 export async function projectSites(id: string, cursor?: string) {
   const { data, error, response } = await client.GET(
     '/api/v1/projects/{projectID}/sites',
