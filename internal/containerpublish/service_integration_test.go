@@ -20,6 +20,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	cerrdefs "github.com/containerd/errdefs"
 	"github.com/google/uuid"
 	"github.com/moby/moby/client"
@@ -37,14 +39,18 @@ import (
 )
 
 func TestContainerPublicationHTTP(t *testing.T) {
-	testContainerPublicationHTTP(t, false)
+	testContainerPublicationHTTP(t, "")
 }
 
 func TestContainerPostgresBindingHTTP(t *testing.T) {
-	testContainerPublicationHTTP(t, true)
+	testContainerPublicationHTTP(t, "postgres")
 }
 
-func testContainerPublicationHTTP(t *testing.T, postgresBinding bool) {
+func TestContainerS3BindingHTTP(t *testing.T) {
+	testContainerPublicationHTTP(t, "s3")
+}
+
+func testContainerPublicationHTTP(t *testing.T, bindingKind string) {
 	ctx, cancel := context.WithTimeout(t.Context(), 8*time.Minute)
 	defer cancel()
 
@@ -276,7 +282,93 @@ func testContainerPublicationHTTP(t *testing.T, postgresBinding bool) {
 	}
 
 	path := collectionPath(project.ID)
-	if postgresBinding {
+	if bindingKind == "s3" {
+		endpoint, ca, admin := integrationS3(t, ctx)
+		appURL := serveS3TestApp(t, ctx, images.ContainerHTTP)
+		secret, err := json.Marshal(map[string]string{"access_key_id": s3AccessKey, "secret_access_key": s3SecretKey})
+		if err != nil {
+			t.Fatal(err)
+		}
+		seed := func(projectID, name string) uuid.UUID {
+			t.Helper()
+			version, err := store.CreateProjectSecretVersion(ctx, projectID, "APP_S3", string(secret), make([]byte, 32))
+			if err != nil {
+				t.Fatal(err)
+			}
+			id := uuid.MustParse(version.ID)
+			created, err := store.CreateS3Binding(ctx, database.S3Binding{
+				ProjectID: projectID, Name: name, Endpoint: endpoint, Region: "us-east-1",
+				Bucket: s3AllowedBucket, SecretVersionID: id, VerifiedAt: time.Now(),
+			})
+			if err != nil || !created {
+				t.Fatalf("seed S3 binding: created=%t error=%v", created, err)
+			}
+			return id
+		}
+		name := "assets"
+		versionID := seed(project.ID, name)
+		foreign, err := store.CreateProject(ctx, outsiderUser.ID, "Foreign S3 binding")
+		if err != nil {
+			t.Fatal(err)
+		}
+		foreignName := "foreign-assets"
+		seed(foreign.ID, foreignName)
+		app := containerpublish.Request{
+			Name: "s3-app", Image: images.ContainerHTTP, Port: 8080, Hostname: "s3-app.localhost",
+			User: "101:101", CPUMillis: 500, MemoryBytes: 128 << 20, S3Binding: &name,
+			Command: []string{"/bin/sh", "-ec", `wget -q -O /tmp/s3app "$FIXTURE_BINARY"; chmod 700 /tmp/s3app; exec /tmp/s3app`},
+			Env:     []string{"FIXTURE_BINARY=" + appURL, "FIXTURE_CA=" + ca, "FIXTURE_DENIED_BUCKET=" + s3DeniedBucket},
+		}
+		unauthorized := app
+		unauthorized.S3Binding = &foreignName
+		request(owner, http.MethodPost, path, "unknown-s3-binding", unauthorized, http.StatusNotFound)
+		request(developer, http.MethodPost, path, "developer-s3-binding", app, http.StatusForbidden)
+		_, data := request(owner, http.MethodPost, path, "create-s3-app", app, http.StatusCreated)
+		bound := decode(data)
+		assertSource := func(body []byte) {
+			t.Helper()
+			value := decode(body)
+			if value.S3Binding == nil || value.S3Binding.Name != name || value.S3Binding.SecretVersionId != versionID {
+				t.Fatal("container lost S3 binding source metadata")
+			}
+			if bytes.Contains(body, []byte(s3AccessKey)) || bytes.Contains(body, []byte(s3SecretKey)) {
+				t.Fatal("container management response leaked an S3 key")
+			}
+		}
+		assertSource(data)
+		_, data = request(viewer, http.MethodGet, itemPath(project.ID, bound.Id), "", nil, http.StatusOK)
+		assertSource(data)
+		var env string
+		if err := store.SQL.QueryRowContext(ctx, "SELECT env FROM container_executions WHERE id = $1", bound.ExecutionId).Scan(&env); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(env, s3AccessKey) || strings.Contains(env, s3SecretKey) {
+			t.Fatal("stored execution environment contains an S3 key")
+		}
+		inspected, err := docker.ContainerInspect(ctx, bound.DockerContainerId, client.ContainerInspectOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		runtimeEnv := strings.Join(inspected.Container.Config.Env, "\n")
+		if !slices.Contains(inspected.Container.Config.Env, "CLOUDLET_S3_CONFIG_FILE=/cloudlet-s3-config.json") ||
+			strings.Contains(runtimeEnv, s3AccessKey) || strings.Contains(runtimeEnv, s3SecretKey) {
+			t.Fatal("Docker environment did not keep credentials in the mounted file")
+		}
+		listed, err := admin.ListObjectsV2(ctx, &s3.ListObjectsV2Input{Bucket: aws.String(s3AllowedBucket)})
+		if err != nil || len(listed.Contents) != 1 || aws.ToString(listed.Contents[0].Key) != "uploaded-picture" {
+			t.Fatalf("authorized object was not stored: %v", err)
+		}
+		listed, err = admin.ListObjectsV2(ctx, &s3.ListObjectsV2Input{Bucket: aws.String(s3DeniedBucket)})
+		if err != nil || len(listed.Contents) != 0 {
+			t.Fatalf("foreign bucket contains unexpected objects: %v", err)
+		}
+		request(owner, http.MethodPost, itemPath(project.ID, bound.Id)+"/stop", "stop-s3", nil, http.StatusOK)
+		_, data = request(owner, http.MethodPost, itemPath(project.ID, bound.Id)+"/restart", "restart-s3", nil, http.StatusOK)
+		assertSource(data)
+		request(owner, http.MethodDelete, itemPath(project.ID, bound.Id), "delete-s3", nil, http.StatusNoContent)
+		return
+	}
+	if bindingKind == "postgres" {
 		business, businessHost, ca := businessPostgres(t, ctx, images.Postgres)
 		secretKey := make([]byte, 32)
 		credentials, err := json.Marshal(map[string]string{"username": businessUser, "password": businessPassword})

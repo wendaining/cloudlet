@@ -743,7 +743,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** @description 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用，引用 PostgreSQL 绑定时仅所有者可以调用。同一幂等键复用操作。 */
+        /** @description 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用，引用 PostgreSQL 或 S3 绑定时仅所有者可以调用。同一幂等键复用操作。 */
         post: operations["createContainer"];
         delete?: never;
         options?: never;
@@ -1273,6 +1273,8 @@ export interface components {
             command?: string[];
             /** @description KEY=value 形式的环境变量。请求体总大小最多 64 KiB。 */
             env?: string[];
+            /** @description 项目内已授权的 S3 绑定名称。凭据必须由存储服务限制到该绑定的桶。 */
+            s3_binding?: string;
             /** @description 项目内已授权的 PostgreSQL 绑定名称。 */
             postgres_binding?: string;
             /**
@@ -1325,6 +1327,7 @@ export interface components {
             user: string;
             command?: string[];
             env?: string[];
+            s3_binding?: components["schemas"]["ContainerS3Binding"];
             postgres_binding?: components["schemas"]["ContainerPostgresBinding"];
             health_check_path: string;
             /** Format: int64 */
@@ -1344,6 +1347,11 @@ export interface components {
             /** Format: date-time */
             created_at: string;
         };
+        ContainerS3Binding: {
+            name: string;
+            /** Format: uuid */
+            secret_version_id: string;
+        };
         ContainerPostgresBinding: {
             name: string;
             /** Format: uuid */
@@ -1359,6 +1367,10 @@ export interface components {
             compatibility_date: string;
             /** @description 无端口的公开域名。 */
             hostname: string;
+            /** @description 普通文本绑定。名称最多 128 个 ASCII 字符，值可为空，最多 4096 个 UTF-8 字节。所有值合计最多 65536 个字节。 */
+            environment?: {
+                [key: string]: string;
+            };
             /** @description 显式声明的 workerd 兼容标志，由部署采用的固定版本验证。 */
             compatibility_flags?: string[];
             /** @description SQLite Durable Object 类及其环境绑定，命名空间由项目和 Worker 自动分配。 */

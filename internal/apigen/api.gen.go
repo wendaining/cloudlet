@@ -314,6 +314,7 @@ type Container struct {
 	Port                 int                       `json:"port"`
 	PostgresBinding      *ContainerPostgresBinding `json:"postgres_binding,omitempty"`
 	ProjectId            openapi_types.UUID        `json:"project_id"`
+	S3Binding            *ContainerS3Binding       `json:"s3_binding,omitempty"`
 
 	// State 容器目标状态，取值为 pending、active、stopped 或 failed。
 	State  string `json:"state"`
@@ -330,6 +331,12 @@ type ContainerDataVolume struct {
 
 // ContainerPostgresBinding defines model for ContainerPostgresBinding.
 type ContainerPostgresBinding struct {
+	Name            string             `json:"name"`
+	SecretVersionId openapi_types.UUID `json:"secret_version_id"`
+}
+
+// ContainerS3Binding defines model for ContainerS3Binding.
+type ContainerS3Binding struct {
 	Name            string             `json:"name"`
 	SecretVersionId openapi_types.UUID `json:"secret_version_id"`
 }
@@ -370,6 +377,9 @@ type CreateContainerRequest struct {
 	// PostgresBinding 项目内已授权的 PostgreSQL 绑定名称。
 	PostgresBinding *string `json:"postgres_binding,omitempty"`
 
+	// S3Binding 项目内已授权的 S3 绑定名称。凭据必须由存储服务限制到该绑定的桶。
+	S3Binding *string `json:"s3_binding,omitempty"`
+
 	// User 非 root 运行身份，格式为 user 或 user:group。省略时使用 1000:1000。
 	User *string `json:"user,omitempty"`
 }
@@ -407,6 +417,9 @@ type DeployWorkerRequest struct {
 
 	// DurableObjects SQLite Durable Object 类及其环境绑定，命名空间由项目和 Worker 自动分配。
 	DurableObjects *[]WorkerDurableObjectBinding `json:"durable_objects,omitempty"`
+
+	// Environment 普通文本绑定。名称最多 128 个 ASCII 字符，值可为空，最多 4096 个 UTF-8 字节。所有值合计最多 65536 个字节。
+	Environment *map[string]string `json:"environment,omitempty"`
 
 	// Hostname 无端口的公开域名。
 	Hostname string `json:"hostname"`
@@ -1093,13 +1106,13 @@ type ClientInterface interface {
 	// CreateContainerWithBody performs a POST /api/v1/projects/{projectID}/containers (the `CreateContainer` operationId) request,
 	// with any type of body and a specified content type.
 	//
-	// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用，引用 PostgreSQL 绑定时仅所有者可以调用。同一幂等键复用操作。.
+	// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用，引用 PostgreSQL 或 S3 绑定时仅所有者可以调用。同一幂等键复用操作。.
 	CreateContainerWithBody(ctx context.Context, projectID string, params *CreateContainerParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// CreateContainer performs a POST /api/v1/projects/{projectID}/containers (the `CreateContainer` operationId) request.
 	// Takes a body of the `application/json` content type.
 	//
-	// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用，引用 PostgreSQL 绑定时仅所有者可以调用。同一幂等键复用操作。.
+	// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用，引用 PostgreSQL 或 S3 绑定时仅所有者可以调用。同一幂等键复用操作。.
 	CreateContainer(ctx context.Context, projectID string, params *CreateContainerParams, body CreateContainerJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// DeleteContainer performs a DELETE /api/v1/projects/{projectID}/containers/{containerID} (the `DeleteContainer` operationId) request.
@@ -1826,7 +1839,7 @@ func (c *Client) UpdateProjectCapacity(ctx context.Context, projectID string, bo
 // CreateContainerWithBody performs a POST /api/v1/projects/{projectID}/containers (the `CreateContainer` operationId) request,
 // with any type of body and a specified content type.
 //
-// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用，引用 PostgreSQL 绑定时仅所有者可以调用。同一幂等键复用操作。.
+// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用，引用 PostgreSQL 或 S3 绑定时仅所有者可以调用。同一幂等键复用操作。.
 func (c *Client) CreateContainerWithBody(ctx context.Context, projectID string, params *CreateContainerParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewCreateContainerRequestWithBody(c.Server, projectID, params, contentType, body)
 	if err != nil {
@@ -1842,7 +1855,7 @@ func (c *Client) CreateContainerWithBody(ctx context.Context, projectID string, 
 // CreateContainer performs a POST /api/v1/projects/{projectID}/containers (the `CreateContainer` operationId) request.
 // Takes a body of the `application/json` content type.
 //
-// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用，引用 PostgreSQL 绑定时仅所有者可以调用。同一幂等键复用操作。.
+// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用，引用 PostgreSQL 或 S3 绑定时仅所有者可以调用。同一幂等键复用操作。.
 func (c *Client) CreateContainer(ctx context.Context, projectID string, params *CreateContainerParams, body CreateContainerJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewCreateContainerRequest(c.Server, projectID, params, body)
 	if err != nil {
@@ -5317,7 +5330,7 @@ type ClientWithResponsesInterface interface {
 	// CreateContainerWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/containers (the `CreateContainer` operationId) request,
 	// with any type of body and a specified content type.
 	//
-	// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用，引用 PostgreSQL 绑定时仅所有者可以调用。同一幂等键复用操作。.
+	// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用，引用 PostgreSQL 或 S3 绑定时仅所有者可以调用。同一幂等键复用操作。.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	CreateContainerWithBodyWithResponse(ctx context.Context, projectID string, params *CreateContainerParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateContainerResponse, error)
@@ -5325,7 +5338,7 @@ type ClientWithResponsesInterface interface {
 	// CreateContainerWithResponse performs a POST /api/v1/projects/{projectID}/containers (the `CreateContainer` operationId) request.
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
-	// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用，引用 PostgreSQL 绑定时仅所有者可以调用。同一幂等键复用操作。.
+	// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用，引用 PostgreSQL 或 S3 绑定时仅所有者可以调用。同一幂等键复用操作。.
 	CreateContainerWithResponse(ctx context.Context, projectID string, params *CreateContainerParams, body CreateContainerJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateContainerResponse, error)
 
 	// DeleteContainerWithResponse performs a DELETE /api/v1/projects/{projectID}/containers/{containerID} (the `DeleteContainer` operationId) request.
@@ -9891,7 +9904,7 @@ func (c *ClientWithResponses) UpdateProjectCapacityWithResponse(ctx context.Cont
 // CreateContainerWithBodyWithResponse performs a POST /api/v1/projects/{projectID}/containers (the `CreateContainer` operationId) request,
 // with any type of body and a specified content type.
 //
-// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用，引用 PostgreSQL 绑定时仅所有者可以调用。同一幂等键复用操作。.
+// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用，引用 PostgreSQL 或 S3 绑定时仅所有者可以调用。同一幂等键复用操作。.
 //
 // Returns a wrapper object for the known response body format(s).
 func (c *ClientWithResponses) CreateContainerWithBodyWithResponse(ctx context.Context, projectID string, params *CreateContainerParams, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateContainerResponse, error) {
@@ -9905,7 +9918,7 @@ func (c *ClientWithResponses) CreateContainerWithBodyWithResponse(ctx context.Co
 // CreateContainerWithResponse performs a POST /api/v1/projects/{projectID}/containers (the `CreateContainer` operationId) request.
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
-// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用，引用 PostgreSQL 绑定时仅所有者可以调用。同一幂等键复用操作。.
+// 从不可变镜像摘要创建首个容器执行，等待真实 HTTP 就绪并激活项目域名。所有者和开发者可以调用，引用 PostgreSQL 或 S3 绑定时仅所有者可以调用。同一幂等键复用操作。.
 func (c *ClientWithResponses) CreateContainerWithResponse(ctx context.Context, projectID string, params *CreateContainerParams, body CreateContainerJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateContainerResponse, error) {
 	rsp, err := c.CreateContainer(ctx, projectID, params, body, reqEditors...)
 	if err != nil {
