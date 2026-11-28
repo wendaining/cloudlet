@@ -84,6 +84,15 @@
   height: 100px;
 }
 
+.renameForm {
+  margin-top: 16px;
+  max-width: 420px;
+}
+
+.renameActions {
+  margin-top: 16px;
+}
+
 .operationFilters {
   display: flex;
   flex-wrap: wrap;

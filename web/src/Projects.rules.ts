@@ -1,4 +1,17 @@
 import type { FormRule } from 'antd';
+import type { ProjectMember } from './client';
+
+export function isProjectOwner(
+  members?: readonly ProjectMember[],
+  accountID?: string,
+): boolean {
+  return Boolean(
+    accountID &&
+    members?.some(
+      (member) => member.user_id === accountID && member.role === 'owner',
+    ),
+  );
+}
 
 export async function validateProjectName(
   _rule: unknown,
