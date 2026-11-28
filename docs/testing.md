@@ -8,7 +8,7 @@
 | npm run lint:config | JSON、YAML、Issue 表单与 Actions 约定 |
 | npm run lint:tooling | 脚本语法、ShellCheck、配置文件与真实端口检查 |
 | make test | Go race 测试、真实 HTTP、Gateway 转发与服务停止 |
-| make test-integration | Docker 中的 PostgreSQL 迁移、账号、会话、项目与成员角色、操作记录、项目凭据、路由快照、容量预留、容器容量准入、项目容量查询与额度调整、就绪检查、workerd 执行、管理 API 容器创建、Gateway 访问、停止/再次启动/删除与可写数据卷持久化，以及容器启动、观测、HTTP 就绪探测、配额触发、停止与删除 |
+| make test-integration | Docker 中的 PostgreSQL 迁移、账号、会话、项目与成员角色、操作记录、项目凭据、路由快照、容量预留、容器容量准入、项目容量查询与额度调整、就绪检查、workerd 执行、管理 API 容器创建、Gateway 访问、停止/再次启动/删除、控制器重启接管与可写数据卷持久化，以及容器启动、观测、HTTP 就绪探测、配额触发、停止与删除 |
 | make web-check | TypeScript、ESLint、Prettier、Vite 构建与接口生成一致性 |
 | make dev-check | 真实本机进程、数据库、热重载、完整停止、多实例与失败清理 |
 | make test-e2e | 真实 Chromium 在桌面和手机尺寸下完成登录、刷新和退出 |
@@ -85,6 +85,18 @@ go test -race -count=1 -tags=integration -run TestContainerPublicationHTTP -v ./
 数据卷用例核对 Docker volume 的平台生成名称、环境/项目/资源/卷类型归属标签；以另一项目归属调用卷校验返回 `ErrNotOwned`，确认其他容器不能取得同一可写卷；数据库集成测试验证第二个运行中的执行不能绑定同一卷。创建失败和容量不足时清理本次新建卷；停止保留卷，再次启动读取原数据。
 
 测试结束后清理所属容器。镜像缓存继续复用。
+
+## 容器重启接管验收
+
+使用真实 PostgreSQL、Docker 与 Gateway 验证管理控制器重启后接管原容器。
+
+```sh
+export DOCKER_HOST="$(docker context inspect --format '{{.Endpoints.docker.Host}}')"
+export TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock
+go test -race -count=1 -tags=integration -run TestContainerTakeoverAfterControllerRestart -v ./internal/containerpublish
+```
+
+用例创建普通容器和绑定 PostgreSQL 的容器，记录 Docker 容器标识、执行标识、卷中数据和公开响应。关闭控制器并用新的 Gateway 重新启动后，核对两个容器均被接管：Docker 容器标识与启动时间、执行标识和容量占用不变，Docker 中每个资源只有一个容器，公开域名继续返回原内容，卷中数据仍可读取。用例先删除已记录的路由，再在容器停止期间改错执行目标和路由目标，确认接管从 Docker 实际发布的回环端点恢复路由与目标。使用另一个实例启动控制器，确认不会接管或修改本实例的容器。外部停止容器后重启控制器，确认平台启动同一容器并恢复路由；删除 Docker 容器后重启控制器，确认不创建副本、公开域名返回 404、容量释放、容器记录为 `failed` 且数据卷保留，随后再次启动可以从原卷创建新执行。
 
 ## 项目容量查询验收
 
