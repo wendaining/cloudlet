@@ -59,6 +59,16 @@
   padding: 48px 24px;
 }
 
+.section {
+  margin-top: 24px;
+}
+
+.loadMore {
+  margin-top: 16px;
+  display: flex;
+  justify-content: center;
+}
+
 .members {
   margin-top: 24px;
 }
