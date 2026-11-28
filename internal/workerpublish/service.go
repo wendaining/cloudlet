@@ -48,6 +48,7 @@ type Request struct {
 	CompatibilityDate  string                 `json:"compatibility_date"`
 	Hostname           string                 `json:"hostname"`
 	CompatibilityFlags []string               `json:"compatibility_flags,omitempty"`
+	Environment        map[string]string      `json:"environment,omitempty"`
 	Stage              bool                   `json:"stage,omitempty"`
 	DurableObjects     []DurableObjectBinding `json:"durable_objects,omitempty"`
 }
@@ -87,7 +88,7 @@ func ValidateRequest(name, key string, request Request) (workers.RuntimeConfig, 
 	if err := config.ValidateRoutes([]config.Route{{Host: request.Hostname, Target: "http://127.0.0.1:8080"}}); err != nil {
 		return workers.RuntimeConfig{}, fmt.Errorf("validate Worker hostname: %w: %w", fs.ErrInvalid, err)
 	}
-	prepared, err := workers.PrepareModuleWithFlags([]byte(request.Module), request.CompatibilityDate, request.CompatibilityFlags)
+	prepared, err := workers.PrepareModuleWithFlagsAndEnvironment([]byte(request.Module), request.CompatibilityDate, request.CompatibilityFlags, request.Environment)
 	if err != nil {
 		return prepared, fmt.Errorf("validate Worker module: %w: %w", fs.ErrInvalid, err)
 	}
@@ -275,7 +276,7 @@ func (s *Service) Deploy(ctx context.Context, projectID uuid.UUID, name, key str
 		return result, false, err
 	}
 	if len(namespaces) > 0 {
-		prepared, err = workers.PrepareDurableModuleWithFlags(prepared.Module, prepared.CompatibilityDate, namespaces, prepared.CompatibilityFlags)
+		prepared, err = workers.PrepareDurableModuleWithFlagsAndEnvironment(prepared.Module, prepared.CompatibilityDate, namespaces, prepared.CompatibilityFlags, request.Environment)
 		if err != nil {
 			return result, false, fmt.Errorf("validate Durable Object bindings: %w: %w", fs.ErrInvalid, err)
 		}
@@ -361,6 +362,13 @@ func (s *Service) Deploy(ctx context.Context, projectID uuid.UUID, name, key str
 	if err != nil {
 		return result, true, err
 	}
+	files := []containers.File{{Path: "worker/config.capnp", Data: prepared.Config}, {Path: "worker/worker.mjs", Data: prepared.Module}}
+	for _, binding := range prepared.Environment {
+		if _, err := s.artifacts.Put(strings.NewReader(binding.Value)); err != nil {
+			return result, true, fmt.Errorf("save Worker environment value %q: %w", binding.Name, err)
+		}
+		files = append(files, containers.File{Path: "worker/" + binding.FilePath(), Data: []byte(binding.Value)})
+	}
 	configDigest, err := s.artifacts.Put(bytes.NewReader(prepared.Config))
 	if err != nil {
 		return result, true, err
@@ -404,7 +412,7 @@ func (s *Service) Deploy(ctx context.Context, projectID uuid.UUID, name, key str
 	execution, err := s.executions.Start(ctx, executions.StartRequest{ExecutionID: result.Execution.ID, ProjectID: projectID, Spec: containers.Spec{
 		Ownership: ownership, Image: s.image, User: "1000:1000", Port: workers.HTTPPort, Access: containers.AccessPublished, Command: workers.ServeArgs(),
 		Limits:     containers.Limits{CPUMillis: 1000, MemoryBytes: 256 << 20, PIDs: 128, OpenFiles: 1024},
-		Files:      []containers.File{{Path: "worker/config.capnp", Data: prepared.Config}, {Path: "worker/worker.mjs", Data: prepared.Module}},
+		Files:      files,
 		DataVolume: dataVolume,
 	}})
 	result.Execution.ContainerID = execution.Container.ID

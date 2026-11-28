@@ -51,8 +51,8 @@ func (h *handler) CreateContainer(c *gin.Context, projectID string, params apige
 		c.JSON(http.StatusBadRequest, apigen.Error{Message: "容器创建请求需要单个 JSON 对象"})
 		return
 	}
-	if request.PostgresBinding != nil && membership.Role != "owner" {
-		c.JSON(http.StatusForbidden, apigen.Error{Message: "只有项目所有者可以授权容器使用 PostgreSQL 绑定"})
+	if (request.PostgresBinding != nil || request.S3Binding != nil) && membership.Role != "owner" {
+		c.JSON(http.StatusForbidden, apigen.Error{Message: "只有项目所有者可以授权容器使用外部服务绑定"})
 		return
 	}
 	result, created, err := h.containers.Create(c.Request.Context(), uuid.MustParse(normalizedID), params.IdempotencyKey, request)
@@ -65,7 +65,11 @@ func (h *handler) CreateContainer(c *gin.Context, projectID string, params apige
 			c.JSON(http.StatusNotFound, apigen.Error{Message: "项目 PostgreSQL 绑定不存在"})
 		case errors.Is(err, containerpublish.ErrPostgresBindingUnavailable):
 			c.JSON(http.StatusConflict, apigen.Error{Message: "项目 PostgreSQL 绑定凭据不可用于容器"})
-		case errors.Is(err, containerpublish.ErrPostgresSecretKeyUnavailable):
+		case errors.Is(err, containerpublish.ErrS3BindingNotFound):
+			c.JSON(http.StatusNotFound, apigen.Error{Message: "项目 S3 绑定不存在"})
+		case errors.Is(err, containerpublish.ErrS3BindingUnavailable):
+			c.JSON(http.StatusConflict, apigen.Error{Message: "项目 S3 绑定凭据不可用于容器"})
+		case errors.Is(err, containerpublish.ErrBindingSecretKeyUnavailable):
 			c.JSON(http.StatusServiceUnavailable, apigen.Error{Message: "容器的项目凭据存储未配置"})
 		case errors.Is(err, fs.ErrInvalid):
 			c.JSON(http.StatusBadRequest, apigen.Error{Message: err.Error()})
@@ -160,6 +164,11 @@ func containerResponse(result containerpublish.Result) apigen.Container {
 	if execution.PostgresBindingName != nil && execution.PostgresSecretVersionID != nil {
 		response.PostgresBinding = &apigen.ContainerPostgresBinding{
 			Name: *execution.PostgresBindingName, SecretVersionId: *execution.PostgresSecretVersionID,
+		}
+	}
+	if execution.S3BindingName != nil && execution.S3SecretVersionID != nil {
+		response.S3Binding = &apigen.ContainerS3Binding{
+			Name: *execution.S3BindingName, SecretVersionId: *execution.S3SecretVersionID,
 		}
 	}
 	if len(execution.Command) > 0 {
@@ -263,7 +272,9 @@ func (h *handler) containerLifecycleFailure(c *gin.Context, projectID string, re
 	switch {
 	case errors.Is(err, containerpublish.ErrPostgresBindingNotFound), errors.Is(err, containerpublish.ErrPostgresBindingUnavailable):
 		c.JSON(http.StatusConflict, apigen.Error{Message: "容器的 PostgreSQL 绑定或凭据不可用"})
-	case errors.Is(err, containerpublish.ErrPostgresSecretKeyUnavailable):
+	case errors.Is(err, containerpublish.ErrS3BindingNotFound), errors.Is(err, containerpublish.ErrS3BindingUnavailable):
+		c.JSON(http.StatusConflict, apigen.Error{Message: "容器的 S3 绑定或凭据不可用"})
+	case errors.Is(err, containerpublish.ErrBindingSecretKeyUnavailable):
 		c.JSON(http.StatusServiceUnavailable, apigen.Error{Message: "容器的项目凭据存储未配置"})
 	case errors.Is(err, fs.ErrInvalid):
 		c.JSON(http.StatusBadRequest, apigen.Error{Message: err.Error()})

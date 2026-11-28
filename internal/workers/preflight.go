@@ -83,16 +83,20 @@ func Preflight(ctx context.Context, docker *client.Client, prepared RuntimeConfi
 	if err != nil {
 		return PreflightResult{}, fmt.Errorf("preflight Worker %q: %w", prepared.Entry, err)
 	}
-	config := preflightConfig(prepared.CompatibilityDate, flags)
+	config := preflightConfig(prepared.CompatibilityDate, flags, prepared.Environment)
 	classes, err := json.Marshal(prepared.DurableClasses)
 	if err != nil {
 		return PreflightResult{}, fmt.Errorf("preflight Worker %q: encode Durable Object classes: %w", prepared.Entry, err)
 	}
-	archive, err := preflightArchive(map[string][]byte{
+	files := map[string][]byte{
 		"config.capnp": config,
 		"wrapper.mjs":  fmt.Appendf(nil, preflightWrapper, classes),
 		"user.mjs":     prepared.Module,
-	})
+	}
+	for _, binding := range prepared.Environment {
+		files[binding.FilePath()] = []byte(binding.Value)
+	}
+	archive, err := preflightArchive(files)
 	if err != nil {
 		return PreflightResult{}, fmt.Errorf("preflight Worker %q: build container archive: %w", prepared.Entry, err)
 	}
@@ -254,8 +258,9 @@ func (c *preflightLogCapture) diagnostics() string {
 	return string(c.tail)
 }
 
-func preflightConfig(compatibilityDate string, flags []string) []byte {
-	return fmt.Appendf(nil, preflightConfigTemplate, compatibilityDate, renderCompatibilityFlags(flags))
+func preflightConfig(compatibilityDate string, flags []string, environment []EnvironmentBinding) []byte {
+	extra := string(renderCompatibilityFlags(flags)) + string(renderBindings(appendEnvironmentBindingEntries(nil, environment)))
+	return fmt.Appendf(nil, preflightConfigTemplate, compatibilityDate, extra)
 }
 
 func preflightArchive(files map[string][]byte) ([]byte, error) {

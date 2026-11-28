@@ -1,12 +1,31 @@
-import { Alert, Button, Card, Form, Input, Select, Table, Tag } from 'antd';
+import { useState } from 'react';
+import {
+  Alert,
+  Button,
+  Card,
+  Form,
+  Input,
+  Modal,
+  Select,
+  Table,
+  Tag,
+  Typography,
+} from 'antd';
 import type { TableProps } from 'antd';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   projectMembers,
+  removeProjectMember,
   upsertProjectMember,
   type ProjectMember,
   type ProjectMemberRole,
 } from './client';
+import {
+  canManageProjectMembers,
+  canRemoveProjectMember,
+  currentMemberRole,
+  memberPermissionDescription,
+} from './ProjectMembers.rules';
 import styles from './app.module.css';
 
 type MemberFormValues = {
@@ -17,6 +36,11 @@ type MemberFormValues = {
 type SaveVariables = {
   accountID: string;
   values: MemberFormValues;
+};
+
+type RemoveVariables = {
+  accountID: string;
+  member: ProjectMember;
 };
 
 const roleLabels: Record<ProjectMember['role'], string> = {
@@ -33,6 +57,9 @@ export function ProjectMembers({
   accountID?: string;
 }) {
   const cache = useQueryClient();
+  const [confirmTarget, setConfirmTarget] = useState<RemoveVariables | null>(
+    null,
+  );
   const members = useQuery({
     queryKey: ['project-members', accountID, projectID],
     queryFn: () => projectMembers(projectID),
@@ -48,13 +75,29 @@ export function ProjectMembers({
       });
     },
   });
-  const canManage = Boolean(
-    accountID &&
-    members.data?.some(
-      (member) => member.user_id === accountID && member.role === 'owner',
-    ),
-  );
+  const remove = useMutation({
+    mutationKey: ['project-member-remove', accountID, projectID],
+    mutationFn: ({ member }: RemoveVariables) =>
+      removeProjectMember(projectID, member.user_id),
+    onSuccess: async (_data, { accountID: removedBy }) => {
+      setConfirmTarget(null);
+      await cache.invalidateQueries({
+        queryKey: ['project-members', removedBy, projectID],
+      });
+    },
+    onError: () => {
+      setConfirmTarget(null);
+    },
+  });
+
+  const role = currentMemberRole(members.data, accountID);
+  const canManage = canManageProjectMembers(members.data, accountID);
+  const permissionText = memberPermissionDescription(role);
   const saveBelongsToAccount = save.variables?.accountID === accountID;
+  const removeBelongsToAccount = remove.variables?.accountID === accountID;
+  const activeConfirmTarget =
+    confirmTarget?.accountID === accountID ? confirmTarget : null;
+  const removePending = removeBelongsToAccount && remove.isPending;
 
   const columns: TableProps<ProjectMember>['columns'] = [
     { title: '邮箱', dataIndex: 'email', key: 'email' },
@@ -62,20 +105,48 @@ export function ProjectMembers({
       title: '角色',
       dataIndex: 'role',
       key: 'role',
-      render: (role: ProjectMember['role']) => (
+      render: (memberRole: ProjectMember['role']) => (
         <Tag
           color={
-            role === 'owner'
+            memberRole === 'owner'
               ? 'gold'
-              : role === 'developer'
+              : memberRole === 'developer'
                 ? 'blue'
                 : 'default'
           }
         >
-          {roleLabels[role]}
+          {roleLabels[memberRole]}
         </Tag>
       ),
     },
+    ...(canManage
+      ? [
+          {
+            title: '操作',
+            key: 'actions',
+            render: (_value: unknown, member: ProjectMember) =>
+              canRemoveProjectMember(member, canManage) ? (
+                <Button
+                  type="link"
+                  danger
+                  size="small"
+                  aria-label={`移除 ${member.email}`}
+                  disabled={removePending}
+                  onClick={() => {
+                    if (!accountID) return;
+                    save.reset();
+                    remove.reset();
+                    setConfirmTarget({ accountID, member });
+                  }}
+                >
+                  移除
+                </Button>
+              ) : (
+                <Typography.Text type="secondary">不可移除</Typography.Text>
+              ),
+          },
+        ]
+      : []),
   ];
 
   return (
@@ -83,7 +154,21 @@ export function ProjectMembers({
       title="项目成员"
       loading={members.isPending}
       className={styles.members}
+      extra={
+        <Button
+          aria-label="刷新成员"
+          loading={members.isFetching}
+          onClick={() => void members.refetch()}
+        >
+          刷新
+        </Button>
+      }
     >
+      {permissionText ? (
+        <Typography.Paragraph type="secondary" className={styles.notice}>
+          {permissionText}
+        </Typography.Paragraph>
+      ) : null}
       {members.error ? (
         <Alert
           type="error"
@@ -99,6 +184,7 @@ export function ProjectMembers({
           dataSource={members.data}
           rowKey={(member) => member.user_id}
           pagination={false}
+          scroll={{ x: 'max-content' }}
         />
       ) : null}
       {canManage ? (
@@ -107,7 +193,9 @@ export function ProjectMembers({
           layout="inline"
           initialValues={{ role: 'developer' }}
           onFinish={(values) => {
-            if (accountID) save.mutate({ accountID, values });
+            if (!accountID) return;
+            remove.reset();
+            save.mutate({ accountID, values });
           }}
         >
           <Form.Item
@@ -157,6 +245,52 @@ export function ProjectMembers({
           className={styles.notice}
         />
       ) : null}
+      {removeBelongsToAccount && remove.isSuccess ? (
+        <Alert
+          type="success"
+          title={`${remove.variables.member.email} 已移除`}
+          role="status"
+          className={styles.notice}
+        />
+      ) : null}
+      {removeBelongsToAccount && remove.isError ? (
+        <Alert
+          type="error"
+          title={remove.error.message}
+          role="alert"
+          className={styles.notice}
+        />
+      ) : null}
+      <Modal
+        open={Boolean(activeConfirmTarget)}
+        title="确认移除成员"
+        okText="确认移除"
+        cancelText="取消"
+        okButtonProps={{
+          danger: true,
+          loading: removePending,
+        }}
+        cancelButtonProps={{
+          disabled: removePending,
+        }}
+        onCancel={() => {
+          if (!removePending) setConfirmTarget(null);
+        }}
+        onOk={() => {
+          if (activeConfirmTarget) {
+            save.reset();
+            remove.mutate(activeConfirmTarget);
+          }
+        }}
+      >
+        {activeConfirmTarget ? (
+          <p>
+            确定要移除成员 {activeConfirmTarget.member.email}（
+            {roleLabels[activeConfirmTarget.member.role]}
+            ）吗？移除后该账号将无法继续访问此项目。
+          </p>
+        ) : null}
+      </Modal>
     </Card>
   );
 }

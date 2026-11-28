@@ -166,3 +166,16 @@ export async function staticSitePublication(
   if (!data) throw new Error(`站点发布信息查询失败，状态码 ${status}`);
   return data;
 }
+
+export async function removeProjectMember(id: string, userID: string) {
+  const { error, response } = await client.DELETE(
+    '/api/v1/projects/{projectID}/members/{userID}',
+    {
+      params: { path: { projectID: id, userID } },
+    },
+  );
+  if (error) throw new Error(error.message);
+  if (!response.ok) {
+    throw new Error(`成员移除失败，状态码 ${response.status}`);
+  }
+}
