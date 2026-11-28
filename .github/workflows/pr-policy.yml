@@ -23,6 +23,7 @@ concurrency:
 jobs:
   policy:
     name: PR policy
+    if: github.event.pull_request.state == 'open'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:

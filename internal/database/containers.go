@@ -66,6 +66,8 @@ type ContainerExecution struct {
 
 	PostgresBindingName     *string    `gorm:"column:postgres_binding_name"`
 	PostgresSecretVersionID *uuid.UUID `gorm:"column:postgres_secret_version_id"`
+	S3BindingName           *string    `gorm:"column:s3_binding_name"`
+	S3SecretVersionID       *uuid.UUID `gorm:"column:s3_secret_version_id"`
 }
 
 func (ContainerExecution) TableName() string { return "container_executions" }

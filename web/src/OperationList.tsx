@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router';
 import {
   Alert,
   Button,
@@ -7,26 +8,29 @@ import {
   Descriptions,
   Drawer,
   Empty,
+  Select,
   Table,
   Tag,
 } from 'antd';
 import type { TableProps } from 'antd';
 import { projectOperations } from './client';
 import type { Operation } from './client';
+import {
+  DEFAULT_PAGE,
+  PAGE_SIZE_OPTIONS,
+  applyOperationFilters,
+  clampOperationPage,
+  filterOperations,
+  hasActiveOperationFilters,
+  outcomeLabels,
+  outcomeOptions,
+  parseOperationFilters,
+  phaseLabels,
+  phaseOptions,
+} from './OperationList.filters';
+import type { OperationFilterState } from './OperationList.filters';
+import styles from './app.module.css';
 
-const phaseLabels: Record<string, string> = {
-  received: '已接收',
-  saving: '保存中',
-  preflight: '预检中',
-  preparing: '准备中',
-  activating: '激活中',
-  finalizing: '收尾中',
-};
-const outcomeLabels: Record<string, string> = {
-  in_progress: '进行中',
-  succeeded: '成功',
-  failed: '失败',
-};
 function timestamp(value: string) {
   return new Intl.DateTimeFormat('zh-CN', {
     dateStyle: 'medium',
@@ -47,11 +51,43 @@ export function OperationList({
   sessionError,
 }: Props) {
   const [selected, setSelected] = useState<Operation | null>(null);
+  const [searchParams, setSearchParams] = useSearchParams();
   const query = useQuery({
     queryKey: ['operations', accountID, projectID],
     queryFn: () => projectOperations(projectID),
     enabled: Boolean(accountID),
   });
+
+  const filters = useMemo(
+    () => parseOperationFilters(searchParams),
+    [searchParams],
+  );
+  const hasFilters = hasActiveOperationFilters(filters);
+
+  const filteredOperations = useMemo(
+    () => filterOperations(query.data ?? [], filters),
+    [query.data, filters],
+  );
+
+  const effectivePage = clampOperationPage(
+    filters.page,
+    filteredOperations.length,
+    filters.pageSize,
+  );
+
+  function updateFilters(next: OperationFilterState) {
+    setSearchParams((prev) => applyOperationFilters(prev, next));
+  }
+
+  function clearFilters() {
+    updateFilters({
+      phase: undefined,
+      outcome: undefined,
+      page: DEFAULT_PAGE,
+      pageSize: filters.pageSize,
+    });
+  }
+
   const columns: TableProps<Operation>['columns'] = [
     {
       title: '操作标识',
@@ -120,6 +156,8 @@ export function OperationList({
     );
   }
 
+  const totalRecords = query.data?.length ?? 0;
+
   return (
     <Card title="操作记录" loading={query.isPending}>
       {query.error ? (
@@ -131,16 +169,70 @@ export function OperationList({
             <Button onClick={() => void query.refetch()}>重新加载</Button>
           }
         />
-      ) : query.data?.length ? (
-        <Table<Operation>
-          columns={columns}
-          dataSource={query.data}
-          rowKey="id"
-          pagination={false}
-          scroll={{ x: true }}
-        />
-      ) : (
+      ) : totalRecords === 0 && !hasFilters ? (
         <Empty description="暂无操作记录" />
+      ) : (
+        <>
+          <div className={styles.operationFilters}>
+            <Select
+              aria-label="阶段筛选"
+              className={styles.operationFilterSelect}
+              placeholder="全部阶段"
+              allowClear
+              value={filters.phase}
+              options={phaseOptions}
+              onChange={(phase) =>
+                updateFilters({
+                  ...filters,
+                  phase,
+                  page: DEFAULT_PAGE,
+                })
+              }
+            />
+            <Select
+              aria-label="结果筛选"
+              className={styles.operationFilterSelect}
+              placeholder="全部结果"
+              allowClear
+              value={filters.outcome}
+              options={outcomeOptions}
+              onChange={(outcome) =>
+                updateFilters({
+                  ...filters,
+                  outcome,
+                  page: DEFAULT_PAGE,
+                })
+              }
+            />
+            <Button disabled={!hasFilters} onClick={clearFilters}>
+              清除筛选
+            </Button>
+          </div>
+          {filteredOperations.length > 0 ? (
+            <Table<Operation>
+              columns={columns}
+              dataSource={filteredOperations}
+              rowKey="id"
+              pagination={{
+                current: effectivePage,
+                pageSize: filters.pageSize,
+                total: filteredOperations.length,
+                showSizeChanger: true,
+                pageSizeOptions: PAGE_SIZE_OPTIONS,
+                showTotal: (total) => `共 ${total} 条`,
+                onChange: (page, pageSize) =>
+                  updateFilters({
+                    ...filters,
+                    page: pageSize !== filters.pageSize ? DEFAULT_PAGE : page,
+                    pageSize,
+                  }),
+              }}
+              scroll={{ x: true }}
+            />
+          ) : (
+            <Empty description="没有符合条件的操作记录" />
+          )}
+        </>
       )}
       <Drawer
         title="操作详情"

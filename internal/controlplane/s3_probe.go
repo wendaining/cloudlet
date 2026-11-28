@@ -2,7 +2,6 @@ package controlplane
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -21,6 +20,7 @@ import (
 	smithyhttp "github.com/aws/smithy-go/transport/http"
 	"github.com/google/uuid"
 	"github.com/wendaining/cloudlet/internal/apigen"
+	"github.com/wendaining/cloudlet/internal/s3binding"
 )
 
 var s3BindingName = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
@@ -74,17 +74,12 @@ func verifyS3Binding(ctx context.Context, input apigen.S3BindingInput, value str
 	if endpoint.Scheme == "http" && !(development && local) {
 		return "S3 端点需要使用 HTTPS", errors.New("plaintext S3 endpoint outside development loopback")
 	}
-	var secret struct {
-		AccessKeyID     string `json:"access_key_id"`
-		SecretAccessKey string `json:"secret_access_key"`
-		SessionToken    string `json:"session_token"`
+	secret, err := s3binding.DecodeCredentials(value)
+	if errors.Is(err, s3binding.ErrIncompleteCredentials) {
+		return "S3 凭据缺少有效的访问密钥", err
 	}
-	if err := json.Unmarshal([]byte(value), &secret); err != nil {
-		return "S3 凭据格式无效", fmt.Errorf("decode S3 credentials: %w", err)
-	}
-	if secret.AccessKeyID == "" || secret.SecretAccessKey == "" ||
-		strings.ContainsAny(secret.AccessKeyID+secret.SecretAccessKey+secret.SessionToken, "\r\n\x00") {
-		return "S3 凭据缺少有效的访问密钥", errors.New("invalid S3 credentials")
+	if err != nil {
+		return "S3 凭据格式无效", err
 	}
 
 	dialer := &net.Dialer{
