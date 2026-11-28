@@ -5,10 +5,7 @@ import { loadConfig } from "../../scripts/development/config.mjs";
 const projectName = (suffix) =>
   `操作验收 ${suffix} ${process.pid}-${Date.now()}`;
 
-test("项目详情通过真实 API 展示操作状态与空态", async ({ page }) => {
-  const config = await loadConfig();
-  const pageErrors = [];
-  page.on("pageerror", (error) => pageErrors.push(error.message));
+async function loginAndCreateProject(page, config, suffix) {
   await page.goto("/");
   await page
     .getByRole("textbox", { name: "邮箱" })
@@ -22,10 +19,17 @@ test("项目详情通过真实 API 展示操作状态与空态", async ({ page }
 
   await page
     .getByRole("textbox", { name: "项目名称" })
-    .fill(projectName("有记录"));
+    .fill(projectName(suffix));
   await page.getByRole("button", { name: "创建项目", exact: true }).click();
   await expect(page.getByText("操作记录", { exact: true })).toBeVisible();
-  const projectID = new URL(page.url()).pathname.split("/").at(-1);
+  return new URL(page.url()).pathname.split("/").at(-1);
+}
+
+test("项目详情通过真实 API 展示操作状态与空态", async ({ page }) => {
+  const config = await loadConfig();
+  const pageErrors = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  const projectID = await loginAndCreateProject(page, config, "有记录");
   const seeded = JSON.parse(
     execFileSync("go", ["run", "./scripts/e2e-seed-operations", projectID], {
       encoding: "utf8",
@@ -115,5 +119,101 @@ test("项目详情通过真实 API 展示操作状态与空态", async ({ page }
     page.getByRole("button", { name: "登录", exact: true }),
   ).toBeVisible();
   await expect(page.getByText("操作记录", { exact: true })).toHaveCount(0);
+  expect(pageErrors).toEqual([]);
+});
+
+test("项目操作列表支持按阶段与结果筛选、翻页、刷新保留与清除", async ({
+  page,
+}) => {
+  const config = await loadConfig();
+  const pageErrors = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  const projectID = await loginAndCreateProject(page, config, "筛选分页");
+  const seeded = JSON.parse(
+    execFileSync(
+      "go",
+      ["run", "./scripts/e2e-seed-operations", projectID, "--paged"],
+      {
+        encoding: "utf8",
+        env: config.env,
+      },
+    ),
+  );
+  expect(seeded).toHaveLength(15);
+
+  await page.reload();
+  const operationCard = page.locator(".ant-card").filter({
+    has: page.getByText("操作记录", { exact: true }),
+  });
+  const rows = operationCard.locator("tbody tr.ant-table-row");
+  const visibleDropdownOption = (text) =>
+    page
+      .locator(
+        ".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option",
+        { hasText: text },
+      )
+      .first();
+
+  await expect(operationCard.getByText("共 15 条")).toBeVisible();
+  await expect(rows).toHaveCount(10);
+
+  // 切换到“进行中”筛选
+  await operationCard.getByRole("combobox", { name: "结果筛选" }).click();
+  await visibleDropdownOption("进行中").click();
+  await expect(operationCard.getByText("共 2 条")).toBeVisible();
+  await expect(
+    operationCard.getByRole("row").filter({ hasText: "e2e_deploy_in_progress" }),
+  ).toBeVisible();
+  await expect(
+    operationCard.getByRole("row").filter({ hasText: "e2e_saving_in_progress" }),
+  ).toBeVisible();
+
+  // 切换到“失败”筛选
+  await operationCard.getByRole("combobox", { name: "结果筛选" }).click();
+  await visibleDropdownOption("失败").click();
+  await expect(operationCard.getByText("共 2 条")).toBeVisible();
+  await expect(
+    operationCard.getByRole("row").filter({ hasText: "e2e_deploy_failed" }),
+  ).toBeVisible();
+  await expect(
+    operationCard.getByRole("row").filter({ hasText: "e2e_activating_failed" }),
+  ).toBeVisible();
+
+  // 切换到“成功”筛选，翻页后刷新页面验证条件和页码保留
+  await operationCard.getByRole("combobox", { name: "结果筛选" }).click();
+  await visibleDropdownOption("成功").click();
+  await expect(operationCard.getByText("共 11 条")).toBeVisible();
+  await operationCard
+    .locator(".ant-pagination-item")
+    .filter({ hasText: /^2$/ })
+    .click();
+  await expect(rows).toHaveCount(1);
+  await expect(
+    operationCard.getByRole("row").filter({ hasText: "e2e_paged_succeeded_10" }),
+  ).toBeVisible();
+  expect(new URL(page.url()).searchParams.get("outcome")).toBe("succeeded");
+  expect(new URL(page.url()).searchParams.get("page")).toBe("2");
+
+  await page.reload();
+  await expect(operationCard.getByText("共 11 条")).toBeVisible();
+  await expect(rows).toHaveCount(1);
+  await expect(
+    operationCard.getByRole("row").filter({ hasText: "e2e_paged_succeeded_10" }),
+  ).toBeVisible();
+  expect(new URL(page.url()).searchParams.get("outcome")).toBe("succeeded");
+  expect(new URL(page.url()).searchParams.get("page")).toBe("2");
+
+  // 叠加阶段筛选为“已接收”，验证无匹配空态与保留筛选栏
+  await operationCard.getByRole("combobox", { name: "阶段筛选" }).click();
+  await visibleDropdownOption("已接收").click();
+  await expect(operationCard.getByText("没有符合条件的操作记录")).toBeVisible();
+  expect(new URL(page.url()).searchParams.get("phase")).toBe("received");
+  expect(new URL(page.url()).searchParams.get("outcome")).toBe("succeeded");
+
+  // 清除筛选后恢复全部 15 条记录
+  await operationCard.getByRole("button", { name: "清除筛选" }).click();
+  await expect(operationCard.getByText("共 15 条")).toBeVisible();
+  await expect(rows).toHaveCount(10);
+  expect(new URL(page.url()).search).toBe("");
   expect(pageErrors).toEqual([]);
 });
