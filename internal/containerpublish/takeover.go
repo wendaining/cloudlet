@@ -40,7 +40,11 @@ func (s *Service) restoreContainer(ctx context.Context, takeover database.Contai
 	if err != nil {
 		return fmt.Errorf("resolve PostgreSQL binding: %w", err)
 	}
-	spec := s.executionSpec(execution, binding)
+	s3, err := s.resolveS3Binding(ctx, execution.ProjectID, execution.S3BindingName, execution.S3SecretVersionID)
+	if err != nil {
+		return fmt.Errorf("resolve S3 binding: %w", err)
+	}
+	spec := s.executionSpec(execution, binding, s3)
 	adopted, found, err := s.executions.Adopt(ctx, executions.StartRequest{
 		ExecutionID: execution.ID,
 		ProjectID:   execution.ProjectID,
@@ -121,7 +125,7 @@ func (s *Service) takeoverOwnership(takeover database.ContainerTakeover) contain
 // executionSpec rebuilds the immutable Docker specification of one execution so
 // adoption verifies the same image, limits, files and data volume that created
 // the container.
-func (s *Service) executionSpec(execution database.ContainerExecution, binding postgresRuntimeBinding) containers.Spec {
+func (s *Service) executionSpec(execution database.ContainerExecution, binding, s3 runtimeBinding) containers.Spec {
 	var dataVolume *containers.DataVolume
 	if execution.VolumeName != "" {
 		dataVolume = &containers.DataVolume{
@@ -135,8 +139,8 @@ func (s *Service) executionSpec(execution database.ContainerExecution, binding p
 		},
 		Image: execution.Image, User: execution.UserName,
 		Command: append([]string(nil), execution.Command...),
-		Env:     binding.environment(execution.Env),
-		Files:   binding.files,
+		Env:     s3.environment(binding.environment(execution.Env)),
+		Files:   append(binding.files, s3.files...),
 		Port:    execution.Port, Access: containers.AccessPublished,
 		DataVolume: dataVolume,
 		Limits: containers.Limits{

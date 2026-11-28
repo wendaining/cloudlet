@@ -23,12 +23,18 @@ func TestExecutionSpecRebuildsStoredConfiguration(t *testing.T) {
 	}
 	bindingName := "business-db"
 	secretVersionID := uuid.New()
-	binding := postgresRuntimeBinding{
-		name: &bindingName, secretVersionID: &secretVersionID,
+	binding := runtimeBinding{
+		name: &bindingName, secretVersionID: &secretVersionID, fileEnv: postgresURLFileEnv,
 		files: []containers.File{{Path: postgresURLPath, Data: []byte("postgres://business")}},
 	}
+	s3Name := "assets"
+	s3VersionID := uuid.New()
+	s3 := runtimeBinding{
+		name: &s3Name, secretVersionID: &s3VersionID, fileEnv: s3ConfigFileEnv,
+		files: []containers.File{{Path: s3ConfigPath, Data: []byte(`{"bucket":"assets"}`)}},
+	}
 
-	spec := service.executionSpec(execution, binding)
+	spec := service.executionSpec(execution, binding, s3)
 	if spec.Ownership != (containers.Ownership{Environment: "development", Project: projectID.String(), Resource: containerID.String(), Generation: 3}) {
 		t.Fatalf("ownership = %+v", spec.Ownership)
 	}
@@ -38,10 +44,11 @@ func TestExecutionSpecRebuildsStoredConfiguration(t *testing.T) {
 	if !slices.Equal(spec.Command, []string{"run"}) {
 		t.Fatalf("command = %v", spec.Command)
 	}
-	if want := []string{"A=1", postgresURLFileEnv + "=/" + postgresURLPath}; !slices.Equal(spec.Env, want) {
+	if want := []string{"A=1", postgresURLFileEnv + "=/" + postgresURLPath, s3ConfigFileEnv + "=/" + s3ConfigPath}; !slices.Equal(spec.Env, want) {
 		t.Fatalf("environment = %v, want %v", spec.Env, want)
 	}
-	if len(spec.Files) != 1 || spec.Files[0].Path != postgresURLPath || string(spec.Files[0].Data) != "postgres://business" {
+	if len(spec.Files) != 2 || spec.Files[0].Path != postgresURLPath || string(spec.Files[0].Data) != "postgres://business" ||
+		spec.Files[1].Path != s3ConfigPath || string(spec.Files[1].Data) != `{"bucket":"assets"}` {
 		t.Fatalf("files = %+v", spec.Files)
 	}
 	if spec.DataVolume == nil || *spec.DataVolume != (containers.DataVolume{Name: "cloudlet-vol-test", MountPath: "/data", Directory: "state"}) {
@@ -59,7 +66,7 @@ func TestExecutionSpecOmitsUnsetBindingAndVolume(t *testing.T) {
 		Image: "example.com/app@" + testDigest, Port: 8080,
 		CPUMillis: 100, MemoryBytes: 64 << 20, PIDs: 64, OpenFiles: 128,
 		UserName: "1000:1000",
-	}, postgresRuntimeBinding{})
+	}, runtimeBinding{}, runtimeBinding{})
 	if spec.DataVolume != nil || len(spec.Files) != 0 || len(spec.Env) != 0 {
 		t.Fatalf("unset configuration = %+v", spec)
 	}
