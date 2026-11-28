@@ -17,7 +17,7 @@ Cloudlet 是一台服务器就能运行的 **Agentic Serverless 平台**。项�
 | 本地开发 | 环境检查、数据库初始化、Go 与前端热更新、多实例与完整停止 |
 | Gateway | 静态与数据库持久化动态路由、HTTP 转发和上游错误响应 |
 | CLI | 查询客户端版本、检查 API 健康状态、列出和查看可访问项目 |
-| Containers | Docker Engine 镜像摘要准备与容器生命周期适配器，按归属标签创建、启动、观测、停止和删除容器，按项目创建隔离 bridge 网络并校验网络归属，支持回环端口与内部网络端点、有期限的 HTTP 就绪探测，并报告 CPU、内存、PIDs 与文件句柄限制的宿主支持范围；通过管理 API 创建真实容器并声明可写数据卷，就绪后经 Gateway 访问，支持停止、再次启动读取原数据和删除后释放容器与卷 |
+| Containers | Docker Engine 镜像摘要准备与容器生命周期适配器，按归属标签创建、启动、观测、停止和删除容器，按项目创建隔离 bridge 网络并校验网络归属，支持回环端口与内部网络端点、有期限的 HTTP 就绪探测，并报告 CPU、内存、PIDs 与文件句柄限制的宿主支持范围；通过管理 API 创建真实容器并声明可写数据卷，就绪后经 Gateway 访问，支持停止、再次启动读取原数据、控制器重启接管原容器和删除后释放容器与卷 |
 | 容量预留 | 主机与项目额度事务预留、执行标识与容器归属及容器 ID 绑定、确认释放、占用查询与项目额度调整 |
 | Workers | 通过管理 API 发布首个无状态 Worker，保存不可变版本并经 Gateway 访问 |
 | Durable Objects | workerd 原生 SQLite 绑定，支持对象隔离与重启后的持久化 |
@@ -50,7 +50,7 @@ make check
 
 完整检查使用真实 PostgreSQL、HTTP 和 Chromium。容器构建检查使用 make container-check，具体范围见 [测试说明](docs/testing.md)。
 
-Worker 的配置、发布接口与验收步骤见 [Worker 发布](docs/workers.md)。容器创建、停止、再次启动、删除、公开访问与失败清理见 [容器生命周期与公开访问](docs/containers.md)。
+Worker 的配置、发布接口与验收步骤见 [Worker 发布](docs/workers.md)。容器创建、停止、再次启动、删除、重启接管、公开访问与失败清理见 [容器生命周期与公开访问](docs/containers.md)。
 
 ## 参与开发
 

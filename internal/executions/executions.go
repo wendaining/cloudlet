@@ -96,11 +96,14 @@ func (r StartRequest) validate() error {
 // Execution is the result of a successful admission and start. When Start
 // returns an error after capacity was reserved, the returned Execution contains
 // the reservation and, if a container was created, its identifier so the caller
-// can retry Stop when cleanup did not finish.
+// can retry Stop when cleanup did not finish. Started reports that an existing
+// stopped container was started during adoption, so the caller can wait for
+// readiness before restoring its route.
 type Execution struct {
 	Container   containers.Container
 	Observation containers.Observation
 	Reservation capacity.Reservation
+	Started     bool
 }
 
 // Start reserves host and project capacity, binds the reservation to the
@@ -193,6 +196,48 @@ func (s *Service) Start(ctx context.Context, request StartRequest) (Execution, e
 	}, nil
 }
 
+// Adopt re-binds an existing managed container to its recorded execution
+// without creating a container. It reserves capacity idempotently, verifies the
+// container ownership and prepared configuration, and starts the container when
+// it exists but is stopped. found is false when no container carries the
+// ownership, which lets a controller report drift instead of creating a
+// duplicate execution. Adoption never releases the reservation on failure.
+func (s *Service) Adopt(ctx context.Context, request StartRequest) (execution Execution, found bool, err error) {
+	if err := request.validate(); err != nil {
+		return Execution{}, false, err
+	}
+	unlock := s.lockExecution(request.ExecutionID)
+	defer unlock()
+
+	binding := bindingFor(request.Spec)
+	reservation, _, err := s.reservations.Reserve(ctx, capacity.Request{
+		ExecutionID: request.ExecutionID,
+		HostID:      s.hostID,
+		ProjectID:   request.ProjectID,
+		Resources: capacity.Resources{
+			CPUMillis:   request.Spec.Limits.CPUMillis,
+			MemoryBytes: request.Spec.Limits.MemoryBytes,
+			Instances:   1,
+		},
+		Binding: binding,
+	})
+	if err != nil {
+		return Execution{}, false, fmt.Errorf("准入执行 %s: %w", request.ExecutionID, err)
+	}
+	if reservation.Binding != binding {
+		return Execution{Reservation: reservation}, false, fmt.Errorf("%w: 执行 %s 的容器归属与预留不一致", ErrExecutionConflict, request.ExecutionID)
+	}
+	existing, found, err := s.containers.Find(ctx, request.Spec.Ownership)
+	if err != nil {
+		return Execution{Reservation: reservation}, false, fmt.Errorf("查找执行 %s 的容器: %w", request.ExecutionID, err)
+	}
+	if !found {
+		return Execution{Reservation: reservation}, false, nil
+	}
+	adopted, err := s.adoptExisting(ctx, request, reservation, existing)
+	return adopted, true, err
+}
+
 func (s *Service) adoptExisting(ctx context.Context, request StartRequest, reservation capacity.Reservation, existing containers.Observation) (Execution, error) {
 	if err := checkAdoptedContainer(request.ExecutionID, existing, request.Spec); err != nil {
 		return Execution{
@@ -225,12 +270,14 @@ func (s *Service) adoptExisting(ctx context.Context, request StartRequest, reser
 			Container:   containers.Container{ID: existing.ID, Name: existing.Name},
 			Observation: existing,
 			Reservation: reservation,
+			Started:     true,
 		}, fmt.Errorf("恢复执行 %s 的容器: %w", request.ExecutionID, err)
 	}
 	return Execution{
 		Container:   containers.Container{ID: observation.ID, Name: observation.Name},
 		Observation: observation,
 		Reservation: reservation,
+		Started:     true,
 	}, nil
 }
 

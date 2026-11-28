@@ -59,6 +59,16 @@
   padding: 48px 24px;
 }
 
+.section {
+  margin-top: 24px;
+}
+
+.loadMore {
+  margin-top: 16px;
+  display: flex;
+  justify-content: center;
+}
+
 .members {
   margin-top: 24px;
 }
@@ -72,4 +82,16 @@
 .loading {
   width: 240px;
   height: 100px;
+}
+
+.operationFilters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.operationFilterSelect {
+  min-width: 160px;
 }
