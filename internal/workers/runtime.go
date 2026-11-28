@@ -35,6 +35,7 @@ type RuntimeConfig struct {
 	CompatibilityDate  string
 	CompatibilityFlags []string
 	DurableClasses     []string
+	Environment        []EnvironmentBinding
 }
 
 // ServeArgs returns the arguments for the pinned image's entrypoint.
@@ -83,17 +84,35 @@ func prepare(bundleDir, entry, compatibilityDate string, namespaces []durableobj
 	if err != nil {
 		return RuntimeConfig{}, fmt.Errorf("read entry %q in bundle %q: %w", entry, bundleDir, err)
 	}
-	return prepareModule(entry, module, compatibilityDate, namespaces, nil, durableobjects.StoragePath)
+	return prepareModule(entry, module, compatibilityDate, namespaces, nil, nil, durableobjects.StoragePath)
 }
 
 // PrepareModule prepares a bundled ES module already read from an upload.
 func PrepareModule(module []byte, compatibilityDate string) (RuntimeConfig, error) {
-	return prepareModule("index.mjs", module, compatibilityDate, nil, nil, "")
+	return prepareModule("index.mjs", module, compatibilityDate, nil, nil, nil, "")
+}
+
+// PrepareModuleWithEnvironment snapshots text bindings for a bundled upload.
+func PrepareModuleWithEnvironment(module []byte, compatibilityDate string, values map[string]string) (RuntimeConfig, error) {
+	bindings, err := prepareEnvironment(values)
+	if err != nil {
+		return RuntimeConfig{}, err
+	}
+	return prepareModule("index.mjs", module, compatibilityDate, nil, nil, bindings, "")
 }
 
 // PrepareModuleWithFlags prepares an uploaded module with explicit compatibility flags.
 func PrepareModuleWithFlags(module []byte, compatibilityDate string, flags []string) (RuntimeConfig, error) {
-	return prepareModule("index.mjs", module, compatibilityDate, nil, flags, "")
+	return prepareModule("index.mjs", module, compatibilityDate, nil, flags, nil, "")
+}
+
+// PrepareModuleWithFlagsAndEnvironment prepares text bindings and compatibility flags together.
+func PrepareModuleWithFlagsAndEnvironment(module []byte, compatibilityDate string, flags []string, values map[string]string) (RuntimeConfig, error) {
+	bindings, err := prepareEnvironment(values)
+	if err != nil {
+		return RuntimeConfig{}, err
+	}
+	return prepareModule("index.mjs", module, compatibilityDate, nil, flags, bindings, "")
 }
 
 // PrepareDurableModule prepares an uploaded module for a managed SQLite volume.
@@ -103,13 +122,22 @@ func PrepareDurableModule(module []byte, compatibilityDate string, namespaces []
 
 // PrepareDurableModuleWithFlags prepares a Durable Object module with explicit compatibility flags.
 func PrepareDurableModuleWithFlags(module []byte, compatibilityDate string, namespaces []durableobjects.Namespace, flags []string) (RuntimeConfig, error) {
+	return PrepareDurableModuleWithFlagsAndEnvironment(module, compatibilityDate, namespaces, flags, nil)
+}
+
+// PrepareDurableModuleWithFlagsAndEnvironment prepares Durable Objects, flags and text bindings together.
+func PrepareDurableModuleWithFlagsAndEnvironment(module []byte, compatibilityDate string, namespaces []durableobjects.Namespace, flags []string, values map[string]string) (RuntimeConfig, error) {
 	if err := durableobjects.Validate(namespaces); err != nil {
 		return RuntimeConfig{}, err
 	}
-	return prepareModule("index.mjs", module, compatibilityDate, namespaces, flags, path.Join(durableobjects.StoragePath, durableobjects.StorageDirectory))
+	bindings, err := prepareEnvironment(values)
+	if err != nil {
+		return RuntimeConfig{}, err
+	}
+	return prepareModule("index.mjs", module, compatibilityDate, namespaces, flags, bindings, path.Join(durableobjects.StoragePath, durableobjects.StorageDirectory))
 }
 
-func prepareModule(entry string, module []byte, compatibilityDate string, namespaces []durableobjects.Namespace, flags []string, storagePath string) (RuntimeConfig, error) {
+func prepareModule(entry string, module []byte, compatibilityDate string, namespaces []durableobjects.Namespace, flags []string, environment []EnvironmentBinding, storagePath string) (RuntimeConfig, error) {
 	if err := validateCompatibilityDate(compatibilityDate, time.Now()); err != nil {
 		return RuntimeConfig{}, err
 	}
@@ -127,12 +155,13 @@ func prepareModule(entry string, module []byte, compatibilityDate string, namesp
 		classes = append(classes, namespace.ClassName)
 	}
 	return RuntimeConfig{
-		Config:             renderConfig(entry, compatibilityDate, namespaces, normalized, storagePath),
+		Config:             renderConfig(entry, compatibilityDate, namespaces, normalized, environment, storagePath),
 		Module:             bytes.Clone(module),
 		Entry:              entry,
 		CompatibilityDate:  compatibilityDate,
 		CompatibilityFlags: normalized,
 		DurableClasses:     classes,
+		Environment:        environment,
 	}, nil
 }
 
@@ -150,22 +179,22 @@ func validateCompatibilityDate(compatibilityDate string, now time.Time) error {
 	return nil
 }
 
-func renderConfig(entry, compatibilityDate string, namespaces []durableobjects.Namespace, flags []string, storagePath string) []byte {
-	var storageService, workerFields []byte
+func renderConfig(entry, compatibilityDate string, namespaces []durableobjects.Namespace, flags []string, environment []EnvironmentBinding, storagePath string) []byte {
+	var storageService, workerFields, bindingEntries []byte
 	if len(namespaces) > 0 {
 		storageService = fmt.Appendf(nil, `, (name = "durable-storage", disk = (path = "%s", writable = true))`, storagePath)
 		workerFields = append(workerFields, "  durableObjectStorage = (localDisk = \"durable-storage\"),\n  durableObjectNamespaces = [\n"...)
 		for _, namespace := range namespaces {
 			workerFields = fmt.Appendf(workerFields, "    (className = \"%s\", uniqueKey = \"%s\", enableSql = true),\n", namespace.ClassName, namespace.ID)
 		}
-		workerFields = append(workerFields, "  ],\n  bindings = [\n"...)
+		workerFields = append(workerFields, "  ],\n"...)
 		for _, namespace := range namespaces {
 			for _, binding := range namespace.Bindings {
-				workerFields = fmt.Appendf(workerFields, "    (name = \"%s\", durableObjectNamespace = \"%s\"),\n", binding, namespace.ClassName)
+				bindingEntries = fmt.Appendf(bindingEntries, "    (name = \"%s\", durableObjectNamespace = \"%s\"),\n", binding, namespace.ClassName)
 			}
 		}
-		workerFields = append(workerFields, "  ],\n"...)
 	}
+	workerFields = append(workerFields, renderBindings(appendEnvironmentBindingEntries(bindingEntries, environment))...)
 	return fmt.Appendf(nil, configTemplate, storageService, HTTPPort, entry, path.Base(ModulePath), compatibilityDate, renderCompatibilityFlags(flags), workerFields)
 }
 

@@ -1359,6 +1359,10 @@ export interface components {
             compatibility_date: string;
             /** @description 无端口的公开域名。 */
             hostname: string;
+            /** @description 普通文本绑定。名称最多 128 个 ASCII 字符，值可为空，最多 4096 个 UTF-8 字节。所有值合计最多 65536 个字节。 */
+            environment?: {
+                [key: string]: string;
+            };
             /** @description 显式声明的 workerd 兼容标志，由部署采用的固定版本验证。 */
             compatibility_flags?: string[];
             /** @description SQLite Durable Object 类及其环境绑定，命名空间由项目和 Worker 自动分配。 */

@@ -408,6 +408,9 @@ type DeployWorkerRequest struct {
 	// DurableObjects SQLite Durable Object 类及其环境绑定，命名空间由项目和 Worker 自动分配。
 	DurableObjects *[]WorkerDurableObjectBinding `json:"durable_objects,omitempty"`
 
+	// Environment 普通文本绑定。名称最多 128 个 ASCII 字符，值可为空，最多 4096 个 UTF-8 字节。所有值合计最多 65536 个字节。
+	Environment *map[string]string `json:"environment,omitempty"`
+
 	// Hostname 无端口的公开域名。
 	Hostname string `json:"hostname"`
 
